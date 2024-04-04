@@ -1,0 +1,117 @@
+import torch
+import torch.nn as nn
+import numpy as np
+
+from read_stock_data import read_stock_data
+from torch.utils.data import Dataset, DataLoader, random_split
+
+# Fully connected neural network with one hidden layer
+class RNN(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.rnn = nn.RNN(input_size, 
+                          hidden_size, 
+                          num_layers=1, 
+                          batch_first=True)
+        #self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
+        #self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, 1)
+        
+    def forward(self, x):
+        batch_size = x.size(0)
+        # 将输入重新整形成 (batch_size, seq_length, input_size)
+        x = x.view(batch_size, -1, 1)
+        _, hidden = self.rnn(x)
+        out = hidden[-1, :, :]
+        out = self.fc(out)
+        return out
+
+
+model = RNN(1, 32) 
+
+print(model) 
+
+open_prices, close_prices, change_percentages, exchange_percentages, rnn_input, rnn_target = read_stock_data('000001.csv')
+print("开盘价向量:", open_prices, "长度:", len(open_prices))
+print("收盘价向量:", close_prices, "长度:", len(close_prices))
+print("涨跌幅向量:", change_percentages, "长度:", len(change_percentages))
+print("换手率向量:", exchange_percentages, "长度:", len(exchange_percentages))
+print("RNN输入向量:", rnn_input, "长度:", len(rnn_input))
+print("RNN目标向量:", rnn_target, "长度:", len(rnn_target))
+
+class RnnDataset(Dataset):
+    def __init__(self, learn_trunks, target, seq_length):
+        self.learn_trunks = learn_trunks
+        self.target = target
+
+    def __len__(self):
+        return len(self.learn_trunks)-1
+    
+    def __getitem__(self, idx):
+        return self.learn_trunks[idx].float(), self.target[idx+seq_length].float()
+
+seq_length = 20
+learn_trunks = [rnn_input[i:i+seq_length] for i in range(len(rnn_input)-seq_length+1)]
+learn_trunks_np = np.array(learn_trunks)
+target_np = np.array(rnn_target)
+# for i,seq in enumerate(learn_trunks[:2]):
+#     input_seq = seq[:]
+#     target = rnn_target[i+20]
+#     print("input_seq",input_seq)
+#     print("target:",target)
+rnn_dataset = RnnDataset(torch.tensor(learn_trunks_np), torch.tensor(target_np), seq_length)
+
+train_ratio = 0.8
+total_len = len(rnn_dataset)
+train_size = int(train_ratio * total_len)
+val_size = total_len - train_size
+train_data, val_data = random_split(rnn_dataset, [train_size, val_size])
+print(len(train_data))
+print(len(val_data))
+
+
+print(len(rnn_dataset))
+for i, (seq, target) in enumerate(rnn_dataset):
+    if i == len(rnn_dataset)-1:
+        print(' Input (x):', seq)
+        print('Target (y):', target)
+        print()
+
+device = torch.device("cuda:0")
+
+batch_size = 32
+torch.manual_seed(1)
+train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
+val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=True, drop_last=True)
+model = model.to(device)
+
+loss_fn = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
+
+num_epochs = 10000
+
+for epoch in range(num_epochs):
+    seq_batch, target_batch = next(iter(train_loader))
+    target_batch = target_batch.view(-1, 1)
+    seq_batch = seq_batch.to(device)
+    target_batch = target_batch.to(device)
+    optimizer.zero_grad()
+    loss = 0
+    pred = model(seq_batch)
+    loss = loss_fn(pred, target_batch)
+    loss.backward()
+    optimizer.step()
+    loss = loss.item()
+    if epoch % 50 == 0:
+        print(f'Epoch {epoch} train loss: {loss:.4f}')
+
+    seq_batch, target_batch = next(iter(val_loader))
+    target_batch = target_batch.view(-1, 1)
+    seq_batch = seq_batch.to(device)
+    target_batch = target_batch.to(device)    
+    loss = 0
+    pred = model(seq_batch)
+    loss = loss_fn(pred, target_batch)
+    loss = loss.item()
+    if epoch % 50 == 0:
+        print(f'Epoch {epoch} val loss: {loss:.4f}')
