@@ -20,14 +20,15 @@ class RNN(nn.Module):
     def forward(self, x):
         batch_size = x.size(0)
         # 将输入重新整形成 (batch_size, seq_length, input_size)
-        x = x.view(batch_size, -1, 1)
+        x = x.view(batch_size, -1, 2)
+        # print("input x:", x[0])
         _, hidden = self.rnn(x)
         out = hidden[-1, :, :]
         out = self.fc(out)
         return out
 
 
-model = RNN(1, 32) 
+model = RNN(2, 32) 
 
 print(model) 
 
@@ -54,11 +55,6 @@ seq_length = 20
 learn_trunks = [rnn_input[i:i+seq_length] for i in range(len(rnn_input)-seq_length+1)]
 learn_trunks_np = np.array(learn_trunks)
 target_np = np.array(rnn_target)
-# for i,seq in enumerate(learn_trunks[:2]):
-#     input_seq = seq[:]
-#     target = rnn_target[i+20]
-#     print("input_seq",input_seq)
-#     print("target:",target)
 rnn_dataset = RnnDataset(torch.tensor(learn_trunks_np), torch.tensor(target_np), seq_length)
 
 train_ratio = 0.8
@@ -72,15 +68,20 @@ print(len(val_data))
 
 print(len(rnn_dataset))
 for i, (seq, target) in enumerate(rnn_dataset):
+    if i == 0:
+        print('First Input (x):', seq)
+        print('First Target (y):', target)
+        print()
     if i == len(rnn_dataset)-1:
-        print(' Input (x):', seq)
-        print('Target (y):', target)
+        print('Last Input (x):', seq)
+        print('Last Target (y):', target)
         print()
 
 device = torch.device("cuda:0")
 
-batch_size = 32
+batch_size = 64
 torch.manual_seed(1)
+rnn_loader = DataLoader(rnn_dataset, batch_size=batch_size, shuffle=False, drop_last=True)
 train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=True)
 val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=True, drop_last=True)
 model = model.to(device)
@@ -91,7 +92,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
 num_epochs = 10000
 
 for epoch in range(num_epochs):
-    seq_batch, target_batch = next(iter(train_loader))
+    seq_batch, target_batch = next(iter(rnn_loader))
     target_batch = target_batch.view(-1, 1)
     seq_batch = seq_batch.to(device)
     target_batch = target_batch.to(device)

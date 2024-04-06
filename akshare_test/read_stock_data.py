@@ -18,13 +18,14 @@ def read_stock_data(filename):
     exchange_percentages = np.array(exchange_percentages)
     
     # 计算 rnn_input 向量
-    rnn_input = change_percentages * exchange_percentages
+    rnn_input = np.column_stack((change_percentages, exchange_percentages))
     
     # 计算 rnn_target 向量
     rnn_target = np.zeros_like(open_prices)
     rnn_target[1:] = np.round((open_prices[1:] - close_prices[:-1]) / close_prices[:-1]*100,2)
     
     return open_prices, close_prices, change_percentages, exchange_percentages, rnn_input, rnn_target
+
 
 # 使用示例
 if __name__ == "__main__":
