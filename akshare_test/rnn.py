@@ -9,21 +9,28 @@ from torch.utils.data import Dataset, DataLoader, random_split
 class RNN(nn.Module):
     def __init__(self, input_size, hidden_size):
         super().__init__()
-        self.rnn = nn.RNN(input_size, 
+        self.rnn1 = nn.RNN(input_size, 
+                          hidden_size, 
+                          num_layers=1, 
+                          batch_first=True)
+        self.rnn2 = nn.RNN(input_size, 
                           hidden_size, 
                           num_layers=1, 
                           batch_first=True)
         #self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
         #self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, 1)
+        self.fc = nn.Linear(2*hidden_size, 1)
         
     def forward(self, x):
         batch_size = x.size(0)
         # 将输入重新整形成 (batch_size, seq_length, input_size)
         x = x.view(batch_size, -1, 2)
         # print("input x:", x[0])
-        _, hidden = self.rnn(x)
-        out = hidden[-1, :, :]
+        _, hidden1 = self.rnn1(x)
+        _, hidden2 = self.rnn2(x)
+        # 将两个隐藏状态连接起来
+        combined_hidden = torch.cat((hidden1, hidden2), dim=2)
+        out = combined_hidden[-1, :, :]
         out = self.fc(out)
         return out
 
@@ -31,6 +38,9 @@ class RNN(nn.Module):
 model = RNN(2, 32) 
 
 print(model) 
+# 打印模型参数数量
+total_params = sum(p.numel() for p in model.parameters())
+print("Total parameters:", total_params)
 
 open_prices, close_prices, change_percentages, exchange_percentages, rnn_input, rnn_target = read_stock_data('000001.csv')
 print("开盘价向量:", open_prices, "长度:", len(open_prices))
@@ -89,7 +99,7 @@ model = model.to(device)
 loss_fn = nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
 
-num_epochs = 10000
+num_epochs = 1000
 
 for epoch in range(num_epochs):
     seq_batch, target_batch = next(iter(rnn_loader))
@@ -99,11 +109,11 @@ for epoch in range(num_epochs):
     optimizer.zero_grad()
     loss = 0
     pred = model(seq_batch)
-    loss = loss_fn(pred, target_batch)
+    loss = loss_fn(pred.squeeze(), target_batch.squeeze())
     loss.backward()
     optimizer.step()
     loss = loss.item()
-    if epoch % 50 == 0:
+    if epoch % 100 == 0:
         print(f'Epoch {epoch} train loss: {loss:.4f}')
 
     seq_batch, target_batch = next(iter(val_loader))
@@ -114,5 +124,5 @@ for epoch in range(num_epochs):
     pred = model(seq_batch)
     loss = loss_fn(pred, target_batch)
     loss = loss.item()
-    if epoch % 50 == 0:
+    if epoch % 100 == 0:
         print(f'Epoch {epoch} val loss: {loss:.4f}')
