@@ -98,7 +98,7 @@ model = model.to(device)
 loss_fn = nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
 
-num_epochs = 5000
+num_epochs = 1000
 
 for epoch in range(num_epochs):
     seq_batch, target_batch = next(iter(train_loader))
