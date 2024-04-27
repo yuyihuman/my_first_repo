@@ -9,28 +9,27 @@ from torch.utils.data import Dataset, DataLoader, random_split
 class RNN(nn.Module):
     def __init__(self, input_size, hidden_size):
         super().__init__()
-        self.rnn1 = nn.RNN(input_size, 
-                          hidden_size, 
-                          num_layers=1, 
-                          batch_first=True)
-        self.rnn2 = nn.RNN(input_size, 
-                          hidden_size, 
-                          num_layers=1, 
-                          batch_first=True)
+        self.rnns = nn.ModuleList([
+            nn.RNN(input_size, hidden_size, num_layers=1, batch_first=True) 
+            for _ in range(15)
+        ])
         #self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
         #self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(2*hidden_size, 1)
+        self.fc = nn.Linear(15*hidden_size, 1)
         
     def forward(self, x):
         batch_size = x.size(0)
         # 将输入重新整形成 (batch_size, seq_length, input_size)
         x = x.view(batch_size, -1, 2)
-        # print("input x:", x[0])
-        _, hidden1 = self.rnn1(x)
-        _, hidden2 = self.rnn2(x)
-        # 将两个隐藏状态连接起来
-        combined_hidden = torch.cat((hidden1, hidden2), dim=2)
+        hidden_states = []
+        for i in range(15):
+            _, hidden = self.rnns[i](x[:,i:,:])
+            # print("张量的形状:", x[:,i:,:].shape)
+            hidden_states.append(hidden)
+        combined_hidden = torch.cat(hidden_states, dim=2)
+        # print("张量的形状:", combined_hidden.shape)
         out = combined_hidden[-1, :, :]
+        # print("张量的形状:", out.shape)
         out = self.fc(out)
         return out
 
@@ -74,9 +73,9 @@ val_size = total_len - train_size
 train_data, val_data = random_split(rnn_dataset, [train_size, val_size])
 print(len(train_data))
 print(len(val_data))
-
-
 print(len(rnn_dataset))
+
+
 for i, (seq, target) in enumerate(rnn_dataset):
     if i == 0:
         print('First Input (x):', seq)
@@ -99,10 +98,10 @@ model = model.to(device)
 loss_fn = nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
 
-num_epochs = 1000
+num_epochs = 5000
 
 for epoch in range(num_epochs):
-    seq_batch, target_batch = next(iter(rnn_loader))
+    seq_batch, target_batch = next(iter(train_loader))
     target_batch = target_batch.view(-1, 1)
     seq_batch = seq_batch.to(device)
     target_batch = target_batch.to(device)

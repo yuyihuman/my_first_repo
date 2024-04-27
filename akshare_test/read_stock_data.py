@@ -22,7 +22,8 @@ def read_stock_data(filename):
     
     # 计算 rnn_target 向量
     rnn_target = np.zeros_like(open_prices)
-    rnn_target[1:] = np.round((open_prices[1:] - close_prices[:-1]) / close_prices[:-1]*100,2)
+    # rnn_target[1:] = np.round((open_prices[1:] - close_prices[:-1]) / close_prices[:-1]*100,2)
+    rnn_target[1:] = ((open_prices[1:] - close_prices[:-1]) > 0).astype(int)
     
     return open_prices, close_prices, change_percentages, exchange_percentages, rnn_input, rnn_target
 
