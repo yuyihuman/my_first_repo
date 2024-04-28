@@ -21,6 +21,7 @@ class TestStrategy(bt.Strategy):
     def __init__(self):
         # Keep a reference to the "close" line in the data[0] dataseries
         self.dataclose = self.datas[0].close
+        self.dataopen = self.datas[0].open
         # To keep track of pending orders
         self.order = None
 
@@ -44,7 +45,7 @@ class TestStrategy(bt.Strategy):
 
     def next(self):
         # Simply log the closing price of the series from the reference
-        self.log('Close, %.2f' % self.dataclose[0])
+        self.log('Open, %.2f\tClose, %.2f' % (self.dataopen[0],self.dataclose[0]))
 
         # Check if an order is pending ... if yes, we cannot send a 2nd one
         if self.order:
@@ -65,6 +66,8 @@ class TestStrategy(bt.Strategy):
 
                     # Keep track of the created order to avoid a 2nd order
                     self.order = self.buy()
+
+
 
         else:
 
@@ -88,7 +91,7 @@ if __name__ == '__main__':
     # 本地数据，笔者用Wind获取的东风汽车数据以csv形式存储在本地。
     # parase_dates = True是为了读取csv为dataframe的时候能够自动识别datetime格式的字符串，big作为index
     # 注意，这里最后的pandas要符合backtrader的要求的格式
-    dataframe = pd.read_csv('000001_back.csv', index_col=0, parse_dates=True)
+    dataframe = pd.read_csv('../akshare_test/000001_back.csv', index_col=0, parse_dates=True)
     dataframe['openinterest'] = 0
     data = bt.feeds.PandasData(dataname=dataframe,
                         fromdate = datetime.datetime(2022, 1, 1),
