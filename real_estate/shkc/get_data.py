@@ -32,8 +32,8 @@ def remove_duplicates(entries):
 # 定义解析函数
 current_community = "上海康城"
 filename = ''.join([c[0] for c in pinyin(current_community, style=Style.FIRST_LETTER)]) + ".json"
-entries = {current_community: []}
-def parse_text(text):
+
+def parse_text(text, entries):
     print("parse text")
     lines = text.split('\n')
     for i, line in enumerate(lines):
@@ -65,10 +65,16 @@ def parse_text(text):
     return entries
 
 # 设置每个小图片的高度
-chunk_height = 4970*2
+chunk_height = 4970 * 2
 
 if __name__ == "__main__":
-    # 打开图片文件
+    # 如果文件已存在，读取其内容
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
+            entries = json.load(f)
+    else:
+        entries = {current_community: []}
+
     i = 1
     while True:
         img_path = f'{i}.jpg'
@@ -82,22 +88,18 @@ if __name__ == "__main__":
 
         # 逐个处理小图片并提取文本
         for j, chunk in enumerate(image_chunks):
-            # plt.figure()
-            # plt.imshow(chunk)
-            # plt.title(f"Chunk {j+1}")
-            # plt.axis('off')
-            # plt.show()
             text = pytesseract.image_to_string(chunk, lang='chi_sim', config='--psm 6')
             print(f"文本提取结果（第 {j+1} 部分）：\n{text}\n")
             # 去除空格
             text = text.replace(' ', '')
-            entries = parse_text(text)
+            entries = parse_text(text, entries)
             entries[current_community] = remove_duplicates(entries[current_community])
-            # 将current_community转换为拼音首字母并拼接成文件名
-            with open(filename, 'w') as f:
-                json.dump(entries, f , indent=4)
-            # if j == 0:
-            #     break
+
         i += 1
-        # if i == 2:
-        #     break
+
+    # 对数据按日期从新到旧排序
+    entries[current_community] = sorted(entries[current_community], key=lambda x: x['date'], reverse=True)
+
+    # 将current_community转换为拼音首字母并拼接成文件名
+    with open(filename, 'w') as f:
+        json.dump(entries, f, indent=4)
