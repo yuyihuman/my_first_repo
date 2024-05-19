@@ -86,7 +86,8 @@ for i, (seq, target) in enumerate(rnn_dataset):
         print('Last Target (y):', target)
         print()
 
-device = torch.device("cuda:0")
+# device = torch.device("cuda:0")
+device = torch.device("cpu")
 
 batch_size = 64
 torch.manual_seed(1)
