@@ -49,38 +49,45 @@ for area_range in area_ranges:
     # 筛选符合面积范围的数据
     filtered_df = df[(df['area'] >= area_min) & (df['area'] < area_max)]
 
-    # 计算移动平均线
-    filtered_df.loc[:, 'moving_avg'] = filtered_df['price'].rolling(window=5, min_periods=1).mean()
+    # 确保有数据可供处理
+    if filtered_df.empty:
+        continue
+
+    # 计算每月的平均价格
+    monthly_avg_price_filtered = filtered_df.groupby('year_month')['price'].mean()
 
     # 绘制价格图表
     fig, axes = plt.subplots(nrows=2, figsize=(10, 10))
 
-    # 绘制移动平均线
-    axes[0].plot(filtered_df['date'], filtered_df['moving_avg'], label='Moving Average', color='blue')
+    # 绘制价格柱状图
+    axes[0].bar(monthly_avg_price_filtered.index.to_timestamp(), monthly_avg_price_filtered.values, color='blue', label='Monthly Average Price')
 
-    # 绘制价格散点图
-    axes[0].scatter(filtered_df['date'], filtered_df['price'], label='Price', color='red', marker='o')
+    # 设置x轴刻度为每年的1月
+    start_date = filtered_df['date'].min()
+    end_date = filtered_df['date'].max()
+    years = pd.date_range(start=start_date, end=end_date, freq='YS')
+    axes[0].set_xticks(years)
+    axes[0].set_xticklabels(years.year, rotation=45)
+
+    # 构建标题
+    title = f'Average Monthly Price vs Date (Area: {area_min}-{area_max})'
+    axes[0].set_title(title)
+    axes[0].set_xlabel('Year')
+    axes[0].set_ylabel('Average Price')
+    axes[0].legend(loc='upper left')
 
     # 计算每月成交数量并展示在图标题中
     monthly_transactions = filtered_df.groupby(filtered_df['date'].dt.to_period('M')).size()
     total_transactions = monthly_transactions.sum()
 
-    # 构建标题
-    title = f'Moving Average Price vs Date (Area: {area_min}-{area_max})\n'
-    title += f'Total Transactions: {total_transactions}'
-    axes[0].set_title(title)
-    axes[0].set_xlabel('Date')
-    axes[0].set_ylabel('Price')
-    axes[0].legend(loc='upper left')
-
     # 绘制成交量柱状图
     bars = axes[1].bar(monthly_transactions.index.to_timestamp(), monthly_transactions.values, color='orange')
-    axes[1].set_xlabel('Month')
+    axes[1].set_xlabel('Year')
     axes[1].set_ylabel('Transactions')
 
-    # 设置x轴刻度为所有月份
-    axes[1].set_xticks(monthly_transactions.index.to_timestamp())
-    axes[1].set_xticklabels(monthly_transactions.index.strftime('%Y-%m'), rotation=45)
+    # 设置x轴刻度为每年的1月
+    axes[1].set_xticks(years)
+    axes[1].set_xticklabels(years.year, rotation=45)
 
     # 在每个柱子中间添加数值标签
     for bar in bars:
@@ -121,7 +128,7 @@ for image_path in images:
         y_offset += img.height
 
 # 创建字体对象
-font_path = "C:\Windows\Fonts\simkai.ttf"  # 替换为您系统中的英文字体文件路径
+font_path = "C:\\Windows\\Fonts\\simkai.ttf"  # 替换为您系统中的英文字体文件路径
 font_size = 36
 title_text = current_community
 title_font = ImageFont.truetype(font_path, font_size)
