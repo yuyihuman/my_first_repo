@@ -35,26 +35,26 @@ history_data = xtdata.get_market_data_ex([],code_list,period=period,count=-1)
 print(history_data["000001.SZ"]["time"][0])
 print("=" * 20)
 
-# # 如果需要盘中的实时行情，需要向服务器进行订阅后才能获取
-# # 订阅后，get_market_data函数于get_market_data_ex函数将会自动拼接本地历史行情与服务器实时行情
+# 如果需要盘中的实时行情，需要向服务器进行订阅后才能获取
+# 订阅后，get_market_data函数于get_market_data_ex函数将会自动拼接本地历史行情与服务器实时行情
 
-# # 向服务器订阅数据
-# for i in code_list:
-#     xtdata.subscribe_quote(i,period=period,count=-1) # 设置count = -1来取到当天所有实时行情
+# 向服务器订阅数据
+for i in code_list:
+    xtdata.subscribe_quote(i,period=period,count=-1) # 设置count = -1来取到当天所有实时行情
 
-# # 等待订阅完成
-# time.sleep(1)
+# 等待订阅完成
+time.sleep(1)
 
 # # 获取订阅后的行情
 # kline_data = xtdata.get_market_data_ex([],code_list,period=period)
 # print(kline_data)
 
-# # 获取订阅后的行情，并以固定间隔进行刷新,预期会循环打印10次
-# for i in range(10):
-#     # 这边做演示，就用for来循环了，实际使用中可以用while True
-#     kline_data = xtdata.get_market_data_ex([],code_list,period=period)
-#     print(kline_data)
-#     time.sleep(3) # 三秒后再次获取行情
+# 获取订阅后的行情，并以固定间隔进行刷新,预期会循环打印10次
+for i in range(10):
+    # 这边做演示，就用for来循环了，实际使用中可以用while True
+    kline_data = xtdata.get_market_data_ex([],code_list,period=period)
+    print(kline_data)
+    time.sleep(3) # 三秒后再次获取行情
 
 # # 如果不想用固定间隔触发，可以以用订阅后的回调来执行
 # # 这种模式下当订阅的callback回调函数将会异步的执行，每当订阅的标的tick发生变化更新，callback回调函数就会被调用一次
