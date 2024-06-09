@@ -48,7 +48,6 @@ time.sleep(1)
 
 # # 获取订阅后的行情
 kline_data = xtdata.get_market_data_ex([],code_list,period=period,start_time='20240401')
-print(kline_data["000001.SZ"])
 
 # # 获取订阅后的行情，并以固定间隔进行刷新,预期会循环打印10次
 # for i in range(10):
@@ -83,6 +82,8 @@ kline_data["000001.SZ"]['stime'] = pd.to_datetime(kline_data["000001.SZ"]['stime
 # 设置time列为索引
 kline_data["000001.SZ"].set_index('stime', inplace=True)
 
+print(kline_data["000001.SZ"])
+kline_data["000001.SZ"].to_csv("000001.csv")
 # 创建一个PandasData对象
 datafeed = bt.feeds.PandasData(dataname=kline_data["000001.SZ"])
 
