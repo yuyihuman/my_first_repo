@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import time
 import os
 import argparse
+from IPython.display import display
+from tabulate import tabulate
 
 class AKSHARE():
     def init(self):
@@ -109,6 +111,7 @@ class AKSHARE():
         df2_latest = df2.loc[df2.groupby('代码')['报告期'].idxmax()]
         merged_df = df1.merge(df2_latest[['代码', second_col_name]], on='代码', how='left')
         merged_df[second_col_name] = merged_df[second_col_name].fillna(0)
+        merged_df[second_col_name] = (merged_df[second_col_name] / merged_df['总股本']).round(3)
         return merged_df
 
     def create_total_list(self):
@@ -119,7 +122,23 @@ class AKSHARE():
             print(input_pd)
             new_pd = self.merge_dataframes(new_pd, input_pd)
         print(new_pd)
+        return new_pd
 
+    def sort_and_select_top_n(self, df, column_name, n=10):
+        """
+        按指定列降序排序并返回前 n 行。
+
+        参数：
+        df (DataFrame): 输入的 DataFrame。
+        column_name (str): 要排序的列名。
+        n (int): 要保留的前 n 行，默认值为 10。
+
+        返回：
+        DataFrame: 按指定列降序排序并保留前 n 行的 DataFrame。
+        """
+        sorted_df = df.sort_values(by=column_name, ascending=False)
+        top_n_df = sorted_df.head(n)
+        return top_n_df
 
 
 if __name__ == "__main__":
@@ -136,4 +155,7 @@ if __name__ == "__main__":
     if args.mode == "utl":
         AKSHARE().get_zong_gu_ben()
     if args.mode == "ctl":
-        AKSHARE().create_total_list()
+        data_pd = AKSHARE().create_total_list()
+        for name in ["社保","基金","券商","信托","QFII"]:
+            display_pd = AKSHARE().sort_and_select_top_n(data_pd, name, n=10)
+            print(tabulate(display_pd, headers='keys', tablefmt='psql', showindex=False))
