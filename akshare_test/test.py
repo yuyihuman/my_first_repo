@@ -1,42 +1,42 @@
 import pandas as pd
 
-def merge_dataframes(df1, df2):
-    # 合并两个 DataFrame
-    merged_df = pd.merge(df1, df2, on=['代码', '报告期'], how='outer', suffixes=('_df1', '_df2'))
-    
-    # 填充缺失值
-    merged_df['社保持股_df1'] = merged_df['社保持股_df1'].fillna(0)
-    merged_df['社保持股_df2'] = merged_df['社保持股_df2'].fillna(0)
-    
-    # 新列 "社保持股" 是两个列相加
-    merged_df['社保持股'] = merged_df['社保持股_df1'] + merged_df['社保持股_df2']
-    
-    # 选择所需的列
-    result_df = merged_df[['代码', '报告期', '社保持股']]
-    
-    return result_df
+class DataProcessor:
+    def sort_and_select_top_n(self, df, column_name, n=10, max_market_value=None, min_market_value=None):
+        # 复制总市值列并转换为纯数字
+        df_copy = df.copy()
+        df_copy['总市值(亿)_数值'] = df_copy['总市值(亿)'].str.extract('(\d+\.?\d*)').astype(float)
+        
+        # 过滤总市值（亿）的范围
+        if max_market_value is not None:
+            df_copy = df_copy[df_copy['总市值(亿)_数值'] <= max_market_value]
+        if min_market_value is not None:
+            df_copy = df_copy[df_copy['总市值(亿)_数值'] >= min_market_value]
+        
+        # 按指定列排序
+        sorted_df = df_copy.sort_values(by=column_name, ascending=False)
+        
+        # 选择前n行
+        top_n_df = sorted_df.head(n)
+        
+        # 删除临时列
+        top_n_df = top_n_df.drop(columns=['总市值(亿)_数值'])
+        
+        return top_n_df
 
-# 示例 DataFrame
-data1 = {
-    '代码': ['000039', '000400', '000543', '000837'],
-    '报告期': ['2024-03-31', '2024-03-31', '2024-03-31', '2024-03-31'],
-    '社保持股': [24822150, 5986300, 15652680, 8303700]
-}
+# 假设你有一个DataFrame命名为df
+df = pd.DataFrame({
+    '代码': ['000001', '000002', '000004', '000006', '000007'],
+    '名称': ['平安银行', '万科A', '国华网安', '深振业A', '*ST全新'],
+    '总市值(亿)': ['1822.2亿', '1017.2亿', '21.4亿', '62.0亿', '16.9亿'],
+    '总股本': [1.940592e+10, 9.724197e+09, 1.323803e+08, 1.349995e+09, 3.464480e+08],
+    '社保': [0.0, 0.0, 0.0, 0.0, 0.0],
+    '基金': [0.012, 0.022, 0.0, 0.005, 0.0],
+    '券商': [0.000, 0.000, 0.000, 0.000, 0.000],
+    '信托': [0.0, 0.0, 0.0, 0.0, 0.0],
+    'QFII': [0.0, 0.0, 0.0, 0.0, 0.0]
+})
 
-data2 = {
-    '代码': ['000039', '000400', '601101', '603659'],
-    '报告期': ['2024-03-31', '2024-03-31', '2024-03-31', '2024-03-31'],
-    '社保持股': [5000000, 2000000, 10406260, 14876319]
-}
-
-
-
-df1 = pd.DataFrame(data1)
-df2 = pd.DataFrame(data2)
-print(df1)
-print(df2)
-# 合并两个 DataFrame
-result_df = merge_dataframes(df1, df2)
-
-# 打印结果
-print(result_df)
+# 使用类中的方法
+processor = DataProcessor()
+result = processor.sort_and_select_top_n(df, column_name='总市值(亿)', n=3, max_market_value=1000, min_market_value=20)
+print(result)

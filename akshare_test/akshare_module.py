@@ -102,6 +102,9 @@ class AKSHARE():
         stock_zh_a_gdhs_df = stock_zh_a_gdhs_df.sort_values(by='代码')
         stock_zh_a_gdhs_df['代码'] = stock_zh_a_gdhs_df['代码'].apply(lambda x: f"{x:06}")
         print(stock_zh_a_gdhs_df.columns)
+        stock_zh_a_gdhs_df["总市值"] = pd.to_numeric(stock_zh_a_gdhs_df["总市值"], errors='coerce')
+        stock_zh_a_gdhs_df["总市值(亿)"] = stock_zh_a_gdhs_df["总市值"] / 1e8
+        stock_zh_a_gdhs_df["总市值(亿)"] = stock_zh_a_gdhs_df["总市值(亿)"].apply(lambda x: "{:.1f}亿".format(x))
         stock_zh_a_gdhs_df.to_csv("total_list.csv", index=False)
         print(stock_zh_a_gdhs_df)
 
@@ -115,40 +118,49 @@ class AKSHARE():
         return merged_df
 
     def create_total_list(self):
-        new_pd = pd.read_csv("total_list.csv", dtype={'代码': str})[["代码", "名称", "总市值", "总股本"]]
-        print(new_pd)
+        new_pd = pd.read_csv("total_list.csv", dtype={'代码': str})[["代码", "名称", "总市值(亿)", "总股本"]]
+        # print(new_pd)
         for name in ["社保","基金","券商","信托","QFII"]:
             input_pd = pd.read_csv(f"{name}.csv")
-            print(input_pd)
+            # print(input_pd)
             new_pd = self.merge_dataframes(new_pd, input_pd)
-        print(new_pd)
+        # print(new_pd)
         return new_pd
 
-    def sort_and_select_top_n(self, df, column_name, n=10):
-        """
-        按指定列降序排序并返回前 n 行。
-
-        参数：
-        df (DataFrame): 输入的 DataFrame。
-        column_name (str): 要排序的列名。
-        n (int): 要保留的前 n 行，默认值为 10。
-
-        返回：
-        DataFrame: 按指定列降序排序并保留前 n 行的 DataFrame。
-        """
-        sorted_df = df.sort_values(by=column_name, ascending=False)
+    def sort_and_select_top_n(self, df, column_name, n=10, max_market_value=None, min_market_value=None):
+        # 复制总市值列并转换为纯数字
+        df_copy = df.copy()
+        df_copy['总市值(亿)_数值'] = df_copy['总市值(亿)'].str.extract('(\d+\.?\d*)').astype(float)
+        # 过滤总市值（亿）的范围
+        if max_market_value is not None:
+            df_copy = df_copy[df_copy['总市值(亿)_数值'] <= max_market_value]
+        if min_market_value is not None:
+            df_copy = df_copy[df_copy['总市值(亿)_数值'] >= min_market_value]
+        # 按指定列排序
+        sorted_df = df_copy.sort_values(by=column_name, ascending=False)
+        # 选择前n行
         top_n_df = sorted_df.head(n)
+        # 删除临时列
+        top_n_df = top_n_df.drop(columns=['总市值(亿)_数值'])
         return top_n_df
-
+    
+    def creat_key_list(self, min_market_value=None, max_market_value=None):
+        # for name in ["社保","基金","券商","信托","QFII"]:
+        #     self.get_top10_shareholder("20231231", name)
+        # self.get_zong_gu_ben()
+        data_pd = self.create_total_list()
+        if os.path.exists("key_list.csv"):
+            os.remove("key_list.csv")
+        for name in ["社保","QFII"]: #["社保","基金","券商","信托","QFII"]
+            display_pd = self.sort_and_select_top_n(data_pd, name, n=50, max_market_value=max_market_value, min_market_value=min_market_value)
+            header = not os.path.exists("key_list.csv")
+            display_pd.to_csv("key_list.csv", mode="a", header=header)
+            print(tabulate(display_pd, headers='keys', tablefmt='psql', showindex=False))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', help='运行模式')
     args = parser.parse_args()
-    # data = pd.read_csv("total_list.csv", dtype={'代码': str})[["代码", "名称", "总市值", "总股本"]]
-    # data['社保占比'] = 0
-    # print(data)
-    # AKSHARE().get_zong_gu_ben()
     if args.mode == "ut10":
         for name in ["社保","基金","券商","信托","QFII"]:
             AKSHARE().get_top10_shareholder("20231231", name)
@@ -157,5 +169,10 @@ if __name__ == "__main__":
     if args.mode == "ctl":
         data_pd = AKSHARE().create_total_list()
         for name in ["社保","基金","券商","信托","QFII"]:
-            display_pd = AKSHARE().sort_and_select_top_n(data_pd, name, n=10)
+            display_pd = AKSHARE().sort_and_select_top_n(data_pd, name, n=50, max_market_value=200, min_market_value=50)
             print(tabulate(display_pd, headers='keys', tablefmt='psql', showindex=False))
+    if args.mode == "ckl":
+        AKSHARE().creat_key_list(min_market_value=50, max_market_value=300)
+    if args.mode == "test":
+        data_pd = AKSHARE().create_total_list()
+        print(data_pd)
