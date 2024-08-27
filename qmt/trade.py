@@ -78,7 +78,7 @@ class MyXtQuantTraderCallback(XtQuantTraderCallback):
 if __name__ == "__main__":
     print("demo test")
     # path为mini qmt客户端安装目录下userdata_mini路径
-    path = 'D:\\国金证券QMT交易端\\userdata_mini'
+    path = 'C:\\国金证券QMT交易端\\userdata_mini'
     # session_id为会话编号，策略使用方对于不同的Python策略需要使用不同的会话编号
     session_id = 123458
     xt_trader = XtQuantTrader(path, session_id)
