@@ -46,34 +46,33 @@ class TestStrategy(bt.Strategy):
                 self.order = self.sell()
 
 # 设定一个标的列表
-code_list = ["000001.SZ"]
+code_list = ["000001.SZ","000002.SZ"]
 period = '10m'
 
-for i in code_list:
-    xtdata.subscribe_quote(i, period=period, count=-1)
-time.sleep(1)
 kline_data = xtdata.get_market_data_ex([], code_list, period=period, start_time='20240101')
-print(kline_data["000001.SZ"])
 
-kline_data["000001.SZ"]['stime'] = pd.to_datetime(kline_data["000001.SZ"]['stime'], format='%Y%m%d%H%M%S')
-kline_data["000001.SZ"].set_index('stime', inplace=True)
-kline_data["000001.SZ"].rename(columns={
-    'open': 'open',
-    'high': 'high',
-    'low': 'low',
-    'close': 'close',
-    'volume': 'volume'
-}, inplace=True)
+for code in code_list:
+    kline_data[code].to_csv(f"{code}.csv", index=False)
 
-datafeed = bt.feeds.PandasData(dataname=kline_data["000001.SZ"])
-cerebro = bt.Cerebro()
-cerebro.addstrategy(TestStrategy)
-cerebro.adddata(datafeed)
-cerebro.broker.setcash(100000.0)
+    kline_data[code]['stime'] = pd.to_datetime(kline_data[code]['stime'], format='%Y%m%d%H%M%S')
+    kline_data[code].set_index('stime', inplace=True)
+    kline_data[code].rename(columns={
+        'open': 'open',
+        'high': 'high',
+        'low': 'low',
+        'close': 'close',
+        'volume': 'volume'
+    }, inplace=True)
 
-print('Starting Portfolio Value: %.2f' % cerebro.broker.getvalue())
-cerebro.run()
-print('Final Portfolio Value: %.2f' % cerebro.broker.getvalue())
+    datafeed = bt.feeds.PandasData(dataname=kline_data[code])
+    cerebro = bt.Cerebro()
+    cerebro.addstrategy(TestStrategy)
+    cerebro.adddata(datafeed)
+    cerebro.broker.setcash(100000.0)
 
-# Plot the result
-cerebro.plot()
+    print('Starting Portfolio Value: %.2f' % cerebro.broker.getvalue())
+    cerebro.run()
+    print('Final Portfolio Value: %.2f' % cerebro.broker.getvalue())
+
+    # Plot the result
+    cerebro.plot()
