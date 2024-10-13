@@ -107,6 +107,7 @@ class AKSHARE():
         stock_zh_a_gdhs_df["总市值(亿)"] = stock_zh_a_gdhs_df["总市值(亿)"].apply(lambda x: "{:.1f}亿".format(x))
         stock_zh_a_gdhs_df.to_csv("total_list.csv", index=False)
         print(stock_zh_a_gdhs_df)
+        return stock_zh_a_gdhs_df
 
     def merge_dataframes(self, df1, df2):
         second_col_name = df2.columns[2]
@@ -130,7 +131,7 @@ class AKSHARE():
     def sort_and_select_top_n(self, df, column_name, n=10, max_market_value=None, min_market_value=None):
         # 复制总市值列并转换为纯数字
         df_copy = df.copy()
-        df_copy['总市值(亿)_数值'] = df_copy['总市值(亿)'].str.extract('(\d+\.?\d*)').astype(float)
+        df_copy['总市值(亿)_数值'] = pd.to_numeric(df_copy['总市值(亿)'].str.replace(',', '').str.extract(r'(-?\d+\.\d+|\d+)'), errors='coerce')
         # 过滤总市值（亿）的范围
         if max_market_value is not None:
             df_copy = df_copy[df_copy['总市值(亿)_数值'] <= max_market_value]
@@ -157,6 +158,25 @@ class AKSHARE():
             display_pd.to_csv("key_list.csv", mode="a", header=header)
             print(tabulate(display_pd, headers='keys', tablefmt='psql', showindex=False))
 
+    def filter_by_market_cap(self, df, lower_bound, upper_bound):
+        """
+        筛选市值在指定范围内的股票
+
+        Args:
+            df: DataFrame
+            lower_bound: 市值下限
+            upper_bound: 市值上限
+
+        Returns:
+            筛选后的 DataFrame
+        """
+
+        df['总市值(亿)_数值'] = pd.to_numeric(df['总市值(亿)'].str.replace('亿', ''), errors='coerce')
+        df.dropna(subset=['总市值(亿)_数值'], inplace=True)
+        mask = (df['总市值(亿)_数值'] >= lower_bound) & (df['总市值(亿)_数值'] <= upper_bound)
+        return df[mask]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', help='运行模式')
@@ -165,7 +185,11 @@ if __name__ == "__main__":
         for name in ["社保","基金","券商","信托","QFII"]:
             AKSHARE().get_top10_shareholder("20231231", name)
     if args.mode == "utl":
-        AKSHARE().get_zong_gu_ben()
+        df = AKSHARE().get_zong_gu_ben()
+        filtered_df = AKSHARE().filter_by_market_cap(df, 100, 200)
+        # 筛选代码以 0、3、6 开头的股票
+        filtered_df = filtered_df[filtered_df['代码'].str.startswith(('0', '3', '6'))]
+        print(filtered_df[['代码', '名称']])
     if args.mode == "ctl":
         data_pd = AKSHARE().create_total_list()
         for name in ["社保","基金","券商","信托","QFII"]:

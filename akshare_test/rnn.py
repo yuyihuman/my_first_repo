@@ -86,8 +86,8 @@ for i, (seq, target) in enumerate(rnn_dataset):
         print('Last Target (y):', target)
         print()
 
-# device = torch.device("cuda:0")
-device = torch.device("cpu")
+device = torch.device("cuda:0")
+# device = torch.device("cpu")
 
 batch_size = 64
 torch.manual_seed(1)
@@ -126,3 +126,6 @@ for epoch in range(num_epochs):
     loss = loss.item()
     if epoch % 100 == 0:
         print(f'Epoch {epoch} val loss: {loss:.4f}')
+
+# 保存整个模型
+torch.save(model, 'rnn_model.pth')
