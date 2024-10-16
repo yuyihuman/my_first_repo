@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-
+import time
 from read_stock_data import read_stock_data
 from torch.utils.data import Dataset, DataLoader, random_split
 
@@ -32,7 +32,6 @@ class RNN(nn.Module):
         # print("张量的形状:", out.shape)
         out = self.fc(out)
         return out
-
 
 model = RNN(2, 32) 
 
@@ -86,7 +85,11 @@ for i, (seq, target) in enumerate(rnn_dataset):
         print('Last Target (y):', target)
         print()
 
-device = torch.device("cuda:0")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+if device.type == "cuda":
+    print("Using GPU for training!")
+else:
+    print("Using CPU for training.")
 # device = torch.device("cpu")
 
 batch_size = 64
@@ -101,6 +104,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
 
 num_epochs = 1000
 
+start_time = time.time()
 for epoch in range(num_epochs):
     seq_batch, target_batch = next(iter(train_loader))
     target_batch = target_batch.view(-1, 1)
@@ -125,7 +129,9 @@ for epoch in range(num_epochs):
     loss = loss_fn(pred, target_batch)
     loss = loss.item()
     if epoch % 100 == 0:
-        print(f'Epoch {epoch} val loss: {loss:.4f}')
+        elapsed_time = time.time() - start_time
+        print(f'Epoch {epoch} val loss: {loss:.4f} | Elapsed time: {elapsed_time:.2f} seconds')
+        start_time = time.time() 
 
 # 保存整个模型
 torch.save(model, 'rnn_model.pth')
