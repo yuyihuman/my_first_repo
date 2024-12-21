@@ -17,14 +17,6 @@ from data_prepare import get_stock_list
 from torch.utils.data import ConcatDataset
 from torch.utils.data import Subset
 
-parser = argparse.ArgumentParser(description="超参数传参")
-parser.add_argument('-sl', '--seq_length', type=int, default=480, help="指定输入序列的长度")
-parser.add_argument('-jl', '--judge_length', type=int, default=480, help="指定输出序列的长度")
-parser.add_argument('-e', '--epoch', type=int, default=1001, help="训练次数")
-parser.add_argument('-sd', '--start_date', type=str, default="20240601", help="开始时间")
-parser.add_argument('-ed', '--end_date', type=str, default="20241201", help="结束时间")
-args = parser.parse_args()
-
 def read_stock_floating_share():
     stock_zh_a_spot_em_df = ak.stock_zh_a_spot_em()
     stock_zh_a_spot_em_df.to_csv(f'data/stock_outstanding_share.csv')
@@ -62,15 +54,58 @@ def add_outstanding_share_column(df1, df2):
 
     return df1
 
-def normalize(column):
-    min_val = column.min()
-    max_val = column.max()
+def normalize(column, code):
+    if code.startswith("0") or code.startswith("6"):
+        min_val = -10
+        max_val = 10
+    elif code.startswith("3"):
+        min_val = -20
+        max_val = 20
+    else:
+        min_val = column.min()
+        max_val = column.max()
     return (2 * (column - min_val) / (max_val - min_val)) - 1
 
 def normalize_0_to_1(column):
     min_val = column.min()
     max_val = column.max()
     return (column - min_val) / (max_val - min_val)
+
+def get_model_para(model_name):
+    input_length = int(model_name.replace(".pth","").split("_")[-2])
+    hold_days = int(model_name.replace(".pth","").split("_")[-1])
+    accuracy = float(model_name.replace(".pth","").split("_")[-3])
+    return input_length, hold_days, accuracy
+
+def evaluate_signal_at_n(column, n, judge_length, threshold_1=0.06, threshold_4=0.02):
+    """
+    在指定索引 `n` 处，根据判断长度和阈值评估信号。
+
+    参数:
+    - column: 包含百分比变化的数据列 (Pandas Series 或 NumPy 数组)。
+    - n: 当前的索引 (int)。
+    - judge_length: 判断的周期长度 (int)。
+    - threshold_1: product_1 的阈值, 默认为 0.06。
+    - threshold_4: product_4 的阈值, 默认为 0.02。
+
+    返回:
+    - 1: 如果满足条件。
+    - 0: 如果不满足条件。
+    """
+    # 检查 n + judge_length 是否越界
+    if n + judge_length > len(column):
+        raise ValueError("`n + judge_length` 超出数据长度，请检查输入。")
+
+    # 计算各个产品值
+    product_1 = np.prod(1 + column[n:n + judge_length])
+    product_2 = np.prod(1 + column[n:n + judge_length // 2])
+    product_3 = np.prod(1 + column[n:n + judge_length // 4])
+    product_4 = np.prod(1 + column[n:n + judge_length // 8])
+
+    # 判断条件
+    if product_4 > 1 + (judge_length / 240 * threshold_4) and product_1 > 1 + (judge_length / 240 * threshold_1):
+        return 1
+    return 0
 
 # Dataset类
 class RnnDataset(Dataset):
@@ -84,19 +119,6 @@ class RnnDataset(Dataset):
     def __getitem__(self, idx):
         return self.learn_trunks[idx].float(), self.target[idx].float()
 
-# GRU模型类
-class GRUModel(nn.Module):
-    def __init__(self, input_size, hidden_size):
-        super().__init__()
-        self.gru = nn.GRU(input_size, hidden_size, num_layers=5, batch_first=True)
-        self.fc = nn.Linear(hidden_size, 1)
-
-    def forward(self, x):
-        out, _ = self.gru(x)
-        out = out[:, -1, :]  # 取最后一个时间步的输出
-        out = self.fc(out)   # 线性层输出
-        return out
-    
 # RNN模型类
 class RNNModel(nn.Module):
     def __init__(self, input_size, hidden_size, sequence_length):
@@ -109,9 +131,7 @@ class RNNModel(nn.Module):
         out, _ = self.rnn(x)  # out 形状: (batch_size, sequence_length, hidden_size)
         out = self.fc1(out)    # out 形状: (batch_size, sequence_length, 1)
         out = out.squeeze(-1)  # 去掉最后一个维度，形状: (batch_size, sequence_length)
-        
         out = self.fc2(out)    # 将时间步维度合并成一个值，形状: (batch_size, 1)
-        
         return out.squeeze(-1)  # 输出形状: (batch_size,)
 
 all_datasets = []
@@ -119,10 +139,9 @@ def train_data(seq_length, judge_length):
     start_time=args.start_date
     end_time=args.end_date
     period="1m"
-    code_list = get_stock_list(lower_bound=150,upper_bound=160)
     total_stocks = len(code_list)
     xtdata.enable_hello = False
-    if 1:
+    if 0:
     ## 为了方便用户进行数据管理，xtquant的大部分历史数据都是以压缩形式存储在本地的
     ## 比如行情数据，需要通过download_history_data下载，财务数据需要通过
     ## 所以在取历史数据之前，我们需要调用数据下载接口，将数据下载到本地
@@ -147,9 +166,10 @@ def train_data(seq_length, judge_length):
         if first_date < check_date:
             data_post = add_outstanding_share_column(data, data_os)
             data_post['turnover'] = data_post['volume'] * 100 / data_post['outstanding_share']
-            data_post['change_percentage'] = (data_post['close'] - data_post['open']) / data_post['open']
+            data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
+            data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
             data_post['turnover_normalized'] = normalize_0_to_1(data_post['turnover'])
-            data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'])
+            data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'], code=code)
 
             float_columns = data_post.select_dtypes(include=['float']).columns
             data_post[float_columns] = data_post[float_columns].round(4)
@@ -162,11 +182,7 @@ def train_data(seq_length, judge_length):
             rnn_target = np.zeros(len(change_percentage) - judge_length, dtype=int)
             positive_counter = 0
             for n in range(len(change_percentage) - judge_length):
-                product_1 = np.prod(1 + change_percentage[n:n+judge_length])
-                product_2 = np.prod(1 + change_percentage[n:n+judge_length//2])
-                product_3 = np.prod(1 + change_percentage[n:n+judge_length//4])
-                product_4 = np.prod(1 + change_percentage[n:n+judge_length//8])
-                if product_4 > 1+(judge_length/240*0.01) and product_1 > 1+(judge_length/240*0.08):
+                if evaluate_signal_at_n(column=change_percentage,n=n,judge_length=judge_length):
                     rnn_target[n] = 1
                     positive_counter += 1
                     print(f'change_percentage[{n}:{n+judge_length}] is:\n{change_percentage[n:n+judge_length]}')
@@ -231,6 +247,7 @@ def train_data(seq_length, judge_length):
 
     # 数据集划分
     total_len = len(combined_dataset)
+    print(f'total_len is {total_len}')
     if total_len*0.3 > 5000:
         train_size = 5000
     else:
@@ -323,28 +340,117 @@ def train_model_single(train_loader, val_loader, seq_length):
                 print(f'Elapsed time: {elapsed_time:.2f} seconds')
                 start_time = time.time()
 
-        val_acc_criteria = 0.85
-        if val_acc / val_size > val_acc_criteria:
-            # 保存最终的模型
-            torch.save(model.state_dict(), f'final_model_{args.seq_length}_{args.judge_length}_{val_acc_criteria}.pth')
-            print(f"Final model saved to final_model_{args.seq_length}_{args.judge_length}.pth")
-            break
+            val_acc_criteria = args.val_acc_criteria
+            if val_acc / val_size > val_acc_criteria:
+                # 保存最终的模型
+                torch.save(model.state_dict(), f'final_model_{val_acc_criteria}_{args.seq_length}_{args.judge_length}.pth')
+                print(f"Final model saved to final_model_{args.seq_length}_{args.judge_length}.pth")
+                if 1:
+                    # 设定一个标的列表
+                    code_list = ["000981.SZ"]
+                    period = '1m'
+                    start_time = args.start_date
+                    end_time = args.end_date
+                    total_stocks = len(code_list)
+                    if 1:
+                    ## 为了方便用户进行数据管理，xtquant的大部分历史数据都是以压缩形式存储在本地的
+                    ## 比如行情数据，需要通过download_history_data下载，财务数据需要通过
+                    ## 所以在取历史数据之前，我们需要调用数据下载接口，将数据下载到本地
+                        for index, code in enumerate(code_list):
+                            # 打印进度
+                            print(f"Downloading {code} ({index + 1}/{total_stocks})...")
+                            # 下载数据
+                            xtdata.download_history_data(code, period=period, incrementally=True, start_time=start_time)
+                            # 打印已完成的进度
+                            print(f"{code} download completed.\nProgress: {round((index + 1) / total_stocks * 100, 2)}%")
 
+                    kline_data = xtdata.get_market_data_ex([], code_list, period=period, start_time=start_time, end_time=end_time)
 
+                    for code in code_list:
+                        data_os = read_single_stock_outstanding_share(code=convert_stock_code(code))
+                        first_date = pd.to_datetime(data_os.loc[0, 'date'])
+                        check_date = pd.to_datetime('2015-01-01')
+                        if first_date < check_date:
+                            data_post = add_outstanding_share_column(kline_data[code], data_os)
+                            data_post['turnover'] = data_post['volume'] * 100 / data_post['outstanding_share']
+                            # data_post['change_percentage'] = (data_post['close'] - data_post['open']) / data_post['open']
+                            data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
+                            data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
+                            data_post['turnover_normalized'] = normalize_0_to_1(data_post['turnover'])
+                            data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'])
+                            data_post['buy'] = 0
+                            data_post['buy_origin'] = 0
+                            float_columns = data_post.select_dtypes(include=['float']).columns
+                            data_post[float_columns] = data_post[float_columns].round(4)
+                            turnover_normalized = data_post['turnover_normalized']
+                            change_percentage = data_post['change_percentage']
+                            change_percentage_normalized = data_post['change_percentage_normalized']
+                            rnn_input = np.column_stack((turnover_normalized, change_percentage_normalized))
+                            seq_length = args.seq_length
 
-# 使用带 UTF-8 编码的文件流进行标准输出重定向
-current_time = time.strftime("%Y-%m-%d_%H-%M-%S")
-log_filename = f'log/log_{current_time}_{args.seq_length}_{args.judge_length}.txt'
-log_file = open(log_filename, 'w', encoding='utf-8', buffering=1)
-sys.stdout = io.TextIOWrapper(log_file.buffer, encoding='utf-8', line_buffering=True)
+                            # use model to predict when to buy 
+                            for i in range(len(rnn_input) - seq_length):
+                                current_sequence_tensor = torch.tensor(rnn_input[i:i+seq_length], dtype=torch.float32).unsqueeze(0).to(device)
+                                with torch.no_grad():
+                                    output = model(current_sequence_tensor)
+                                    output = torch.sigmoid(output)
+                                # print(output.item())  # 打印单个预测值
+                                if seq_length + i < len(data_post):
+                                    data_post.iloc[seq_length + i, data_post.columns.get_loc('buy_origin')] = round(output.item(), 4)
+                                    prediction = 1 if output.item() >= 0.5 else 0
+                                    data_post.iloc[seq_length + i, data_post.columns.get_loc('buy')] = prediction
 
-try:
-    seq_length = args.seq_length
-    judge_length = args.judge_length
-    print(f'seq_length is {seq_length} judge_length is {judge_length}')
-    train_loader, val_loader = train_data(seq_length=seq_length, judge_length=judge_length)
-    train_model_single(train_loader=train_loader, val_loader=val_loader, seq_length=seq_length)
-except Exception as e:
-    print("*******************")
-    print(e)
-    print("*******************")
+                            data_post.to_csv(f'data/{code}_{val_acc_criteria}_{args.seq_length}_{args.judge_length}_post_modeltest.csv', index=True)
+                break
+
+def get_buy_value_by_index(df, index):
+    """
+    根据指定的索引返回 DataFrame 中 'buy' 列的值。
+    
+    参数：
+        df (pd.DataFrame): 包含数据的 DataFrame，索引为时间。
+        index (str or pd.Timestamp): 要查找的索引，支持字符串或时间戳格式。
+        
+    返回：
+        int or None: 对应 'buy' 列的值，如果索引不存在返回 None。
+    """
+    try:
+        # 确保输入的索引是 pd.Timestamp 类型
+        index = pd.to_datetime(index)
+        # 检查索引是否存在
+        if index in df.index:
+            return df.loc[index, 'buy']
+        else:
+            return f"索引 {index} 不存在于 DataFrame 中。"
+    except Exception as e:
+        return f"发生错误: {e}"
+
+if __name__=="__main__":
+    parser = argparse.ArgumentParser(description="超参数传参")
+    parser.add_argument('-sl', '--seq_length', type=int, default=480, help="指定输入序列的长度")
+    parser.add_argument('-jl', '--judge_length', type=int, default=480, help="指定输出序列的长度")
+    parser.add_argument('-e', '--epoch', type=int, default=1001, help="训练次数")
+    parser.add_argument('-vac', '--val_acc_criteria', type=float, default=0.9, help="训练次数")
+    parser.add_argument('-sd', '--start_date', type=str, default="20240601", help="开始时间")
+    parser.add_argument('-ed', '--end_date', type=str, default="20241201", help="结束时间")
+    parser.add_argument('-cl', '--code_list', type=str, default=[], help="训练代码列表")
+    args = parser.parse_args()
+    # 将逗号分隔的字符串解析为列表
+    code_list = args.code_list.split(",") if args.code_list else []
+    print(code_list)
+    # 使用带 UTF-8 编码的文件流进行标准输出重定向
+    current_time = time.strftime("%Y-%m-%d_%H-%M-%S")
+    log_filename = f'log/log_{current_time}_{args.seq_length}_{args.judge_length}.txt'
+    log_file = open(log_filename, 'w', encoding='utf-8', buffering=1)
+    sys.stdout = io.TextIOWrapper(log_file.buffer, encoding='utf-8', line_buffering=True)
+
+    try:
+        seq_length = args.seq_length
+        judge_length = args.judge_length
+        print(f'seq_length is {seq_length} judge_length is {judge_length}')
+        train_loader, val_loader = train_data(seq_length=seq_length, judge_length=judge_length)
+        train_model_single(train_loader=train_loader, val_loader=val_loader, seq_length=seq_length)
+    except Exception as e:
+        print("*******************")
+        print(e)
+        print("*******************")
