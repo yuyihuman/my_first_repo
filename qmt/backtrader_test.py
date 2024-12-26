@@ -8,6 +8,12 @@ import torch
 import sys
 import io
 import os
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+# 禁用显示功能
+plt.show = lambda: None
 
 from model_train import normalize, normalize_0_to_1, read_single_stock_outstanding_share, \
                         convert_stock_code, add_outstanding_share_column, get_model_para, \
@@ -21,18 +27,20 @@ sys.stdout = io.TextIOWrapper(log_file.buffer, encoding='utf-8', line_buffering=
 
 parser = argparse.ArgumentParser(description="")
 parser.add_argument('-m', '--model', type=str, default="final_model_0.95_120_720.pth", help="指定模型名称")
-parser.add_argument('-sd', '--start_date', type=str, default="20240601", help="开始时间")
-parser.add_argument('-ed', '--end_date', type=str, default="20241201", help="结束时间")
+parser.add_argument('-sd', '--start_date', type=str, default="20240101", help="开始时间")
+parser.add_argument('-ed', '--end_date', type=str, default="20240930", help="结束时间")
 parser.add_argument('-mode', '--mode', type=str, default="predict", help="predict/truth")
 parser.add_argument('-p', '--plot', type=str, default="Flase", help="True/Flase")
+parser.add_argument('-clb', '--code_list_backtrader', type=str, default=[], help="回测代码列表")
 args = parser.parse_args()
-input_length, hold_cycles, accuracy = get_model_para(model_name=args.model)
-input_size = 2
-hidden_size = 64
-
+code_list_backtrader = args.code_list_backtrader.split(",") if args.code_list_backtrader else []
+print(code_list_backtrader)
 # Check if CUDA (GPU) is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
+input_length, hold_cycles, accuracy = get_model_para(model_name=args.model)
+input_size = 2
+hidden_size = 64
 model = RNNModel(input_size, hidden_size, input_length)
 # 检查模型文件是否存在
 if not os.path.exists(args.model) and args.mode == "predict":
@@ -40,6 +48,7 @@ if not os.path.exists(args.model) and args.mode == "predict":
     sys.exit(0)  # 非零值表示异常退出
 else:
     print(f"Info: Use Model file {args.model}")
+
 if args.mode == "predict":
     model.load_state_dict(torch.load(args.model))
     model.to(device)
@@ -95,23 +104,10 @@ class TestStrategy(bt.Strategy):
                 self.order = self.sell(size=self.position.size)
 
 # 设定一个标的列表
-code_list = ["000981.SZ"]
+code_list = code_list_backtrader
 period = '1m'
 start_time = args.start_date
 end_time = args.end_date
-total_stocks = len(code_list)
-if 1:
-## 为了方便用户进行数据管理，xtquant的大部分历史数据都是以压缩形式存储在本地的
-## 比如行情数据，需要通过download_history_data下载，财务数据需要通过
-## 所以在取历史数据之前，我们需要调用数据下载接口，将数据下载到本地
-    for index, code in enumerate(code_list):
-        # 打印进度
-        print(f"Downloading {code} ({index + 1}/{total_stocks})...")
-        # 下载数据
-        xtdata.download_history_data(code, period=period, incrementally=True, start_time=start_time)
-        # 打印已完成的进度
-        print(f"{code} download completed.\nProgress: {round((index + 1) / total_stocks * 100, 2)}%")
-
 kline_data = xtdata.get_market_data_ex([], code_list, period=period, start_time=start_time, end_time=end_time)
 
 for code in code_list:
@@ -153,7 +149,7 @@ for code in code_list:
             for n in range(len(change_percentage) - hold_cycles):
                 data_post.iloc[n, data_post.columns.get_loc('buy')] = evaluate_signal_at_n(column=change_percentage,n=n,judge_length=hold_cycles)
 
-        data_post.to_csv(f'data/{code}_post_backtrade.csv', index=True)
+        # data_post.to_csv(f'data/{code}_post_backtrade.csv', index=True)
         print(kline_data[code].index)
         kline_data[code].index = pd.to_datetime(kline_data[code].index, format='%Y%m%d%H%M%S')
         kline_data[code].rename(columns={
@@ -173,7 +169,8 @@ for code in code_list:
 
         print('Starting Portfolio Value: %.2f' % cerebro.broker.getvalue())
         cerebro.run()
-        print('Final Portfolio Value: %.2f' % cerebro.broker.getvalue())
+        print(f'{code} Final Portfolio Value: %.2f' % cerebro.broker.getvalue())
         # Plot the result
-        if args.plot == "True":
-            cerebro.plot()
+        fig = cerebro.plot(show=False)[0][0]
+        fig.set_size_inches(30, 5)
+        fig.savefig(f'data/{code}_{accuracy}_{input_length}_{hold_cycles}_backtrade.png',dpi=300)

@@ -20,17 +20,7 @@ for root, dirs, files in os.walk(log_folder):
             for line in lines:
                 if "Use Model file" in line:
                     use_model_line = line.strip()
+                    print(use_model_line)
                 if "Final Portfolio Value" in line:
-                    final_portfolio_line = line.strip()
-                
-                # 如果两行都找到了，可以提前退出循环
-                if use_model_line and final_portfolio_line:
-                    break
-
-            # 如果找到了目标行，打印文件名和对应的行
-            if use_model_line or final_portfolio_line:
-                print(f"\nFile: {file_path}")
-                if use_model_line:
-                    print(f"Use Model file line: {use_model_line}")
-                if final_portfolio_line:
-                    print(f"Final Portfolio Value line: {final_portfolio_line}")
+                    final_portfolio_line = line.strip()  # 保存匹配的行
+                    print(final_portfolio_line)

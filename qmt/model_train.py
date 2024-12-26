@@ -9,6 +9,7 @@ import random
 import io
 import sys
 import argparse
+import concurrent.futures
 
 from xtquant import xtdata
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -26,7 +27,7 @@ def read_single_stock_outstanding_share(code="sz000001"):
     date_string = now.strftime("%Y%m%d")
     stock_zh_a_daily_qfq_df = ak.stock_zh_a_daily(symbol=code, start_date="19910403", end_date=date_string, adjust="qfq")
     print(stock_zh_a_daily_qfq_df)
-    stock_zh_a_daily_qfq_df.to_csv(f'data/{code}outstanding_share.csv')
+    stock_zh_a_daily_qfq_df.to_csv(f'data/{code}_outstanding_share.csv')
     return stock_zh_a_daily_qfq_df
 
 def convert_stock_code(stock_code):
@@ -72,12 +73,13 @@ def normalize_0_to_1(column):
     return (column - min_val) / (max_val - min_val)
 
 def get_model_para(model_name):
+    print(model_name)
     input_length = int(model_name.replace(".pth","").split("_")[-2])
     hold_days = int(model_name.replace(".pth","").split("_")[-1])
     accuracy = float(model_name.replace(".pth","").split("_")[-3])
     return input_length, hold_days, accuracy
 
-def evaluate_signal_at_n(column, n, judge_length, threshold_1=0.06, threshold_4=0.02):
+def evaluate_signal_at_n(column, n, judge_length, threshold_1=0.08, threshold_4=0.02):
     """
     在指定索引 `n` 处，根据判断长度和阈值评估信号。
 
@@ -134,122 +136,94 @@ class RNNModel(nn.Module):
         out = self.fc2(out)    # 将时间步维度合并成一个值，形状: (batch_size, 1)
         return out.squeeze(-1)  # 输出形状: (batch_size,)
 
-all_datasets = []
+def process_stock_data(code, seq_length, judge_length, start_time, end_time):
+    # 获取数据的过程
+    kline_data = xtdata.get_market_data_ex([], [code], period="1m", start_time=start_time, end_time=end_time)
+    data = kline_data[code]
+    
+    data_os = read_single_stock_outstanding_share(code=convert_stock_code(code))
+    first_date = pd.to_datetime(data_os.loc[0, 'date'])
+    check_date = pd.to_datetime('2010-01-01')
+    
+    if first_date < check_date:
+        data_post = add_outstanding_share_column(data, data_os)
+        data_post['turnover'] = data_post['volume'] * 100 / data_post['outstanding_share']
+        data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
+        data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
+        data_post['turnover_normalized'] = normalize_0_to_1(data_post['turnover'])
+        data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'], code=code)
+
+        float_columns = data_post.select_dtypes(include=['float']).columns
+        data_post[float_columns] = data_post[float_columns].round(4)
+
+        turnover_normalized = data_post['turnover_normalized']
+        change_percentage = data_post['change_percentage']
+        change_percentage_normalized = data_post['change_percentage_normalized']
+        data_post.to_csv(f'data/{code}.csv')
+        rnn_input = np.column_stack((turnover_normalized, change_percentage_normalized))
+        rnn_target = np.zeros(len(change_percentage) - judge_length, dtype=int)
+        positive_counter = 0
+        
+        # Process each change_percentage sequence
+        for n in range(len(change_percentage) - judge_length):
+            if evaluate_signal_at_n(column=change_percentage, n=n, judge_length=judge_length):
+                rnn_target[n] = 1
+                positive_counter += 1
+            else:
+                rnn_target[n] = 0
+                
+        if positive_counter == 0:
+            print(f"Skipping {code} due to no positive samples.")
+            return None  # Skip if no positive samples
+        
+        rnn_input = rnn_input[:-judge_length]
+
+        # Construct learning trunks
+        learn_trunks = [rnn_input[i:i+seq_length] for i in range(len(rnn_input) - seq_length)]
+        learn_trunks_np = np.array(learn_trunks)
+        target_np = rnn_target[seq_length:]  # Align target with input sequences
+
+        positive_indices = np.where(target_np == 1)[0]
+        negative_indices = np.where(target_np == 0)[0]
+        
+        # Handle positive and negative samples
+        x = len(positive_indices)
+        sampled_negative_indices = random.sample(list(negative_indices), min(1 * x, len(negative_indices)))
+        selected_indices = np.concatenate([positive_indices, sampled_negative_indices])
+        np.random.shuffle(selected_indices)
+
+        filtered_learn_trunks = learn_trunks_np[selected_indices]
+        filtered_targets = target_np[selected_indices]
+
+        # Create rnn_dataset
+        rnn_dataset = RnnDataset(torch.tensor(filtered_learn_trunks, dtype=torch.float32), 
+                                 torch.tensor(filtered_targets, dtype=torch.long))
+        return rnn_dataset
+
 def train_data(seq_length, judge_length):
-    start_time=args.start_date
-    end_time=args.end_date
-    period="1m"
-    total_stocks = len(code_list)
-    xtdata.enable_hello = False
-    if 0:
-    ## 为了方便用户进行数据管理，xtquant的大部分历史数据都是以压缩形式存储在本地的
-    ## 比如行情数据，需要通过download_history_data下载，财务数据需要通过
-    ## 所以在取历史数据之前，我们需要调用数据下载接口，将数据下载到本地
-        for index, code in enumerate(code_list):
-            # 打印进度
-            print(f"Downloading {code} ({index + 1}/{total_stocks})...")
-            # 下载数据
-            xtdata.download_history_data(code, period=period, incrementally=True, start_time=start_time)
-            # 打印已完成的进度
-            print(f"{code} download completed.\nProgress: {round((index + 1) / total_stocks * 100, 2)}%")
+    start_time = args.start_date
+    end_time = args.end_date
+    all_datasets = []
+    
+    with concurrent.futures.ProcessPoolExecutor(max_workers=20) as executor:
+        # Parallel processing for each stock
+        futures = []
+        for code in code_list:
+            futures.append(executor.submit(process_stock_data, code, seq_length, judge_length, start_time, end_time))
+        
+        # Collect results
+        for future in concurrent.futures.as_completed(futures):
+            rnn_dataset = future.result()
+            if rnn_dataset is not None:
+                all_datasets.append(rnn_dataset)
 
-    kline_data = xtdata.get_market_data_ex([], code_list, period=period, start_time=start_time, end_time=end_time)
-    for code in code_list:
-        print(f'=========================================')
-        print(f'code {code} start')
-        print(f'=========================================')
-        data = kline_data[code]
-        data.to_csv(f'data/{code}.csv')
-        data_os = read_single_stock_outstanding_share(code=convert_stock_code(code))
-        first_date = pd.to_datetime(data_os.loc[0, 'date'])
-        check_date = pd.to_datetime('2010-01-01')
-        if first_date < check_date:
-            data_post = add_outstanding_share_column(data, data_os)
-            data_post['turnover'] = data_post['volume'] * 100 / data_post['outstanding_share']
-            data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
-            data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
-            data_post['turnover_normalized'] = normalize_0_to_1(data_post['turnover'])
-            data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'], code=code)
-
-            float_columns = data_post.select_dtypes(include=['float']).columns
-            data_post[float_columns] = data_post[float_columns].round(4)
-
-            turnover_normalized = data_post['turnover_normalized']
-            change_percentage = data_post['change_percentage']
-            change_percentage_normalized = data_post['change_percentage_normalized']
-            rnn_input = np.column_stack((turnover_normalized, change_percentage_normalized))
-            judge_length = judge_length
-            rnn_target = np.zeros(len(change_percentage) - judge_length, dtype=int)
-            positive_counter = 0
-            for n in range(len(change_percentage) - judge_length):
-                if evaluate_signal_at_n(column=change_percentage,n=n,judge_length=judge_length):
-                    rnn_target[n] = 1
-                    positive_counter += 1
-                    print(f'change_percentage[{n}:{n+judge_length}] is:\n{change_percentage[n:n+judge_length]}')
-                else:
-                    rnn_target[n] = 0
-            print(f'positive_counter is {positive_counter}')
-            if positive_counter == 0:
-                print('continue')
-                continue
-            rnn_input = rnn_input[:-judge_length]
-
-            # 定义序列长度
-            seq_length = seq_length
-            # 构建输入序列
-            learn_trunks = [rnn_input[i:i+seq_length] for i in range(len(rnn_input) - seq_length)]
-            learn_trunks_np = np.array(learn_trunks)
-            target_np = rnn_target[seq_length:]  # 目标要对齐输入序列
-
-            # 查找 target == 1 和 target == 0 的索引
-            positive_indices = np.where(target_np == 1)[0]
-            negative_indices = np.where(target_np == 0)[0]
-            first_positive_index = positive_indices[0]
-
-            # 计算 target == 1 的数量
-            x = len(positive_indices)
-
-            # 从 target == 0 中随机抽取 100x 条数据
-            sampled_negative_indices = random.sample(list(negative_indices), min(1 * x, len(negative_indices)))
-
-            # 合并 target == 1 和采样的 target == 0 的数据索引
-            selected_indices = np.concatenate([positive_indices, sampled_negative_indices])
-
-            # 打乱索引以避免顺序问题
-            np.random.shuffle(selected_indices)
-
-            # 根据选定索引提取数据
-            filtered_learn_trunks = learn_trunks_np[selected_indices]
-            filtered_targets = target_np[selected_indices]
-
-            # 获取对应的 filtered_learn_trunks 和 filtered_targets
-            first_filtered_learn_trunk = learn_trunks_np[first_positive_index]
-            first_filtered_target = target_np[first_positive_index]
-
-            # 打印对应的数据
-            print(f"First sample where target == 1:")
-            print(f"Index: {first_positive_index}")
-            print(f"Filtered learn trunk: {first_filtered_learn_trunk}")
-            print(f"Filtered target: {first_filtered_target}")
-
-            # 打印统计信息
-            print(f"Total positive samples (target == 1): {x}")
-            print(f"Total negative samples (target == 0) selected: {len(sampled_negative_indices)}")
-            print(f"Total samples in dataset: {len(selected_indices)}")
-
-            # 创建 rnn_dataset
-            rnn_dataset = RnnDataset(torch.tensor(filtered_learn_trunks, dtype=torch.float32), 
-                                    torch.tensor(filtered_targets, dtype=torch.long))
-            all_datasets.append(rnn_dataset)
-
-            data_post.to_csv(f'data/{code}_post.csv')
     combined_dataset = ConcatDataset(all_datasets)
 
     # 数据集划分
     total_len = len(combined_dataset)
     print(f'total_len is {total_len}')
-    if total_len*0.3 > 5000:
-        train_size = 5000
+    if total_len*0.3 > 10000:
+        train_size = 10000
     else:
         train_size = int(total_len*0.3)
     if total_len-train_size > 10000:
@@ -278,9 +252,20 @@ def train_data(seq_length, judge_length):
     for learn_trunks_batch, target_batch in train_loader:
         print("Batch learn_trunks shape:", learn_trunks_batch.shape)  # (batch_size, seq_length, feature_dim)
         print("Batch target shape:", target_batch.shape)              # (batch_size,)
+
+        # 计算目标标签中的 0 和 1 的比例
+        num_zeros = (target_batch == 0).sum().item()
+        num_ones = (target_batch == 1).sum().item()
+        total = target_batch.size(0)
+        zero_ratio = num_zeros / total
+        one_ratio = num_ones / total
+
+        print(f"Batch label distribution: 0's: {num_zeros} ({zero_ratio * 100:.2f}%), 1's: {num_ones} ({one_ratio * 100:.2f}%)")
+        
         break  # 仅展示第一个 batch
 
     return train_loader, val_loader
+
 
 def train_model_single(train_loader, val_loader, seq_length):
     # 获取训练集和验证集的大小
@@ -347,23 +332,10 @@ def train_model_single(train_loader, val_loader, seq_length):
                 print(f"Final model saved to final_model_{args.seq_length}_{args.judge_length}.pth")
                 if 1:
                     # 设定一个标的列表
-                    code_list = ["000981.SZ"]
+                    code_list = code_list_backtrader
                     period = '1m'
                     start_time = args.start_date
                     end_time = args.end_date
-                    total_stocks = len(code_list)
-                    if 1:
-                    ## 为了方便用户进行数据管理，xtquant的大部分历史数据都是以压缩形式存储在本地的
-                    ## 比如行情数据，需要通过download_history_data下载，财务数据需要通过
-                    ## 所以在取历史数据之前，我们需要调用数据下载接口，将数据下载到本地
-                        for index, code in enumerate(code_list):
-                            # 打印进度
-                            print(f"Downloading {code} ({index + 1}/{total_stocks})...")
-                            # 下载数据
-                            xtdata.download_history_data(code, period=period, incrementally=True, start_time=start_time)
-                            # 打印已完成的进度
-                            print(f"{code} download completed.\nProgress: {round((index + 1) / total_stocks * 100, 2)}%")
-
                     kline_data = xtdata.get_market_data_ex([], code_list, period=period, start_time=start_time, end_time=end_time)
 
                     for code in code_list:
@@ -377,7 +349,7 @@ def train_model_single(train_loader, val_loader, seq_length):
                             data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
                             data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
                             data_post['turnover_normalized'] = normalize_0_to_1(data_post['turnover'])
-                            data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'])
+                            data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'], code=code)
                             data_post['buy'] = 0
                             data_post['buy_origin'] = 0
                             float_columns = data_post.select_dtypes(include=['float']).columns
@@ -434,10 +406,13 @@ if __name__=="__main__":
     parser.add_argument('-sd', '--start_date', type=str, default="20240601", help="开始时间")
     parser.add_argument('-ed', '--end_date', type=str, default="20241201", help="结束时间")
     parser.add_argument('-cl', '--code_list', type=str, default=[], help="训练代码列表")
+    parser.add_argument('-clb', '--code_list_backtrader', type=str, default=[], help="回测代码列表")
     args = parser.parse_args()
     # 将逗号分隔的字符串解析为列表
     code_list = args.code_list.split(",") if args.code_list else []
     print(code_list)
+    code_list_backtrader = args.code_list_backtrader.split(",") if args.code_list_backtrader else []
+    print(code_list_backtrader)
     # 使用带 UTF-8 编码的文件流进行标准输出重定向
     current_time = time.strftime("%Y-%m-%d_%H-%M-%S")
     log_filename = f'log/log_{current_time}_{args.seq_length}_{args.judge_length}.txt'
