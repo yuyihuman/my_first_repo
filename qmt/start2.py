@@ -1,4 +1,5 @@
 import os
+os.environ["NUMEXPR_MAX_THREADS"] = "20"
 import argparse
 import subprocess
 import shutil
@@ -7,6 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 from datetime import datetime
 from data_prepare import get_stock_list
 from xtquant import xtdata
+
 
 # 获取当前时间
 current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -19,10 +21,10 @@ parser.add_argument("-ed", "--end_date", type=str, required=True, help="End date
 args = parser.parse_args()
 start_time = args.start_date
 stop_time = args.end_date
-code_list = get_stock_list(lower_bound=140, upper_bound=150)
+code_list = get_stock_list(lower_bound=140, upper_bound=145)
 code_list = [code for code in code_list if code.startswith("0")]
 code_list_str = ",".join(map(str, code_list))
-code_list_backtrader = get_stock_list(lower_bound=100, upper_bound=110)
+code_list_backtrader = get_stock_list(lower_bound=100, upper_bound=101)
 code_list_backtrader = [code for code in code_list_backtrader if code.startswith("0")]
 code_list_backtrader_str = ",".join(map(str, code_list_backtrader))
 combined_code_list = list(set(code_list + code_list_backtrader))
