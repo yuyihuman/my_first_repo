@@ -2,8 +2,9 @@ import os
 import argparse
 import subprocess
 import shutil
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 from datetime import datetime
-
 from data_prepare import get_stock_list
 from xtquant import xtdata
 
@@ -18,7 +19,7 @@ parser.add_argument("-ed", "--end_date", type=str, required=True, help="End date
 args = parser.parse_args()
 start_time = args.start_date
 stop_time = args.end_date
-code_list = get_stock_list(lower_bound=120, upper_bound=150)
+code_list = get_stock_list(lower_bound=140, upper_bound=150)
 code_list = [code for code in code_list if code.startswith("0")]
 code_list_str = ",".join(map(str, code_list))
 code_list_backtrader = get_stock_list(lower_bound=100, upper_bound=110)
@@ -54,11 +55,8 @@ for index, code in enumerate(combined_code_list):
 for val_acc_criteria in val_acc_criteria_range:
     for seq_length in seq_length_range:
         for judge_length in judge_length_range:
-            print(f"Running experiment with seq_length={seq_length}, judge_length={judge_length}, "
-                  f"val_acc_criteria={val_acc_criteria}, epochs=3001")
-
-            # 执行 model_train.py 脚本
-            subprocess.run([
+            # 构建 model_train.py 的命令
+            train_command = [
                 "python", "model_train.py",
                 "--seq_length", str(seq_length),
                 "--judge_length", str(judge_length),
@@ -68,24 +66,33 @@ for val_acc_criteria in val_acc_criteria_range:
                 "-ed", stop_time,
                 "-cl", code_list_str,
                 "-clb", code_list_backtrader_str
-            ])
+            ]
+            # 记录日志并执行 model_train.py
+            logging.info(f"Executing: {' '.join(train_command)}")
+            subprocess.run(train_command)
 
-            # 执行 backtrader_test.py 脚本
+            # 构建 backtrader_test.py 的命令
             model_name = f"final_model_{val_acc_criteria}_{seq_length}_{judge_length}.pth"
-            subprocess.run([
+            
+            test_command_1 = [
                 "python", "backtrader_test.py",
                 "-m", model_name,
                 "-sd", start_time,
                 "-ed", stop_time,
                 "-clb", code_list_str
-            ])
-            subprocess.run([
+            ]
+            logging.info(f"Executing: {' '.join(test_command_1)}")
+            subprocess.run(test_command_1)
+            
+            test_command_2 = [
                 "python", "backtrader_test.py",
                 "-m", model_name,
                 "-sd", start_time,
                 "-ed", stop_time,
                 "-clb", code_list_backtrader_str
-            ])            
+            ]
+            logging.info(f"Executing: {' '.join(test_command_2)}")
+            subprocess.run(test_command_2)  
 
 # 将日志记录到 log 文件夹中的文件
 log_filename = f"log_{current_time}.txt"

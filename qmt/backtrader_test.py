@@ -36,7 +36,8 @@ args = parser.parse_args()
 code_list_backtrader = args.code_list_backtrader.split(",") if args.code_list_backtrader else []
 print(code_list_backtrader)
 # Check if CUDA (GPU) is available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
 print(f"Using device: {device}")
 input_length, hold_cycles, accuracy = get_model_para(model_name=args.model)
 input_size = 2
