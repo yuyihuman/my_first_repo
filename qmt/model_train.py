@@ -222,12 +222,12 @@ def train_data(seq_length, judge_length):
     # 数据集划分
     total_len = len(combined_dataset)
     print(f'total_len is {total_len}')
-    if total_len*0.3 > 5000:
-        train_size = 5000
+    if total_len*0.3 > 10000:
+        train_size = 10000
     else:
         train_size = int(total_len*0.3)
-    if total_len-train_size > 5000:
-        val_size = 5000
+    if total_len-train_size > 10000:
+        val_size = 10000
     else:
         val_size = total_len - train_size
     # 随机选择 train_size 个索引

@@ -7,7 +7,7 @@ log_folder = "./log"
 for root, dirs, files in os.walk(log_folder):
     for file in files:
         # 检查文件是否是文本文件（根据扩展名）
-        if file.endswith(".txt"):
+        if file.endswith(".log"):
             file_path = os.path.join(root, file)
             with open(file_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
