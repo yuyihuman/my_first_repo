@@ -67,7 +67,7 @@ if __name__ == '__main__':
     kline_data = xtdata.get_market_data_ex([], code_list_backtrader, period='1m', start_time=args.start_date, end_time=args.end_date)
     # 使用 ProcessPoolExecutor 并行执行
     with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
-        futures = {executor.submit(process_stock_data_backtrader, code, model, kline_data, accuracy, input_length, hold_cycles, device, args): code for code in code_list_backtrader}
+        futures = {executor.submit(process_stock_data_backtest, code, input_length, hold_cycles, accuracy, args.start_date, args.end_date, "backtest"): code for code in code_list_backtrader}
         for future in concurrent.futures.as_completed(futures):
             code = futures[future]
             try:
