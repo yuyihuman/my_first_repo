@@ -31,7 +31,7 @@ def read_single_stock_outstanding_share(code="sz000001"):
     now = datetime.now()
     date_string = now.strftime("%Y%m%d")
     stock_zh_a_daily_qfq_df = ak.stock_zh_a_daily(symbol=code, start_date="19910403", end_date=date_string, adjust="qfq")
-    logging.info(stock_zh_a_daily_qfq_df)
+    logging.info(f'\n{stock_zh_a_daily_qfq_df}')
     stock_zh_a_daily_qfq_df.to_csv(f'data/{code}_outstanding_share.csv')
     return stock_zh_a_daily_qfq_df
 
@@ -142,17 +142,28 @@ class RNNModel(nn.Module):
         return out.squeeze(-1)  # 输出形状: (batch_size,)
 
 def process_stock_data(code, seq_length, judge_length, start_time, end_time):
-    create_logger(code)
+    create_logger(f'{code}_train')
+    logging.info(f"Processing stock data for code: {code}, sequence length: {seq_length}, judge length: {judge_length}, time range: {start_time} to {end_time}")
+
     # 获取数据的过程
-    kline_data = xtdata.get_market_data_ex([], [code], period="1m", start_time=start_time, end_time=end_time)
+    logging.info("Fetching market data...")
+    kline_data = xtdata.get_market_data_ex([], [code], period="1m", start_time=start_time, end_time=end_time, dividend_type="front")
     data = kline_data[code]
-    
+    logging.info(f"Fetched {len(data)} rows of market data for code: {code}")
+
+    logging.info("Fetching outstanding share data...")
     data_os = read_single_stock_outstanding_share(code=convert_stock_code(code))
+    logging.info(f"Outstanding share data contains {len(data_os)} rows.")
+
     first_date = pd.to_datetime(data_os.loc[0, 'date'])
     check_date = pd.to_datetime('2010-01-01')
-    
+    logging.info(f"First outstanding share date: {first_date}, check date: {check_date}")
+
     if first_date < check_date:
+        logging.info("Processing data with outstanding share adjustments...")
         data_post = add_outstanding_share_column(data, data_os)
+        data_post['close'] = data_post['preClose']
+        data_post['open'] = data_post['preClose']
         data_post['turnover'] = data_post['volume'] * 100 / data_post['outstanding_share']
         data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
         data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
@@ -162,6 +173,7 @@ def process_stock_data(code, seq_length, judge_length, start_time, end_time):
 
         float_columns = data_post.select_dtypes(include=['float']).columns
         data_post[float_columns] = data_post[float_columns].round(4)
+        logging.info(f"Data processed: columns normalized and rounded for {code}")
 
         turnover_normalized = data_post['turnover_normalized']
         change_percentage = data_post['change_percentage']
@@ -169,62 +181,60 @@ def process_stock_data(code, seq_length, judge_length, start_time, end_time):
         rnn_input = np.column_stack((turnover_normalized, change_percentage_normalized))
         rnn_target = np.zeros(len(change_percentage) - judge_length, dtype=int)
         positive_counter = 0
-        
-        # Process each change_percentage sequence
+
+        logging.info("Evaluating buy signals...")
         for n in range(len(change_percentage) - judge_length):
             if evaluate_signal_at_n(column=change_percentage, n=n, judge_length=judge_length):
                 rnn_target[n] = 1
                 data_post.iloc[n, data_post.columns.get_loc('buy')] = 1
                 positive_counter += 1
-            else:
-                rnn_target[n] = 0
-                
+
+        logging.info(f"Positive samples count: {positive_counter}")
         if positive_counter == 0:
             logging.info(f"Skipping {code} due to no positive samples.")
             return None  # Skip if no positive samples
-        else:
-            file_path = f'data/{code}_{judge_length}_truth.csv'
-            if os.path.exists(file_path):
-                pass
-            else:
-                # 保存数据并准备回测
-                logging.info(f"Saving processed data for {code}...")
-                kline_data[code].index = pd.to_datetime(kline_data[code].index, format='%Y%m%d%H%M%S')
-                kline_data[code].rename(columns={
-                    'open': 'open',
-                    'high': 'high',
-                    'low': 'low',
-                    'close': 'close',
-                    'volume': 'volume'
-                }, inplace=True)
-                kline_data[code].to_csv(file_path, index=True)
-                # 回测
-                logging.info(f"Running backtest for {code}...")
-                datafeed = bt.feeds.PandasData(dataname=kline_data[code])
-                cerebro = bt.Cerebro()
-                cerebro.addstrategy(TestStrategy, code=code, kline_data=kline_data, hold_cycles=judge_length)
-                cerebro.adddata(datafeed)
-                cerebro.broker.setcash(100000.0)
-                logging.info(f'Starting Portfolio Value: %.2f' % cerebro.broker.getvalue())
-                cerebro.run()
-                logging.info(f'{code} Truth Final Portfolio Value: %.2f' % cerebro.broker.getvalue())
-                # 绘制结果
-                fig = cerebro.plot(show=False)[0][0]
-                fig.set_size_inches(30, 5)
-                fig.savefig(f'data/{code}_{judge_length}_truth.png', dpi=300)
-                logging.info(f"Backtest and plot for {code} completed successfully.")
+
+        file_path = f'data/{code}_{judge_length}_truth.csv'
+        if not os.path.exists(file_path):
+            logging.info(f"Saving processed data to {file_path}...")
+            kline_data[code].index = pd.to_datetime(kline_data[code].index, format='%Y%m%d%H%M%S')
+            kline_data[code].rename(columns={
+                'open': 'open',
+                'high': 'high',
+                'low': 'low',
+                'close': 'close',
+                'volume': 'volume'
+            }, inplace=True)
+            kline_data[code].to_csv(file_path, index=True)
+
+            logging.info(f"Running backtest for {code}...")
+            datafeed = bt.feeds.PandasData(dataname=kline_data[code])
+            cerebro = bt.Cerebro()
+            cerebro.addstrategy(TestStrategy, code=code, kline_data=kline_data, hold_cycles=judge_length)
+            cerebro.adddata(datafeed)
+            cerebro.broker.setcash(100000.0)
+            logging.info(f"Starting Portfolio Value: {cerebro.broker.getvalue():.2f}")
+            cerebro.run()
+            logging.info(f"{code} Truth Final Portfolio Value: {cerebro.broker.getvalue():.2f}")
+            
+            logging.info("Saving backtest plot...")
+            fig = cerebro.plot(show=False)[0][0]
+            fig.set_size_inches(30, 5)
+            fig.savefig(f'data/{code}_{judge_length}_truth.png', dpi=300)
+            logging.info(f"Backtest and plot for {code} completed successfully.")
 
         rnn_input = rnn_input[:-judge_length]
 
-        # Construct learning trunks
+        logging.info("Constructing learning trunks...")
         learn_trunks = [rnn_input[i:i+seq_length] for i in range(len(rnn_input) - seq_length)]
         learn_trunks_np = np.array(learn_trunks)
         target_np = rnn_target[seq_length:]  # Align target with input sequences
 
         positive_indices = np.where(target_np == 1)[0]
         negative_indices = np.where(target_np == 0)[0]
-        
-        # Handle positive and negative samples
+
+        logging.info(f"Positive samples: {len(positive_indices)}, Negative samples: {len(negative_indices)}")
+
         x = len(positive_indices)
         sampled_negative_indices = random.sample(list(negative_indices), min(1 * x, len(negative_indices)))
         selected_indices = np.concatenate([positive_indices, sampled_negative_indices])
@@ -233,15 +243,17 @@ def process_stock_data(code, seq_length, judge_length, start_time, end_time):
         filtered_learn_trunks = learn_trunks_np[selected_indices]
         filtered_targets = target_np[selected_indices]
 
-        # Create rnn_dataset
+        logging.info("Creating RNN dataset...")
         rnn_dataset = RnnDataset(torch.tensor(filtered_learn_trunks, dtype=torch.float32), 
                                  torch.tensor(filtered_targets, dtype=torch.long))
+        logging.info(f"Dataset for {code} created successfully with {len(filtered_targets)} samples.")
         return rnn_dataset
+
 
 def train_data(seq_length, judge_length, start_time, end_time):
     all_datasets = []
     
-    with concurrent.futures.ProcessPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=5) as executor:
         # Parallel processing for each stock
         futures = []
         for code in code_list:
@@ -386,47 +398,65 @@ def train_model_single(train_loader, val_loader, seq_length):
                 break
 
 def process_stock_data_backtest(code, seq_length, judge_length, val_acc_criteria, start_time, end_time, resource):
-    create_logger(code)
+    create_logger(f'{code}_back')
+    
     # 定义设备
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    device = "cpu"
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     logging.info(f"Using device: {device}")
+    logging.info(f"Starting backtest for {code} with sequence length {seq_length}, judge length {judge_length}, and validation criteria {val_acc_criteria}")
+    
     # 初始化模型
     model = RNNModel(input_size=2, hidden_size=64, sequence_length=seq_length).to(device)
     model_name = f'final_model_{val_acc_criteria}_{seq_length}_{judge_length}.pth'
-    if not os.path.exists(model_name):
-        logging.info(f'{model_name} is not exist')
-        return
-    model.load_state_dict(torch.load(model_name, map_location=torch.device('cpu')))
-    # 获取数据的过程
-    kline_data = xtdata.get_market_data_ex([], [code], period="1m", start_time=start_time, end_time=end_time)
-    data = kline_data[code]
+    logging.info(f"Model file: {model_name}")
     
+    if not os.path.exists(model_name):
+        logging.warning(f"Model file {model_name} does not exist. Skipping {code}.")
+        return
+    try:
+        model.load_state_dict(torch.load(model_name, map_location=torch.device('cpu'), weights_only=True))
+        logging.info(f"Successfully loaded model {model_name}")
+    except Exception as e:
+        logging.error(f"Error loading model {model_name}: {e}")
+        return
+    
+    # 获取数据的过程
+    logging.info(f"Fetching market data for {code} from {start_time} to {end_time}")
+    kline_data = xtdata.get_market_data_ex([], [code], period="1m", start_time=start_time, end_time=end_time, dividend_type="front")
+    data = kline_data[code]
+    logging.info(f"Market data for {code} fetched successfully with {len(data)} rows")
+    
+    # 获取流通股数据
     data_os = read_single_stock_outstanding_share(code=convert_stock_code(code))
     first_date = pd.to_datetime(data_os.loc[0, 'date'])
     check_date = pd.to_datetime('2010-01-01')
+    logging.info(f"First outstanding share data date: {first_date}")
     
     if first_date < check_date:
+        logging.info("Processing outstanding share data...")
         data_post = add_outstanding_share_column(data, data_os)
+        logging.info("Adding new columns and normalizing data...")
+        data_post['close'] = data_post['preClose']
+        data_post['open'] = data_post['preClose']
         data_post['turnover'] = data_post['volume'] * 100 / data_post['outstanding_share']
         data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
         data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
         data_post['turnover_normalized'] = normalize_0_to_1(data_post['turnover'])
         data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'], code=code)
         data_post['buy'] = 0
-        data_post['buy_origin'] = 0
+        data_post['buy_origin'] = 0.0
 
         float_columns = data_post.select_dtypes(include=['float']).columns
         data_post[float_columns] = data_post[float_columns].round(4)
-
+        logging.info(f"Data normalization and rounding completed for {code}")
+        
+        # 构建 RNN 输入
         turnover_normalized = data_post['turnover_normalized']
-        change_percentage = data_post['change_percentage']
         change_percentage_normalized = data_post['change_percentage_normalized']
         rnn_input = np.column_stack((turnover_normalized, change_percentage_normalized))
-        rnn_target = np.zeros(len(change_percentage) - judge_length, dtype=int)
         
-        # Process each change_percentage sequence
-        logging.info(f"Use Model file {model_name}")
+        # 使用模型预测
+        logging.info(f"Using model {model_name} for predictions...")
         for i in range(len(rnn_input) - seq_length):
             current_sequence_tensor = torch.tensor(rnn_input[i:i+seq_length], dtype=torch.float32).unsqueeze(0).to(device)
             with torch.no_grad():
@@ -436,32 +466,36 @@ def process_stock_data_backtest(code, seq_length, judge_length, val_acc_criteria
                 data_post.iloc[seq_length + i, data_post.columns.get_loc('buy_origin')] = round(output.item(), 4)
                 prediction = 1 if output.item() >= 0.5 else 0
                 data_post.iloc[seq_length + i, data_post.columns.get_loc('buy')] = prediction
-                
-        logging.info(f"Saving processed data for {code}...")
+        
+        logging.info(f"Prediction completed for {code}")
+        
+        # 保存处理后的数据
+        output_file = f'data/{code}_{val_acc_criteria}_{seq_length}_{judge_length}_predict.csv'
+        logging.info(f"Saving processed data to {output_file}")
         kline_data[code].index = pd.to_datetime(kline_data[code].index, format='%Y%m%d%H%M%S')
-        kline_data[code].rename(columns={
-            'open': 'open',
-            'high': 'high',
-            'low': 'low',
-            'close': 'close',
-            'volume': 'volume'
-        }, inplace=True)
-        kline_data[code].to_csv(f'data/{code}_{val_acc_criteria}_{seq_length}_{judge_length}_predict.csv', index=True)
+        kline_data[code].to_csv(output_file, index=True)
+        
         # 回测
-        logging.info(f"Running backtest for {code}...")
+        logging.info(f"Starting backtest for {code}")
         datafeed = bt.feeds.PandasData(dataname=kline_data[code])
         cerebro = bt.Cerebro()
         cerebro.addstrategy(TestStrategy, code=code, kline_data=kline_data, hold_cycles=judge_length)
         cerebro.adddata(datafeed)
         cerebro.broker.setcash(100000.0)
-        logging.info(f'Starting Portfolio Value: %.2f' % cerebro.broker.getvalue())
+        logging.info(f'Starting Portfolio Value: {cerebro.broker.getvalue():.2f}')
         cerebro.run()
-        logging.info(f'{code} {resource} Final Portfolio Value: %.2f' % cerebro.broker.getvalue())
-        # 绘制结果
+        logging.info(f'{code} {resource} Final Portfolio Value: {cerebro.broker.getvalue():.2f}')
+        
+        # 保存回测结果图
+        output_plot = f'data/{code}_{val_acc_criteria}_{seq_length}_{judge_length}_predict.png'
+        logging.info(f"Saving backtest plot to {output_plot}")
         fig = cerebro.plot(show=False)[0][0]
         fig.set_size_inches(30, 5)
-        fig.savefig(f'data/{code}_{val_acc_criteria}_{seq_length}_{judge_length}_predict.png', dpi=300)
-        logging.info(f"Backtest and plot for {code} completed successfully.")
+        fig.savefig(output_plot, dpi=300)
+        logging.info(f"Backtest and plot for {code} completed successfully")
+    else:
+        logging.warning(f"Skipping {code} due to insufficient outstanding share data (first date: {first_date})")
+
 
 
 def get_buy_value_by_index(df, index):
@@ -487,18 +521,29 @@ def get_buy_value_by_index(df, index):
         return f"发生错误: {e}"
 
 def create_logger(code=None):
-    log_filename = f"{code}.log"  # 固定文件名，并包含时间戳
+    # 获取当前时间，格式为YYYYMMDD_HHMMSS
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 定义日志文件名，包含代码和时间戳
+    log_filename = f"{current_time}_{code}.log" if code else f"{current_time}_general.log"
     log_file_path = os.path.join("log", log_filename)
-    # 确保log目录存在
+    
+    # 确保 log 目录存在
     os.makedirs("log", exist_ok=True)
+    
     # 配置 logging，将输出重定向到日志文件
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(levelname)s - %(filename)s - %(lineno)d - %(message)s',
-                        filename=log_file_path, 
-                        filemode='a')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(filename)s - %(lineno)d - %(message)s',
+        filename=log_file_path,
+        filemode='a'
+    )
+    
     # 将 stdout 和 stderr 重定向到日志文件
     sys.stdout = open(log_file_path, 'a', encoding='utf-8')
     sys.stderr = sys.stdout
+
+    # 提示日志文件路径，便于检查
+    logging.info(f"Logging initialized for code: {code}. Log file: {log_file_path}")
 
 # Create a Strategy
 class TestStrategy(bt.Strategy):
@@ -557,96 +602,6 @@ class TestStrategy(bt.Strategy):
             if len(self) >= (self.bar_executed + self.hold_cycles) and self.datas[0].datetime.datetime(0).date() != self.open_time:
                 self.log('SELL CREATE, %.2f' % self.dataclose[0])
                 self.order = self.sell(size=self.position.size)
-
-def process_stock_data_backtrader(code, model, kline_data, accuracy, input_length, hold_cycles, device, args):
-    create_logger(code)  # 为每个股票创建独立的 logger
-    logging.info(f"Processing stock code: {code}")  # 打印当前正在处理的股票代码
-    try:
-        # 读取该股票的流通股本数据
-        logging.info(f"Reading outstanding share data for {code}...")
-        data_os = read_single_stock_outstanding_share(code=convert_stock_code(code))
-        first_date = pd.to_datetime(data_os.loc[0, 'date'])
-        check_date = pd.to_datetime('2015-01-01')
-        
-        logging.info(f"First date of outstanding share data for {code}: {first_date}")
-        if first_date < check_date:
-            logging.info(f"Data for {code} is valid for processing. Proceeding with data manipulation...")
-            
-            # 处理股票数据
-            data_post = add_outstanding_share_column(kline_data[code], data_os)
-            data_post['turnover'] = data_post['volume'] * 100 / data_post['outstanding_share']
-            data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
-            data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
-            data_post['turnover_normalized'] = normalize_0_to_1(data_post['turnover'])
-            data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'], code=code)
-            data_post['buy'] = 0
-            data_post['buy_origin'] = 0
-            
-            logging.info(f"Stock data for {code} processed successfully.")
-            
-            # 对数据进行列类型转换
-            float_columns = data_post.select_dtypes(include=['float']).columns
-            data_post[float_columns] = data_post[float_columns].round(4)
-
-            turnover_normalized = data_post['turnover_normalized']
-            change_percentage = data_post['change_percentage']
-            change_percentage_normalized = data_post['change_percentage_normalized']
-            rnn_input = np.column_stack((turnover_normalized, change_percentage_normalized))
-            seq_length = input_length
-
-            logging.info(f"Starting model prediction for {code}...")
-            
-            # 模型推理过程
-            if args.mode == "predict":
-                logging.info(f"Use Model file {args.model}")
-                for i in range(len(rnn_input) - seq_length):
-                    current_sequence_tensor = torch.tensor(rnn_input[i:i+seq_length], dtype=torch.float32).unsqueeze(0).to(device)
-                    with torch.no_grad():
-                        output = model(current_sequence_tensor)
-                        output = torch.sigmoid(output)
-                    if seq_length + i < len(data_post):
-                        data_post.iloc[seq_length + i, data_post.columns.get_loc('buy_origin')] = round(output.item(), 4)
-                        prediction = 1 if output.item() >= 0.5 else 0
-                        data_post.iloc[seq_length + i, data_post.columns.get_loc('buy')] = prediction
-
-            elif args.mode == "truth":
-                for n in range(len(change_percentage) - hold_cycles):
-                    data_post.iloc[n, data_post.columns.get_loc('buy')] = evaluate_signal_at_n(column=change_percentage, n=n, judge_length=hold_cycles)
-
-            # 保存数据并准备回测
-            logging.info(f"Saving processed data for {code}...")
-            kline_data[code].index = pd.to_datetime(kline_data[code].index, format='%Y%m%d%H%M%S')
-            kline_data[code].rename(columns={
-                'open': 'open',
-                'high': 'high',
-                'low': 'low',
-                'close': 'close',
-                'volume': 'volume'
-            }, inplace=True)
-            kline_data[code].to_csv(f'data/{code}_{accuracy}_{input_length}_{hold_cycles}_backtrade.csv', index=True)
-
-            # 回测
-            logging.info(f"Running backtest for {code}...")
-            datafeed = bt.feeds.PandasData(dataname=kline_data[code])
-            cerebro = bt.Cerebro()
-            cerebro.addstrategy(TestStrategy, code=code, kline_data=kline_data, hold_cycles=hold_cycles)
-            cerebro.adddata(datafeed)
-            cerebro.broker.setcash(100000.0)
-
-            logging.info(f'Starting Portfolio Value: %.2f' % cerebro.broker.getvalue())
-            cerebro.run()
-            logging.info(f'{code} Final Portfolio Value: %.2f' % cerebro.broker.getvalue())
-            
-            # 绘制结果
-            fig = cerebro.plot(show=False)[0][0]
-            fig.set_size_inches(30, 5)
-            fig.savefig(f'data/{code}_{accuracy}_{input_length}_{hold_cycles}_backtrade_{args.mode}.png', dpi=300)
-            logging.info(f"Backtest and plot for {code} completed successfully.")
-        else:
-            logging.info(f"Data for {code} is outdated, skipping this stock.")
-    
-    except Exception as e:
-        logging.error(f"Error processing {code}: {e}")
 
 if __name__=="__main__":
     # 获取当前时间

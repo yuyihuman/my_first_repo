@@ -43,15 +43,6 @@ if __name__ == '__main__':
     code_list_backtrader = args.code_list_backtrader.split(",") if args.code_list_backtrader else []
     logging.info(code_list_backtrader)
 
-    # Check if CUDA (GPU) is available
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    logging.info(f"Using device: {device}")
-
-    input_length, hold_cycles, accuracy = get_model_para(model_name=args.model)
-    input_size = 2
-    hidden_size = 64
-    model = RNNModel(input_size, hidden_size, input_length)
-
     # 检查模型文件是否存在
     if not os.path.exists(args.model) and args.mode == "predict":
         logging.info(f"Error: Model file '{args.model}' does not exist.")
@@ -59,18 +50,10 @@ if __name__ == '__main__':
     else:
         logging.info(f"Info: Use Model file {args.model}")
 
-    if args.mode == "predict":
-        model.load_state_dict(torch.load(args.model, weights_only=True))
-        model.to(device)
-        model.eval()  # 切换到评估模式
+    input_length, hold_cycles, accuracy = get_model_para(model_name=args.model)
+    input_size = 2
+    hidden_size = 64
+    model = RNNModel(input_size, hidden_size, input_length)
 
-    kline_data = xtdata.get_market_data_ex([], code_list_backtrader, period='1m', start_time=args.start_date, end_time=args.end_date)
-    # 使用 ProcessPoolExecutor 并行执行
-    with concurrent.futures.ProcessPoolExecutor(max_workers=12) as executor:
-        futures = {executor.submit(process_stock_data_backtest, code, input_length, hold_cycles, accuracy, args.start_date, args.end_date, "backtest"): code for code in code_list_backtrader}
-        for future in concurrent.futures.as_completed(futures):
-            code = futures[future]
-            try:
-                future.result()
-            except Exception as exc:
-                logging.info(f'Code {code} generated an exception: {exc}')
+    for code in code_list_backtrader:
+        process_stock_data_backtest(code=code, seq_length=input_length, judge_length=hold_cycles, val_acc_criteria=accuracy, start_time=args.start_date, end_time=args.end_date, resource="backtest")

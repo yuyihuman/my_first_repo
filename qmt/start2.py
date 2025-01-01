@@ -5,8 +5,11 @@ import shutil
 import logging
 import argparse
 import random
+import pandas as pd
+import glob
 from datetime import datetime
 from data_prepare import get_stock_list
+from model_train import read_single_stock_outstanding_share, convert_stock_code
 from xtquant import xtdata
 
 # 删除源文件（清空文件夹内容，但保留文件夹本身）
@@ -38,6 +41,7 @@ os.makedirs("data", exist_ok=True)
 # 保留文件夹，只删除里面的文件和子文件夹
 clear_folder("log")
 clear_folder("data")
+[os.remove(f) for f in glob.glob("*.pth")]
 
 # 配置logging，将输出重定向到日志文件
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s - %(lineno)d - %(message)s', filename=log_file_path, filemode='a')
@@ -59,12 +63,17 @@ stop_time = args.end_date
 # 获取股票代码列表
 code_list = get_stock_list(lower_bound=140, upper_bound=160)
 code_list = [code for code in code_list if code.startswith("0")]
-random.sample(code_list, 10)
+code_list = [
+    code for code in code_list
+    if pd.to_datetime(read_single_stock_outstanding_share(code=convert_stock_code(code)).loc[0, 'date']) <= pd.to_datetime('2010-01-01')
+]
+code_list = random.sample(code_list, 10)
 code_list_str = ",".join(map(str, code_list))
+logging.info(f'code_list_str is {code_list_str}')
 
 code_list_backtrader = get_stock_list(lower_bound=100, upper_bound=110)
 code_list_backtrader = [code for code in code_list_backtrader if code.startswith("0")]
-random.sample(code_list_backtrader, 5)
+code_list_backtrader = random.sample(code_list_backtrader, 5)
 code_list_backtrader_str = ",".join(map(str, code_list_backtrader))
 
 combined_code_list = list(set(code_list + code_list_backtrader))
@@ -78,14 +87,15 @@ def frange(start, stop, step):
 
 # 循环参数范围
 val_acc_criteria_range = [round(x, 2) for x in list(frange(0.9, 0.95, 0.05))]
-seq_length_range = range(240, 481, 120)
-judge_length_range = range(240, 721, 240)
+seq_length_range = range(360, 481, 120)
+judge_length_range = range(480, 721, 240)
 
 # 下载数据
 if args.download == "True":
     total_stocks = len(combined_code_list)
     xtdata.enable_hello = False
     for index, code in enumerate(combined_code_list):
+        logging.info(" ")
         logging.info(f"Downloading {code} ({index + 1}/{total_stocks})...")
         xtdata.download_history_data(code, period="1m", incrementally=True, start_time=start_time)
         logging.info(f"{code} download completed.\nProgress: {round((index + 1) / total_stocks * 100, 2)}%")

@@ -43,7 +43,7 @@ def prepare_rnn_data(code_list,period="5m",start_time='20240101'):
         xtdata.download_history_data(code, period=period, incrementally=True)
         # 打印已完成的进度
         print(f"{code} download completed.\nProgress: {round((index + 1) / total_stocks * 100, 2)}%")
-    kline_data = xtdata.get_market_data_ex([], code_list, period=period, start_time=start_time)
+    kline_data = xtdata.get_market_data_ex([], code_list, period=period, start_time=start_time, dividend_type="front")
 
 if __name__ == "__main__":
     stock_list = get_stock_list(lower_bound=100, upper_bound=110)
