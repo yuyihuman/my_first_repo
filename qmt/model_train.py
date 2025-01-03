@@ -15,6 +15,8 @@ import backtrader as bt
 import matplotlib.pyplot as plt
 # 禁用显示功能
 plt.show = lambda: None
+import multiprocessing
+import shutil
 
 from xtquant import xtdata
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -84,7 +86,7 @@ def get_model_para(model_name):
     accuracy = float(model_name.replace(".pth","").split("_")[-3])
     return input_length, hold_days, accuracy
 
-def evaluate_signal_at_n(column, n, judge_length, threshold_1=0.08, threshold_4=0.02):
+def evaluate_signal_at_n(column, n, judge_length, threshold=0.08):
     """
     在指定索引 `n` 处，根据判断长度和阈值评估信号。
 
@@ -110,7 +112,7 @@ def evaluate_signal_at_n(column, n, judge_length, threshold_1=0.08, threshold_4=
     product_4 = np.prod(1 + column[n:n + judge_length // 8])
 
     # 判断条件
-    if product_4 > 1 + (judge_length / 240 * threshold_4) and product_1 > 1 + (judge_length / 240 * threshold_1):
+    if product_4 > 1 + (judge_length / 48 * (threshold/8)) and product_1 > 1 + (judge_length / 48 * threshold):
         return 1
     return 0
 
@@ -147,7 +149,7 @@ def process_stock_data(code, seq_length, judge_length, start_time, end_time):
 
     # 获取数据的过程
     logging.info("Fetching market data...")
-    kline_data = xtdata.get_market_data_ex([], [code], period="1m", start_time=start_time, end_time=end_time, dividend_type="front")
+    kline_data = xtdata.get_market_data_ex([], [code], period="5m", start_time=start_time, end_time=end_time, dividend_type="front")
     data = kline_data[code]
     logging.info(f"Fetched {len(data)} rows of market data for code: {code}")
 
@@ -252,19 +254,25 @@ def process_stock_data(code, seq_length, judge_length, start_time, end_time):
 
 def train_data(seq_length, judge_length, start_time, end_time):
     all_datasets = []
-    
-    with concurrent.futures.ProcessPoolExecutor(max_workers=5) as executor:
-        # Parallel processing for each stock
-        futures = []
-        for code in code_list:
-            futures.append(executor.submit(process_stock_data, code, seq_length, judge_length, start_time, end_time))
-        
-        # Collect results
-        for future in concurrent.futures.as_completed(futures):
-            rnn_dataset = future.result()
-            if rnn_dataset is not None:
-                all_datasets.append(rnn_dataset)
+    chunk_size = 10
+    # Helper function to process a chunk of tasks
+    def process_chunk(tasks_chunk):
+        # Create a pool of workers for each chunk
+        with multiprocessing.Pool(chunk_size) as pool:
+            results = pool.starmap(process_stock_data, tasks_chunk)
+            for rnn_dataset in results:
+                if rnn_dataset is not None:
+                    all_datasets.append(rnn_dataset)
 
+    # Prepare the arguments for the process
+    tasks = [(code, seq_length, judge_length, start_time, end_time) for code in code_list]
+    # Split tasks into chunks of 5
+    tasks_chunks = [tasks[i:i + chunk_size] for i in range(0, len(tasks), chunk_size)]
+    # Process each chunk using the pool
+    for tasks_chunk in tasks_chunks:
+        process_chunk(tasks_chunk)
+
+    # Combine all datasets into one
     combined_dataset = ConcatDataset(all_datasets)
 
     # 数据集划分
@@ -402,6 +410,7 @@ def process_stock_data_backtest(code, seq_length, judge_length, val_acc_criteria
     
     # 定义设备
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = "cpu"
     logging.info(f"Using device: {device}")
     logging.info(f"Starting backtest for {code} with sequence length {seq_length}, judge length {judge_length}, and validation criteria {val_acc_criteria}")
     
@@ -422,14 +431,14 @@ def process_stock_data_backtest(code, seq_length, judge_length, val_acc_criteria
     
     # 获取数据的过程
     logging.info(f"Fetching market data for {code} from {start_time} to {end_time}")
-    kline_data = xtdata.get_market_data_ex([], [code], period="1m", start_time=start_time, end_time=end_time, dividend_type="front")
+    kline_data = xtdata.get_market_data_ex([], [code], period="5m", start_time=start_time, end_time=end_time, dividend_type="front")
     data = kline_data[code]
     logging.info(f"Market data for {code} fetched successfully with {len(data)} rows")
     
     # 获取流通股数据
     data_os = read_single_stock_outstanding_share(code=convert_stock_code(code))
     first_date = pd.to_datetime(data_os.loc[0, 'date'])
-    check_date = pd.to_datetime('2010-01-01')
+    check_date = pd.to_datetime('2015-01-01')
     logging.info(f"First outstanding share data date: {first_date}")
     
     if first_date < check_date:
@@ -544,6 +553,18 @@ def create_logger(code=None):
 
     # 提示日志文件路径，便于检查
     logging.info(f"Logging initialized for code: {code}. Log file: {log_file_path}")
+
+# 删除源文件（清空文件夹内容，但保留文件夹本身）
+def clear_folder(folder_path):
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        try:
+            if os.path.isdir(file_path):
+                shutil.rmtree(file_path)  # 删除子文件夹
+            else:
+                os.remove(file_path)  # 删除文件
+        except Exception as e:
+            logging.error(f"Error removing {file_path}: {e}")
 
 # Create a Strategy
 class TestStrategy(bt.Strategy):

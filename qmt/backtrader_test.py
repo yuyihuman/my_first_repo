@@ -55,5 +55,9 @@ if __name__ == '__main__':
     hidden_size = 64
     model = RNNModel(input_size, hidden_size, input_length)
 
-    for code in code_list_backtrader:
-        process_stock_data_backtest(code=code, seq_length=input_length, judge_length=hold_cycles, val_acc_criteria=accuracy, start_time=args.start_date, end_time=args.end_date, resource="backtest")
+    chunk_size = 20
+    tasks = [(code, input_length, hold_cycles, accuracy, args.start_date, args.end_date, "backtest") for code in code_list_backtrader]
+    tasks_chunks = [tasks[i:i + chunk_size] for i in range(0, len(tasks), chunk_size)]  
+    for tasks_chunk in tasks_chunks:
+        with multiprocessing.Pool(chunk_size) as pool:
+            pool.starmap(process_stock_data_backtest, tasks_chunk)
