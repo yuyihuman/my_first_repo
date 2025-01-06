@@ -473,7 +473,7 @@ def process_stock_data_backtest(code, seq_length, judge_length, val_acc_criteria
                 output = torch.sigmoid(output)
             if seq_length + i < len(data_post):
                 data_post.iloc[seq_length + i, data_post.columns.get_loc('buy_origin')] = round(output.item(), 4)
-                prediction = 1 if output.item() >= 0.5 else 0
+                prediction = 1 if output.item() >= 0.9 else 0
                 data_post.iloc[seq_length + i, data_post.columns.get_loc('buy')] = prediction
         
         logging.info(f"Prediction completed for {code}")
@@ -639,6 +639,7 @@ if __name__=="__main__":
     sys.stderr = sys.stdout
 
     parser = argparse.ArgumentParser(description="超参数传参")
+    parser.add_argument('mode', type=str, help="选择模式：train 或 debug")
     parser.add_argument('-sl', '--seq_length', type=int, default=480, help="指定输入序列的长度")
     parser.add_argument('-jl', '--judge_length', type=int, default=480, help="指定输出序列的长度")
     parser.add_argument('-e', '--epoch', type=int, default=1001, help="训练次数")
@@ -649,20 +650,27 @@ if __name__=="__main__":
     parser.add_argument('-clb', '--code_list_backtrader', type=str, default=[], help="回测代码列表")
     args = parser.parse_args()
     # 将逗号分隔的字符串解析为列表
+    print(f"Mode: {args.mode}")
     code_list = args.code_list.split(",") if args.code_list else []
     logging.info(code_list)
     code_list_backtrader = args.code_list_backtrader.split(",") if args.code_list_backtrader else []
     logging.info(code_list_backtrader)
 
-    try:
-        seq_length = args.seq_length
-        judge_length = args.judge_length
-        val_acc_criteria = args.val_acc_criteria
-        logging.info(f'seq_length is {seq_length} judge_length is {judge_length}')
-        train_loader, val_loader = train_data(seq_length=seq_length, judge_length=judge_length, start_time=args.start_date, end_time=args.end_date)
-        train_model_single(train_loader=train_loader, val_loader=val_loader, seq_length=seq_length)
-        # process_stock_data_backtest(code='000410.SZ', seq_length=seq_length, judge_length=judge_length, val_acc_criteria=val_acc_criteria, start_time=args.start_date, end_time=args.end_date)
-    except Exception as e:
-        logging.info("*******************")
-        logging.info(e)
-        logging.info("*******************")
+    if args.mode == "train":
+        try:
+            seq_length = args.seq_length
+            judge_length = args.judge_length
+            val_acc_criteria = args.val_acc_criteria
+            logging.info(f'seq_length is {seq_length} judge_length is {judge_length}')
+            train_loader, val_loader = train_data(seq_length=seq_length, judge_length=judge_length, start_time=args.start_date, end_time=args.end_date)
+            train_model_single(train_loader=train_loader, val_loader=val_loader, seq_length=seq_length)
+        except Exception as e:
+            logging.info("*******************")
+            logging.info(e)
+            logging.info("*******************")
+    elif args.mode == "debug":
+            seq_length = args.seq_length
+            judge_length = args.judge_length
+            val_acc_criteria = args.val_acc_criteria
+            logging.info(f'seq_length is {seq_length} judge_length is {judge_length}')
+            train_loader, val_loader = train_data(seq_length=seq_length, judge_length=judge_length, start_time=args.start_date, end_time=args.end_date)

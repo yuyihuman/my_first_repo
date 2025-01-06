@@ -62,7 +62,7 @@ code_list = [
     code for code in code_list
     if pd.to_datetime(read_single_stock_outstanding_share(code=convert_stock_code(code)).loc[0, 'date']) <= pd.to_datetime('2010-01-01')
 ]
-code_list = random.sample(code_list, 10)
+code_list = random.sample(code_list, 20)
 code_list_str = ",".join(map(str, code_list))
 logging.info(f'code_list_str is {code_list_str}')
 
@@ -85,8 +85,8 @@ def frange(start, stop, step):
         start += step
 
 # 循环参数范围
-val_acc_criteria_range = [round(x, 2) for x in list(frange(0.9, 0.95, 0.05))]
-seq_length_range = range(24, 96+1, 24)
+val_acc_criteria_range = [round(x, 2) for x in list(frange(0.85, 0.90+0.01, 0.05))]
+seq_length_range = range(24, 720+1, 144)
 judge_length_range = range(48, 144+1, 48)
 logging.info("==============================================")
 # 下载数据
@@ -105,6 +105,7 @@ for val_acc_criteria in val_acc_criteria_range:
             # 构建model_train.py的命令
             train_command = [
                 "python", "model_train.py",
+                "train",
                 "--seq_length", str(seq_length),
                 "--judge_length", str(judge_length),
                 "--val_acc_criteria", str(val_acc_criteria),
