@@ -75,8 +75,10 @@ def normalize(column, code):
     return (2 * (column - min_val) / (max_val - min_val)) - 1
 
 def normalize_0_to_1(column):
-    min_val = column.min()
-    max_val = column.max()
+    # min_val = column.min()
+    # max_val = column.max()
+    min_val = 0
+    max_val = 0.8
     return (column - min_val) / (max_val - min_val)
 
 def get_model_para(model_name):

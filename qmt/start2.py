@@ -56,13 +56,13 @@ one_year_ago = end_date - timedelta(days=180)
 previous_year_date = one_year_ago.strftime("%Y%m%d")
 
 # 获取股票代码列表
-code_list = get_stock_list(lower_bound=140, upper_bound=180)
+code_list = get_stock_list(lower_bound=120, upper_bound=200)
 code_list = [code for code in code_list if code.startswith("0")]
 code_list = [
     code for code in code_list
     if pd.to_datetime(read_single_stock_outstanding_share(code=convert_stock_code(code)).loc[0, 'date']) <= pd.to_datetime('2010-01-01')
 ]
-code_list = random.sample(code_list, 20)
+code_list = random.sample(code_list, 30)
 code_list_str = ",".join(map(str, code_list))
 logging.info(f'code_list_str is {code_list_str}')
 
@@ -86,7 +86,7 @@ def frange(start, stop, step):
 
 # 循环参数范围
 val_acc_criteria_range = [round(x, 2) for x in list(frange(0.85, 0.90+0.01, 0.05))]
-seq_length_range = range(24, 720+1, 144)
+seq_length_range = range(24, 1440+1, 144)
 judge_length_range = range(48, 144+1, 48)
 logging.info("==============================================")
 # 下载数据
