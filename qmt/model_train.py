@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 plt.show = lambda: None
 import multiprocessing
 import shutil
+import traceback
 
 from xtquant import xtdata
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -234,18 +235,40 @@ def process_stock_data(code, seq_length, judge_length, start_time, end_time):
         learn_trunks_np = np.array(learn_trunks)
         target_np = rnn_target[seq_length:]  # Align target with input sequences
 
+        # Debugging output for the variables
+        logging.info(f"learn_trunks_np shape: {learn_trunks_np.shape}")
+        logging.info(f"target_np shape: {target_np.shape}")
+        
         positive_indices = np.where(target_np == 1)[0]
         negative_indices = np.where(target_np == 0)[0]
 
+        # Log information about indices and their types before proceeding
+        logging.info(f"positive_indices dtype: {positive_indices.dtype}")
+        logging.info(f"negative_indices dtype: {negative_indices.dtype}")
+        logging.info(f"positive_indices values: {positive_indices}")
+        logging.info(f"negative_indices values: {negative_indices}")
+
         logging.info(f"Positive samples: {len(positive_indices)}, Negative samples: {len(negative_indices)}")
+
+        # Check if there are any positive samples
+        if len(positive_indices) == 0:
+            logging.info(f"Skipping {code} due to no positive samples.")
+            return None  # Skip if no positive samples
 
         x = len(positive_indices)
         sampled_negative_indices = random.sample(list(negative_indices), min(1 * x, len(negative_indices)))
         selected_indices = np.concatenate([positive_indices, sampled_negative_indices])
-        np.random.shuffle(selected_indices)
+
+        # Log selected_indices dtype and values
+        logging.info(f"selected_indices dtype: {selected_indices.dtype}")
+        logging.info(f"selected_indices values: {selected_indices}")
 
         filtered_learn_trunks = learn_trunks_np[selected_indices]
         filtered_targets = target_np[selected_indices]
+
+        # Debugging output for filtered_learn_trunks and filtered_targets
+        logging.info(f"filtered_learn_trunks shape: {filtered_learn_trunks.shape}")
+        logging.info(f"filtered_targets shape: {filtered_targets.shape}")
 
         logging.info("Creating RNN dataset...")
         rnn_dataset = RnnDataset(torch.tensor(filtered_learn_trunks, dtype=torch.float32), 
@@ -253,10 +276,9 @@ def process_stock_data(code, seq_length, judge_length, start_time, end_time):
         logging.info(f"Dataset for {code} created successfully with {len(filtered_targets)} samples.")
         return rnn_dataset
 
-
 def train_data(seq_length, judge_length, start_time, end_time):
     all_datasets = []
-    chunk_size = 10
+    chunk_size = 20
     # Helper function to process a chunk of tasks
     def process_chunk(tasks_chunk):
         # Create a pool of workers for each chunk
@@ -664,12 +686,24 @@ if __name__=="__main__":
             judge_length = args.judge_length
             val_acc_criteria = args.val_acc_criteria
             logging.info(f'seq_length is {seq_length} judge_length is {judge_length}')
+            
+            # 记录开始和结束时间
+            logging.info(f"Training data from {args.start_date} to {args.end_date}")
+            
             train_loader, val_loader = train_data(seq_length=seq_length, judge_length=judge_length, start_time=args.start_date, end_time=args.end_date)
+            
+            logging.info("Training model...")
             train_model_single(train_loader=train_loader, val_loader=val_loader, seq_length=seq_length)
+            
         except Exception as e:
-            logging.info("*******************")
-            logging.info(e)
-            logging.info("*******************")
+            logging.error("*******************")
+            logging.error(f"Exception occurred: {str(e)}")
+            
+            # 使用 traceback 来记录详细的堆栈信息
+            logging.error("Stack trace:")
+            logging.error(traceback.format_exc())
+            
+            logging.error("*******************")
     elif args.mode == "debug":
             seq_length = args.seq_length
             judge_length = args.judge_length

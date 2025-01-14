@@ -62,7 +62,7 @@ code_list = [
     code for code in code_list
     if pd.to_datetime(read_single_stock_outstanding_share(code=convert_stock_code(code)).loc[0, 'date']) <= pd.to_datetime('2010-01-01')
 ]
-code_list = random.sample(code_list, 30)
+code_list = random.sample(code_list, 40)
 code_list_str = ",".join(map(str, code_list))
 logging.info(f'code_list_str is {code_list_str}')
 
