@@ -147,134 +147,149 @@ class RNNModel(nn.Module):
         return out.squeeze(-1)  # 输出形状: (batch_size,)
 
 def process_stock_data(code, seq_length, judge_length, start_time, end_time):
-    create_logger(f'{code}_train')
-    logging.info(f"Processing stock data for code: {code}, sequence length: {seq_length}, judge length: {judge_length}, time range: {start_time} to {end_time}")
+    try:
+        create_logger(f'{code}_train')
+        logging.info(f"Processing stock data for code: {code}, sequence length: {seq_length}, judge length: {judge_length}, time range: {start_time} to {end_time}")
 
-    # 获取数据的过程
-    logging.info("Fetching market data...")
-    kline_data = xtdata.get_market_data_ex([], [code], period="5m", start_time=start_time, end_time=end_time, dividend_type="front")
-    data = kline_data[code]
-    logging.info(f"Fetched {len(data)} rows of market data for code: {code}")
-
-    logging.info("Fetching outstanding share data...")
-    data_os = read_single_stock_outstanding_share(code=convert_stock_code(code))
-    logging.info(f"Outstanding share data contains {len(data_os)} rows.")
-
-    first_date = pd.to_datetime(data_os.loc[0, 'date'])
-    check_date = pd.to_datetime('2010-01-01')
-    logging.info(f"First outstanding share date: {first_date}, check date: {check_date}")
-
-    if first_date < check_date:
-        logging.info("Processing data with outstanding share adjustments...")
-        data_post = add_outstanding_share_column(data, data_os)
-        data_post['close'] = data_post['preClose']
-        data_post['open'] = data_post['preClose']
-        data_post['turnover'] = data_post['volume'] * 100 / data_post['outstanding_share']
-        data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
-        data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
-        data_post['turnover_normalized'] = normalize_0_to_1(data_post['turnover'])
-        data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'], code=code)
-        data_post['buy'] = 0
-
-        float_columns = data_post.select_dtypes(include=['float']).columns
-        data_post[float_columns] = data_post[float_columns].round(4)
-        logging.info(f"Data processed: columns normalized and rounded for {code}")
-
-        turnover_normalized = data_post['turnover_normalized']
-        change_percentage = data_post['change_percentage']
-        change_percentage_normalized = data_post['change_percentage_normalized']
-        rnn_input = np.column_stack((turnover_normalized, change_percentage_normalized))
-        rnn_target = np.zeros(len(change_percentage) - judge_length, dtype=int)
-        positive_counter = 0
-
-        logging.info("Evaluating buy signals...")
-        for n in range(len(change_percentage) - judge_length):
-            if evaluate_signal_at_n(column=change_percentage, n=n, judge_length=judge_length):
-                rnn_target[n] = 1
-                data_post.iloc[n, data_post.columns.get_loc('buy')] = 1
-                positive_counter += 1
-
-        logging.info(f"Positive samples count: {positive_counter}")
-        if positive_counter == 0:
-            logging.info(f"Skipping {code} due to no positive samples.")
-            return None  # Skip if no positive samples
-
-        file_path = f'data/{code}_{judge_length}_truth.csv'
-        if not os.path.exists(file_path):
-            logging.info(f"Saving processed data to {file_path}...")
-            kline_data[code].index = pd.to_datetime(kline_data[code].index, format='%Y%m%d%H%M%S')
-            kline_data[code].rename(columns={
-                'open': 'open',
-                'high': 'high',
-                'low': 'low',
-                'close': 'close',
-                'volume': 'volume'
-            }, inplace=True)
-            kline_data[code].to_csv(file_path, index=True)
-
-            logging.info(f"Running backtest for {code}...")
-            datafeed = bt.feeds.PandasData(dataname=kline_data[code])
-            cerebro = bt.Cerebro()
-            cerebro.addstrategy(TestStrategy, code=code, kline_data=kline_data, hold_cycles=judge_length)
-            cerebro.adddata(datafeed)
-            cerebro.broker.setcash(100000.0)
-            logging.info(f"Starting Portfolio Value: {cerebro.broker.getvalue():.2f}")
-            cerebro.run()
-            logging.info(f"{code} Truth Final Portfolio Value: {cerebro.broker.getvalue():.2f}")
-            
-            logging.info("Saving backtest plot...")
-            fig = cerebro.plot(show=False)[0][0]
-            fig.set_size_inches(30, 5)
-            fig.savefig(f'data/{code}_{judge_length}_truth.png', dpi=300)
-            logging.info(f"Backtest and plot for {code} completed successfully.")
-
-        rnn_input = rnn_input[:-judge_length]
-
-        logging.info("Constructing learning trunks...")
-        learn_trunks = [rnn_input[i:i+seq_length] for i in range(len(rnn_input) - seq_length)]
-        learn_trunks_np = np.array(learn_trunks)
-        target_np = rnn_target[seq_length:]  # Align target with input sequences
-
-        # Debugging output for the variables
-        logging.info(f"learn_trunks_np shape: {learn_trunks_np.shape}")
-        logging.info(f"target_np shape: {target_np.shape}")
+        # 获取数据的过程
+        logging.info("Fetching market data...")
+        kline_data = xtdata.get_market_data_ex([], [code], period="5m", start_time=start_time, end_time=end_time, dividend_type="front")
+        data = kline_data.get(code, pd.DataFrame())
         
-        positive_indices = np.where(target_np == 1)[0]
-        negative_indices = np.where(target_np == 0)[0]
+        if data.empty:
+            logging.warning(f"No market data found for code: {code}. Skipping processing.")
+            return None
 
-        # Log information about indices and their types before proceeding
-        logging.info(f"positive_indices dtype: {positive_indices.dtype}")
-        logging.info(f"negative_indices dtype: {negative_indices.dtype}")
-        logging.info(f"positive_indices values: {positive_indices}")
-        logging.info(f"negative_indices values: {negative_indices}")
+        logging.info(f"Fetched {len(data)} rows of market data for code: {code}")
 
-        logging.info(f"Positive samples: {len(positive_indices)}, Negative samples: {len(negative_indices)}")
+        logging.info("Fetching outstanding share data...")
+        data_os = read_single_stock_outstanding_share(code=convert_stock_code(code))
 
-        # Check if there are any positive samples
-        if len(positive_indices) == 0:
-            logging.info(f"Skipping {code} due to no positive samples.")
-            return None  # Skip if no positive samples
+        if data_os.empty:
+            logging.warning(f"No outstanding share data found for code: {code}. Skipping processing.")
+            return None
 
-        x = len(positive_indices)
-        sampled_negative_indices = random.sample(list(negative_indices), min(1 * x, len(negative_indices)))
-        selected_indices = np.concatenate([positive_indices, sampled_negative_indices])
+        logging.info(f"Outstanding share data contains {len(data_os)} rows.")
 
-        # Log selected_indices dtype and values
-        logging.info(f"selected_indices dtype: {selected_indices.dtype}")
-        logging.info(f"selected_indices values: {selected_indices}")
+        first_date = pd.to_datetime(data_os.loc[0, 'date'])
+        check_date = pd.to_datetime('2010-01-01')
+        logging.info(f"First outstanding share date: {first_date}, check date: {check_date}")
 
-        filtered_learn_trunks = learn_trunks_np[selected_indices]
-        filtered_targets = target_np[selected_indices]
+        if first_date < check_date:
+            logging.info("Processing data with outstanding share adjustments...")
+            try:
+                data_post = add_outstanding_share_column(data, data_os)
+                data_post['close'] = data_post['preClose']
+                data_post['open'] = data_post['preClose']
+                data_post['turnover'] = data_post['volume'] * 100 / data_post['outstanding_share']
+                data_post['change_percentage'] = data_post['close'].diff() / data_post['close'].shift(1)
+                data_post['change_percentage'] = data_post['change_percentage'].fillna(0)
+                data_post['turnover_normalized'] = normalize_0_to_1(data_post['turnover'])
+                data_post['change_percentage_normalized'] = normalize(data_post['change_percentage'], code=code)
+                data_post['buy'] = 0
+            except Exception as e:
+                logging.error(f"Error processing data for code {code}: {e}")
+                return None
 
-        # Debugging output for filtered_learn_trunks and filtered_targets
-        logging.info(f"filtered_learn_trunks shape: {filtered_learn_trunks.shape}")
-        logging.info(f"filtered_targets shape: {filtered_targets.shape}")
+            float_columns = data_post.select_dtypes(include=['float']).columns
+            data_post[float_columns] = data_post[float_columns].round(4)
+            logging.info(f"Data processed: columns normalized and rounded for {code}")
 
-        logging.info("Creating RNN dataset...")
-        rnn_dataset = RnnDataset(torch.tensor(filtered_learn_trunks, dtype=torch.float32), 
-                                 torch.tensor(filtered_targets, dtype=torch.long))
-        logging.info(f"Dataset for {code} created successfully with {len(filtered_targets)} samples.")
-        return rnn_dataset
+            turnover_normalized = data_post['turnover_normalized']
+            change_percentage = data_post['change_percentage']
+
+            if len(change_percentage) <= judge_length:
+                logging.warning(f"Insufficient data for processing: len(change_percentage)={len(change_percentage)}, judge_length={judge_length}")
+                return None
+
+            change_percentage_normalized = data_post['change_percentage_normalized']
+            rnn_input = np.column_stack((turnover_normalized, change_percentage_normalized))
+            rnn_target = np.zeros(len(change_percentage) - judge_length, dtype=int)
+            positive_counter = 0
+
+            logging.info("Evaluating buy signals...")
+            for n in range(len(change_percentage) - judge_length):
+                try:
+                    if evaluate_signal_at_n(column=change_percentage, n=n, judge_length=judge_length):
+                        rnn_target[n] = 1
+                        data_post.iloc[n, data_post.columns.get_loc('buy')] = 1
+                        positive_counter += 1
+                except Exception as e:
+                    logging.error(f"Error evaluating signal at index {n} for code {code}: {e}")
+
+            logging.info(f"Positive samples count: {positive_counter}")
+            if positive_counter == 0:
+                logging.info(f"Skipping {code} due to no positive samples.")
+                return None
+
+            file_path = f'data/{code}_{judge_length}_truth.csv'
+            if not os.path.exists(file_path):
+                try:
+                    logging.info(f"Saving processed data to {file_path}...")
+                    kline_data[code].index = pd.to_datetime(kline_data[code].index, format='%Y%m%d%H%M%S')
+                    kline_data[code].rename(columns={
+                        'open': 'open',
+                        'high': 'high',
+                        'low': 'low',
+                        'close': 'close',
+                        'volume': 'volume'
+                    }, inplace=True)
+                    kline_data[code].to_csv(file_path, index=True)
+
+                    logging.info(f"Running backtest for {code}...")
+                    datafeed = bt.feeds.PandasData(dataname=kline_data[code])
+                    cerebro = bt.Cerebro()
+                    cerebro.addstrategy(TestStrategy, code=code, kline_data=kline_data, hold_cycles=judge_length)
+                    cerebro.adddata(datafeed)
+                    cerebro.broker.setcash(100000.0)
+                    logging.info(f"Starting Portfolio Value: {cerebro.broker.getvalue():.2f}")
+                    cerebro.run()
+                    logging.info(f"{code} Truth Final Portfolio Value: {cerebro.broker.getvalue():.2f}")
+
+                    logging.info("Saving backtest plot...")
+                    fig = cerebro.plot(show=False)[0][0]
+                    fig.set_size_inches(30, 5)
+                    fig.savefig(f'data/{code}_{judge_length}_truth.png', dpi=300)
+                    logging.info(f"Backtest and plot for {code} completed successfully.")
+                except Exception as e:
+                    logging.error(f"Error during backtest or saving for code {code}: {e}")
+
+            rnn_input = rnn_input[:-judge_length]
+
+            logging.info("Constructing learning trunks...")
+            learn_trunks = [rnn_input[i:i+seq_length] for i in range(len(rnn_input) - seq_length)]
+            learn_trunks_np = np.array(learn_trunks)
+            target_np = rnn_target[seq_length:]  # Align target with input sequences
+
+            logging.info(f"learn_trunks_np shape: {learn_trunks_np.shape}")
+            logging.info(f"target_np shape: {target_np.shape}")
+
+            positive_indices = np.where(target_np == 1)[0]
+            negative_indices = np.where(target_np == 0)[0]
+
+            if len(positive_indices) == 0:
+                logging.info(f"Skipping {code} due to no positive samples.")
+                return None
+
+            x = len(positive_indices)
+            sampled_negative_indices = random.sample(list(negative_indices), min(1 * x, len(negative_indices)))
+            selected_indices = np.concatenate([positive_indices, sampled_negative_indices])
+
+            filtered_learn_trunks = learn_trunks_np[selected_indices]
+            filtered_targets = target_np[selected_indices]
+
+            logging.info(f"filtered_learn_trunks shape: {filtered_learn_trunks.shape}")
+            logging.info(f"filtered_targets shape: {filtered_targets.shape}")
+
+            logging.info("Creating RNN dataset...")
+            rnn_dataset = RnnDataset(torch.tensor(filtered_learn_trunks, dtype=torch.float32), 
+                                     torch.tensor(filtered_targets, dtype=torch.long))
+            logging.info(f"Dataset for {code} created successfully with {len(filtered_targets)} samples.")
+            return rnn_dataset
+
+    except Exception as e:
+        logging.error(f"Unexpected error processing stock data for code {code}: {e}")
+        return None
 
 def train_data(seq_length, judge_length, start_time, end_time):
     all_datasets = []

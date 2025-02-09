@@ -86,8 +86,8 @@ def frange(start, stop, step):
 
 # 循环参数范围
 val_acc_criteria_range = [round(x, 2) for x in list(frange(0.85, 0.90+0.01, 0.05))]
-seq_length_range = range(24, 1440+1, 144)
-judge_length_range = range(48, 144+1, 48)
+seq_length_range = range(24, 200+1, 144)
+judge_length_range = range(48, 100+1, 48)
 logging.info("==============================================")
 # 下载数据
 if args.download == "True":
