@@ -7,7 +7,7 @@ url = "http://localhost:11434/api/generate"
 # 请求数据
 data = {
     "model": "deepseek-r1:7b",  # 使用的模型名称
-    "prompt": "务必用中文回复：我现在希望你帮我写一个小学三年级的作文，关于香港旅游的",  # 你的输入提示
+    "prompt": "我现在希望你用中文帮我写一个小学三年级的作文，关于香港旅游的",  # 你的输入提示
     "stream": True,  # 是否流式输出（False 表示一次性返回完整结果）
     "max_tokens": 500  # 生成的最大 token 数量
 }
