@@ -11,7 +11,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.append(project_root)
 # 现在可以正常导入 ollama 下的模块
-from ollama.ollama_util import story_writer
+from ollama.ollama_util import story_writer,translator
 from util import *
 
 clean_txt_files()
@@ -45,7 +45,7 @@ params = {
     "sortBy": "publishedAt",
     "language": "en",
     "apiKey": api_key,
-    "pageSize": 5
+    "pageSize": 3
 }
 
 # 配置代理
@@ -79,12 +79,13 @@ try:
                 full_content = news_article.text
                 print(f"   全文: {full_content}\n")
                 article['full_content'] = full_content  # 将全文内容添加到文章数据中
-                material = f'[故事]{full_content}[/故事]\n\n'
+                material = f'{full_content}\n'
                 material_full += material
                 # 将 material 写入 TXT 文件
-                with open("material.txt", 'w', encoding='utf-8') as txt_file:
-                    txt_file.write(material)
-                story_writer(material=material,title=article['title'])
+                # with open("material.txt", 'w', encoding='utf-8') as txt_file:
+                #     txt_file.write(material)
+                output = story_writer(material=material,title=article['title'])
+                translator(material=output,title=article['title'])
             except Exception as e:
                 print(f"   无法获取全文内容: {e}")
                 article['full_content'] = "无法获取全文内容"
