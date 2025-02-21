@@ -163,7 +163,7 @@ def article_motifier(model="70b_3", material="", title="default"):
         print("请求失败，状态码:", response.status_code)
         print("响应内容:", response.text)
 
-def chapter_writer(model="70b_3", material="", wordage=2500, title="第1章", style="年轻人", first_point=5, second_point=140, last_point=150, key_info="主角名称"):
+def chapter_writer(model="70b_3", plot="", outline="", character_document="", wordage=2500, title="第1章", first_point=5, second_point=140, last_point=150):
     # 根据参数选择配置
     config = MODEL_CONFIG[model]
     url = config["url"]
@@ -178,20 +178,22 @@ def chapter_writer(model="70b_3", material="", wordage=2500, title="第1章", st
     title = title.replace('>', '-')  # 将 > 替换为 -
 
     # 请求数据
-    prompt1=str(f'{material}\n')
-    prompt2=str(f'你现在是一个长篇小说作家，请你仔细思考上面的小说大纲和前情介绍，要求：\n'
-                f'1、使用中文完成{title}，不要使用任何英文单词\n'
-                f'2、这个章节的字数要在{wordage}字左右，构思好足够的情节推进，防止内容不够无法达到字数要求\n'
-                f'3、这个小说是写给{style}，请注意语言风格\n'
-                f'4、根据本章节中推动故事发展的核心要素给这个章节起个名字\n'
-                f'5、不要和其他章节重名，也不要一直使用类似的命名方式\n'
-                f'6、第1章到第{first_point}章是小说世界的构建，第{first_point+1}章到第{second_point}章是主要剧情，第{second_point+1}章到第{last_point}章是小说的结局\n'
-                f'7、注意故事的主角是{key_info}，请围绕主角推动剧情\n'
-                f'8、输出文章的格式如下\n'
-                f'###标题###\n'
-                f'段落1\n'
-                f'段落2\n')
-    prompt=prompt1+prompt2
+    prompt=str(f'你现在是一个长篇小说作家，你需要完成新的篇章，要求：\n'
+               f'1、使用中文完成{title}，不要使用任何英文单词\n'
+               f'2、篇章正文要在{wordage}字左右，构思好足够的情节推进，防止内容不够无法达到字数要求\n'
+               f'3、这个小说的大纲如下\n'
+               f'{outline}\n'
+               f'4、这个小说的人物档案如下\n'
+               f'{character_document}\n'
+               f'5、这个小说之前的情节如下\n'
+               f'{plot}\n'
+               f'6、根据本章节中推动故事发展的核心要素给这个章节起个名字\n'
+               f'7、请关注之前的情节，本章节名不要和之前的章节重名\n'
+               f'8、小说的第1章到第{first_point}章是世界的构建，第{first_point+1}章到第{second_point}章是主要剧情，第{second_point+1}章到第{last_point}章是小说的结尾\n'
+               f'9、请围绕人物档案中的主要人物推动剧情\n'
+               f'8、输出文章的格式如下\n'
+               f'###第一章 标题###\n'
+               f'###篇章正文###\n')
     # 按行分割字符串
     lines = prompt.splitlines()
     # 取最后 100 行
@@ -251,14 +253,15 @@ def Outline_Generator(model="70b_3", material="", title="default"):
     prompt2=str(f'你现在是一个长篇小说作家，请你根据上面这段文字的要求，构思一个相应风格长篇小说的大纲，要求：\n'
                 f'1、首先介绍整个小说的故事背景，核心设定和整体剧情，这部分尽量详细一些\n'
                 f'2、构建一个人物档案，至少首先拟定10名主要人物，格式如下\n'
-                f'$$1. 人物名称$$\n'
-                f'- **年龄**：\n'
-                f'- **性格**：\n'
-                f'- **背景**：\n'
-                f'- **关系**：\n'
+                f'  $$1. 人物名称$$\n'
+                f'  - **年龄**：\n'
+                f'  - **性格**：\n'
+                f'  - **背景**：\n'
+                f'  - **关系**：\n'
                 f'3、最后给这个小说起一个吸引人的标题\n'
                 f'4、输出文章的格式如下\n'
                 f'###文章标题###\n'
+                f'  &&你起的标题&&\n'
                 f'###故事背景###\n'
                 f'###核心设定###\n'
                 f'###整体剧情###\n'
