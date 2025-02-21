@@ -15,7 +15,7 @@ from ollama.ollama_util import story_writer,translator
 from util import *
 
 clean_txt_files()
-
+model = "70b_3"
 # 设置命令行参数解析
 parser = argparse.ArgumentParser(description="传参")
 parser.add_argument("-k","--keyword", type=str, default="historical anecdotes")
@@ -84,8 +84,8 @@ try:
                 # 将 material 写入 TXT 文件
                 # with open("material.txt", 'w', encoding='utf-8') as txt_file:
                 #     txt_file.write(material)
-                output = story_writer(material=material,title=article['title'])
-                translator(material=output,title=article['title'])
+                output = story_writer(material=material,title=article['title'], model=model)
+                translator(material=output,title=article['title'], model=model)
             except Exception as e:
                 print(f"   无法获取全文内容: {e}")
                 article['full_content'] = "无法获取全文内容"
