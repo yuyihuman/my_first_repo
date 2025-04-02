@@ -1,0 +1,21 @@
+/* 个股信息页面专用样式 */
+.stock-search-container {
+    margin-bottom: 2rem;
+}
+
+.stock-info-card {
+    margin-bottom: 1.5rem;
+}
+
+.stock-chart-container {
+    height: 400px;
+    margin-bottom: 2rem;
+}
+
+.financial-data-table {
+    font-size: 0.9rem;
+}
+
+.financial-data-table th {
+    background-color: #f8f9fa;
+}
