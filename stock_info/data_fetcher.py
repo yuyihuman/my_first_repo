@@ -8,10 +8,14 @@ import time
 # 缓存文件路径
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache')
 LHB_CACHE_FILE = os.path.join(CACHE_DIR, 'lhb_top10_cache.json')
+# 添加股票财务数据缓存目录
+STOCK_FINANCE_CACHE_DIR = os.path.join(CACHE_DIR, 'stock_finance')
 
 # 确保缓存目录存在
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
+if not os.path.exists(STOCK_FINANCE_CACHE_DIR):
+    os.makedirs(STOCK_FINANCE_CACHE_DIR)
 
 def get_lhb_top10():
     """获取最近半年龙虎榜出现次数前10的股票，使用缓存机制"""
@@ -89,3 +93,220 @@ def _is_cache_expired(timestamp):
     """检查缓存是否已过期（超过24小时）"""
     # 24小时 = 86400秒
     return (time.time() - timestamp) > 86400
+
+def get_stock_financial_data(stock_code):
+    """获取股票财务数据，使用缓存机制"""
+    # 检查股票代码格式
+    if not stock_code.isdigit() or len(stock_code) != 6:
+        return {'error': '请输入正确的股票代码（6位数字）'}
+    
+    # 构建缓存文件路径
+    cache_file = os.path.join(STOCK_FINANCE_CACHE_DIR, f'{stock_code}_finance.json')
+    
+    # 检查缓存是否存在且有效
+    cache_data = _read_cache(cache_file)
+    if cache_data and not _is_cache_expired(cache_data.get('timestamp', 0)):
+        print(f"使用缓存的股票{stock_code}财务数据")
+        return cache_data.get('data')
+    
+    # 缓存不存在或已过期，重新获取数据
+    print(f"重新获取股票{stock_code}财务数据")
+    data = _fetch_stock_financial_data(stock_code)
+    
+    # 保存到缓存
+    _save_cache(cache_file, data)
+    
+    return data
+
+def _convert_to_float(value_str):
+    """将字符串格式的财务数据转换为浮点数"""
+    if pd.isna(value_str) or value_str == 'False' or value_str == '--' or value_str == '':
+        return 0.0
+    
+    if isinstance(value_str, (int, float)):
+        return float(value_str)
+    
+    # 确保value_str是字符串类型
+    value_str = str(value_str).strip()
+    
+    # 处理带单位的数字，如"123.45亿"、"5.77万"或"5.77万亿"
+    if '万亿' in value_str:
+        try:
+            return float(value_str.replace('万亿', '')) * 1000000000000  # 万亿 = 10^12
+        except ValueError:
+            print(f"无法转换值: {value_str}")
+            return 0.0
+    elif '亿' in value_str:
+        try:
+            return float(value_str.replace('亿', '')) * 100000000  # 亿 = 10^8
+        except ValueError:
+            print(f"无法转换值: {value_str}")
+            return 0.0
+    elif '万' in value_str:
+        try:
+            return float(value_str.replace('万', '')) * 10000  # 万 = 10^4
+        except ValueError:
+            print(f"无法转换值: {value_str}")
+            return 0.0
+    
+    try:
+        return float(value_str)
+    except ValueError:
+        print(f"无法转换值: {value_str}")
+        return 0.0
+
+def _fetch_stock_financial_data(stock_code):
+    """从API获取股票财务数据"""
+    try:
+        # 获取资产负债表数据
+        debt_df = ak.stock_financial_debt_ths(symbol=stock_code, indicator="按年度")  # 改为按年度
+        
+        # 获取利润表数据
+        benefit_df = ak.stock_financial_benefit_ths(symbol=stock_code, indicator="按年度")  # 改为按年度
+        
+        # 确保报告期列是字符串类型
+        debt_df['报告期'] = debt_df['报告期'].astype(str)
+        benefit_df['报告期'] = benefit_df['报告期'].astype(str)
+        
+        # 处理资产负债表数据，计算负债率
+        debt_df = debt_df[['报告期', '*资产合计', '*负债合计']]
+        debt_df['负债率'] = debt_df.apply(
+            lambda x: _convert_to_float(x['*负债合计']) / _convert_to_float(x['*资产合计']) * 100 
+            if _convert_to_float(x['*资产合计']) != 0 else 0, 
+            axis=1
+        )
+        debt_df = debt_df[['报告期', '负债率']]
+        
+        # 处理利润表数据，计算净利率和毛利率
+        # 检查必要的列是否存在
+        required_columns = ['报告期', '*净利润', '*营业总收入']
+        if not all(col in benefit_df.columns for col in required_columns):
+            print(f"利润表缺少必要的列: {[col for col in required_columns if col not in benefit_df.columns]}")
+            # 只计算存在的列
+            benefit_df = benefit_df[['报告期', '*净利润', '*营业总收入']]
+            benefit_df['净利率'] = benefit_df.apply(
+                lambda x: _convert_to_float(x['*净利润']) / _convert_to_float(x['*营业总收入']) * 100 
+                if _convert_to_float(x['*营业总收入']) != 0 else 0, 
+                axis=1
+            )
+            # 由于缺少营业成本，无法计算毛利率
+            benefit_df['毛利率'] = None
+        else:
+            # 检查是否有营业成本列
+            if '其中：营业成本' in benefit_df.columns:
+                benefit_df = benefit_df[['报告期', '*净利润', '*营业总收入', '其中：营业成本']]
+                benefit_df['净利率'] = benefit_df.apply(
+                    lambda x: _convert_to_float(x['*净利润']) / _convert_to_float(x['*营业总收入']) * 100 
+                    if _convert_to_float(x['*营业总收入']) != 0 else 0, 
+                    axis=1
+                )
+                benefit_df['毛利率'] = benefit_df.apply(
+                    lambda x: ((_convert_to_float(x['*营业总收入']) - _convert_to_float(x['其中：营业成本'])) 
+                            / _convert_to_float(x['*营业总收入'])) * 100 
+                    if _convert_to_float(x['*营业总收入']) != 0 else 0, 
+                    axis=1
+                )
+            else:
+                print("缺少'其中：营业成本'列，无法计算毛利率")
+                benefit_df = benefit_df[['报告期', '*净利润', '*营业总收入']]
+                benefit_df['净利率'] = benefit_df.apply(
+                    lambda x: _convert_to_float(x['*净利润']) / _convert_to_float(x['*营业总收入']) * 100 
+                    if _convert_to_float(x['*营业总收入']) != 0 else 0, 
+                    axis=1
+                )
+                benefit_df['毛利率'] = None
+        
+        benefit_df = benefit_df[['报告期', '净利率', '毛利率']]
+        
+        # 合并数据
+        try:
+            merged_df = pd.merge(debt_df, benefit_df, on='报告期', how='outer')
+        except Exception as e:
+            print(f"合并数据出错: {e}")
+            # 尝试使用concat方法合并
+            print("尝试使用concat方法合并数据...")
+            debt_df.set_index('报告期', inplace=True)
+            benefit_df.set_index('报告期', inplace=True)
+            merged_df = pd.concat([debt_df, benefit_df], axis=1)
+            merged_df.reset_index(inplace=True)
+        
+        # 按报告期排序并获取最近10个年度的数据
+        merged_df = merged_df.sort_values('报告期', ascending=False).head(10)
+        
+        # 转换为字典列表
+        result = []
+        for _, row in merged_df.iterrows():
+            result.append({
+                '报告期': row['报告期'],
+                '负债率': round(row['负债率'], 2) if not pd.isna(row['负债率']) else None,
+                '净利率': round(row['净利率'], 2) if not pd.isna(row['净利率']) else None,
+                '毛利率': round(row['毛利率'], 2) if not pd.isna(row['毛利率']) else None
+            })
+        
+        # 获取股票名称
+        stock_name = _get_stock_name(stock_code)
+        
+        return {
+            'code': stock_code,
+            'name': stock_name,
+            'financial_data': result
+        }
+    except Exception as e:
+        print(f"获取股票{stock_code}财务数据出错: {e}")
+        # 返回空数据
+        return {
+            'code': stock_code,
+            'name': "获取失败",
+            'financial_data': []
+        }
+
+def _get_stock_name(stock_code):
+    """获取股票名称的函数，尝试多种方法"""
+    try:
+        # 方法1：使用stock_zh_a_spot_em接口获取当前A股行情数据
+        spot_df = ak.stock_zh_a_spot_em()
+        # 确保代码格式一致（有些接口返回的代码可能带有市场前缀）
+        stock_row = spot_df[spot_df['代码'] == stock_code]
+        if not stock_row.empty:
+            return stock_row.iloc[0]['名称']
+    except Exception as e:
+        print(f"方法1获取股票名称失败: {e}")
+    
+    try:
+        # 方法2：使用stock_lhb_detail_em接口获取龙虎榜数据
+        # 使用最近一个月的数据
+        from datetime import datetime, timedelta
+        end_date = datetime.now().strftime('%Y%m%d')
+        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y%m%d')
+        lhb_df = ak.stock_lhb_detail_em(start_date=start_date, end_date=end_date)
+        stock_row = lhb_df[lhb_df['代码'] == stock_code]
+        if not stock_row.empty:
+            return stock_row.iloc[0]['名称']
+    except Exception as e:
+        print(f"方法2获取股票名称失败: {e}")
+    
+    try:
+        # 方法3：使用stock_zh_a_hist接口获取历史行情数据
+        # 只获取最近一天的数据
+        today = datetime.now().strftime('%Y%m%d')
+        one_month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y%m%d')
+        hist_df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", 
+                                    start_date=one_month_ago, end_date=today, adjust="")
+        if not hist_df.empty and '名称' in hist_df.columns:
+            return hist_df.iloc[0]['名称']
+        # 如果没有名称列，但有股票代码列，可以尝试从其他列获取信息
+        elif not hist_df.empty:
+            # 尝试从其他接口获取名称
+            try:
+                # 使用stock_individual_info_em接口
+                stock_info = ak.stock_individual_info_em(symbol=stock_code)
+                if not stock_info.empty:
+                    # 股票名称通常在第二列
+                    return stock_info.iloc[0, 1]
+            except:
+                pass
+    except Exception as e:
+        print(f"方法3获取股票名称失败: {e}")
+    
+    # 所有方法都失败，返回一个更友好的格式
+    return f"股票{stock_code}"

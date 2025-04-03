@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 import data_fetcher
 
 app = Flask(__name__)
@@ -19,6 +19,15 @@ def lhb():
 def lhb_data():
     # 获取龙虎榜数据
     data = data_fetcher.get_lhb_top10()
+    return jsonify(data)
+
+@app.route('/api/stock_finance')
+def stock_finance():
+    stock_code = request.args.get('code', '')
+    if not stock_code:
+        return jsonify({'error': '请提供股票代码'})
+    
+    data = data_fetcher.get_stock_financial_data(stock_code)
     return jsonify(data)
 
 if __name__ == '__main__':
