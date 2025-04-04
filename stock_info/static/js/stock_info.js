@@ -109,8 +109,9 @@ function displayStockInfo(data) {
                 <td>${item.负债率 !== null ? item.负债率.toFixed(2) : '-'}</td>
                 <td>${item.净利率 !== null ? item.净利率.toFixed(2) : '-'}</td>
                 <td>${item.毛利率 !== null ? item.毛利率.toFixed(2) : '-'}</td>
-                <td>${item.稀释每股收益 !== null ? item.稀释每股收益.toFixed(2) : '-'}</td>
+                <td>${item.稀释每股收益 !== null ? item.稀释每股收益.toFixed(2) + '元' : '-'}</td>
                 <td>${item.归属母公司净利润 !== null ? (item.归属母公司净利润 / 100000000).toFixed(2) + '亿' : '-'}</td>
+                <td>${item.实收资本 !== null ? (item.实收资本 / 100000000).toFixed(2) + '亿' : '-'}</td>
             `;
             financialData.appendChild(row);
         });
@@ -120,7 +121,7 @@ function displayStockInfo(data) {
     } else {
         // 无数据时显示提示
         const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="6" class="text-center">暂无财务数据</td>';
+        row.innerHTML = '<td colspan="7" class="text-center">暂无财务数据</td>';  // 修改colspan为7
         financialData.appendChild(row);
     }
     
