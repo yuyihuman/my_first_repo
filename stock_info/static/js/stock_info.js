@@ -19,6 +19,15 @@ document.addEventListener('DOMContentLoaded', function() {
             searchStock();
         }
     });
+
+    // 检查URL参数，如果有股票代码参数则自动查询
+    const urlParams = new URLSearchParams(window.location.search);
+    const codeParam = urlParams.get('code');
+    
+    if (codeParam) {
+        stockCodeInput.value = codeParam;
+        searchStock(); // 自动触发查询
+    }
 });
 
 // 搜索股票

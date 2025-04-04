@@ -14,8 +14,15 @@ document.addEventListener('DOMContentLoaded', function() {
             // 隐藏加载状态
             loading.style.display = 'none';
             
+            // 提取股票代码数组
+            const stockCodes = data.codes.map(item => {
+                // 从"股票名称(股票代码)"格式中提取股票代码
+                const match = item.match(/\((\d+)\)/);
+                return match ? match[1] : null;
+            });
+            
             // 创建图表
-            new Chart(lhbChart, {
+            const chart = new Chart(lhbChart, {
                 type: 'bar',
                 data: {
                     labels: data.codes,
@@ -66,6 +73,22 @@ document.addEventListener('DOMContentLoaded', function() {
                                 }
                             }
                         }
+                    },
+                    // 添加点击事件处理
+                    onClick: (event, elements) => {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            const stockCode = stockCodes[index];
+                            if (stockCode) {
+                                // 跳转到个股信息页面并传递股票代码
+                                window.location.href = `/stock_info?code=${stockCode}`;
+                            }
+                        }
+                    },
+                    // 添加鼠标样式，提示可点击
+                    onHover: (event, elements) => {
+                        const canvas = event.chart.canvas;
+                        canvas.style.cursor = elements.length > 0 ? 'pointer' : 'default';
                     }
                 }
             });
