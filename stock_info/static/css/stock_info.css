@@ -19,3 +19,15 @@
 .financial-data-table th {
     background-color: #f8f9fa;
 }
+
+/* 添加表格等宽列样式 */
+.table-equal-width {
+    table-layout: fixed;
+    width: 100%;
+}
+
+.table-equal-width th,
+.table-equal-width td {
+    width: 16.66%; /* 100% / 6列 = 16.66% */
+    text-align: center;
+}
