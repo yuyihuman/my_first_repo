@@ -19,15 +19,19 @@ document.addEventListener('DOMContentLoaded', function() {
             searchStock();
         }
     });
-
-    // 检查URL参数，如果有股票代码参数则自动查询
-    const urlParams = new URLSearchParams(window.location.search);
-    const codeParam = urlParams.get('code');
     
-    if (codeParam) {
-        stockCodeInput.value = codeParam;
-        searchStock(); // 自动触发查询
-    }
+    // 检查URL参数，如果有股票代码参数则自动查询
+    // 确保在DOM完全加载后执行
+    setTimeout(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const codeParam = urlParams.get('code');
+        
+        if (codeParam && codeParam.match(/^\d{6}$/)) {
+            stockCodeInput.value = codeParam;
+            // 直接调用搜索函数
+            searchStock();
+        }
+    }, 100); // 短暂延迟确保DOM已完全加载
 });
 
 // 搜索股票
