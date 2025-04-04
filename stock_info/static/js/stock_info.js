@@ -136,11 +136,19 @@ function createChart(data) {
         financialChart.destroy();
     }
     
+    // 对数据按照报告期进行排序（从早到晚）
+    const sortedData = [...data].sort((a, b) => {
+        // 将报告期转换为可比较的格式（假设报告期是年份或日期格式）
+        const periodA = a.报告期;
+        const periodB = b.报告期;
+        return periodA.localeCompare(periodB);
+    });
+    
     // 提取数据
-    const periods = data.map(item => item.报告期);
-    const debtRatios = data.map(item => item.负债率);
-    const netProfitRatios = data.map(item => item.净利率);
-    const grossProfitRatios = data.map(item => item.毛利率);
+    const periods = sortedData.map(item => item.报告期);
+    const debtRatios = sortedData.map(item => item.负债率);
+    const netProfitRatios = sortedData.map(item => item.净利率);
+    const grossProfitRatios = sortedData.map(item => item.毛利率);
     
     // 创建新图表
     financialChart = new Chart(ctx, {
