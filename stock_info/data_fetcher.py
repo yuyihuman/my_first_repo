@@ -173,14 +173,31 @@ def _fetch_stock_financial_data(stock_code):
         debt_df['报告期'] = debt_df['报告期'].astype(str)
         benefit_df['报告期'] = benefit_df['报告期'].astype(str)
         
-        # 处理资产负债表数据，计算负债率
-        debt_df = debt_df[['报告期', '*资产合计', '*负债合计']]
-        debt_df['负债率'] = debt_df.apply(
-            lambda x: _convert_to_float(x['*负债合计']) / _convert_to_float(x['*资产合计']) * 100 
-            if _convert_to_float(x['*资产合计']) != 0 else 0, 
-            axis=1
-        )
-        debt_df = debt_df[['报告期', '负债率']]
+        # 处理资产负债表数据，计算负债率，并提取实收资本
+        # 检查是否存在实收资本列
+        has_registered_capital = '实收资本（或股本）' in debt_df.columns
+        
+        if has_registered_capital:
+            debt_df = debt_df[['报告期', '*资产合计', '*负债合计', '实收资本（或股本）']]
+            debt_df['负债率'] = debt_df.apply(
+                lambda x: _convert_to_float(x['*负债合计']) / _convert_to_float(x['*资产合计']) * 100 
+                if _convert_to_float(x['*资产合计']) != 0 else 0, 
+                axis=1
+            )
+            debt_df['实收资本'] = debt_df.apply(
+                lambda x: _convert_to_float(x['实收资本（或股本）']), 
+                axis=1
+            )
+            debt_df = debt_df[['报告期', '负债率', '实收资本']]
+        else:
+            debt_df = debt_df[['报告期', '*资产合计', '*负债合计']]
+            debt_df['负债率'] = debt_df.apply(
+                lambda x: _convert_to_float(x['*负债合计']) / _convert_to_float(x['*资产合计']) * 100 
+                if _convert_to_float(x['*资产合计']) != 0 else 0, 
+                axis=1
+            )
+            debt_df['实收资本'] = None
+            debt_df = debt_df[['报告期', '负债率', '实收资本']]
         
         # 处理利润表数据，计算净利率、毛利率和提取稀释每股收益
         # 检查必要的列是否存在
@@ -309,7 +326,8 @@ def _fetch_stock_financial_data(stock_code):
                 '净利率': round(row['净利率'], 2) if not pd.isna(row['净利率']) else None,
                 '毛利率': round(row['毛利率'], 2) if not pd.isna(row['毛利率']) else None,
                 '稀释每股收益': round(row['稀释每股收益'], 4) if not pd.isna(row['稀释每股收益']) else None,
-                '归属母公司净利润': round(row['归属母公司净利润'], 2) if not pd.isna(row['归属母公司净利润']) else None
+                '归属母公司净利润': round(row['归属母公司净利润'], 2) if not pd.isna(row['归属母公司净利润']) else None,
+                '实收资本': round(row['实收资本'], 2) if not pd.isna(row['实收资本']) else None
             })
         
         # 获取股票名称
