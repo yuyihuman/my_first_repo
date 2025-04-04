@@ -5,6 +5,9 @@ import os
 # 创建应用实例
 app = Flask(__name__)
 
+# 确保缓存目录存在
+data_fetcher.ensure_cache_directories()
+
 # 设置静态文件缓存时间（1天）
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400
 
@@ -22,12 +25,16 @@ def lhb():
 
 @app.route('/api/lhb_data')
 def lhb_data():
+    # 确保缓存目录存在
+    data_fetcher.ensure_cache_directories()
     # 获取龙虎榜数据
     data = data_fetcher.get_lhb_top10()
     return jsonify(data)
 
 @app.route('/api/stock_finance')
 def stock_finance():
+    # 确保缓存目录存在
+    data_fetcher.ensure_cache_directories()
     stock_code = request.args.get('code', '')
     if not stock_code:
         return jsonify({'error': '请提供股票代码'})

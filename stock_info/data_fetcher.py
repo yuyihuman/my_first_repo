@@ -353,3 +353,16 @@ def _get_stock_name(stock_code):
     
     # 所有方法都失败，返回一个更友好的格式
     return f"股票{stock_code}"
+
+# 在文件开头的导入部分之后添加以下函数
+
+def ensure_cache_directories():
+    """确保所有缓存目录存在"""
+    directories = [
+        CACHE_DIR,
+        STOCK_FINANCE_CACHE_DIR
+    ]
+    for directory in directories:
+        if not os.path.exists(directory):
+            print(f"创建缓存目录: {directory}")
+            os.makedirs(directory)
