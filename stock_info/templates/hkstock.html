@@ -7,6 +7,35 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
     <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <!-- 添加Chart.js库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            margin: 20px 0;
+            height: 400px;
+        }
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+        .estimated-value {
+            border: 2px dashed #6c757d;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 20px;
+            background-color: #f8f9fa;
+        }
+    </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -32,23 +61,63 @@
     </nav>
 
     <div class="container mt-5">
-        <div class="jumbotron text-center">
-            <h1 class="display-4">港股通数据分析</h1>
-            <p class="lead">该功能正在建设中，目前仅支持数据获取测试</p>
+        <div class="jumbotron">
+            <h1 class="display-4 text-center">港股通数据分析</h1>
+            <p class="lead text-center">南向资金流向分析</p>
             <hr class="my-4">
-            <div class="mt-4">
-                <button id="fetchDataBtn" class="btn btn-primary btn-lg">获取港股通数据</button>
+            
+            <div id="updateInfo" class="alert alert-info text-center">
+                正在加载数据，请稍候...
             </div>
-            <div id="resultArea" class="mt-4">
-                <div id="loadingDiv" class="d-none">
+            
+            <!-- 累计净买入额折线图 -->
+            <div class="chart-container">
+                <div id="cumulativeChartLoading" class="loading-overlay">
                     <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
-                    <p>正在获取数据，请稍候...</p>
+                    <p class="mt-2">加载中...</p>
                 </div>
-                <div id="resultDiv" class="mt-3 text-start d-none">
-                    <h5>数据获取结果：</h5>
-                    <pre id="jsonResult" class="bg-light p-3" style="max-height: 500px; overflow: auto;"></pre>
+                <canvas id="cumulativeChart"></canvas>
+            </div>
+            
+            <!-- 月度净买入额柱状图 -->
+            <div class="chart-container">
+                <div id="monthlyChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="monthlyChart"></canvas>
+            </div>
+            
+            <!-- 领涨股统计 -->
+            <div class="card mt-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">领涨股统计 (出现频率最高的20只股票)</h5>
+                </div>
+                <div class="card-body">
+                    <div id="leadingStocksLoading" class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">加载中...</p>
+                    </div>
+                    <div id="leadingStocksTable" class="table-responsive" style="display: none;">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>排名</th>
+                                    <th>股票名称</th>
+                                    <th>股票代码</th>
+                                    <th>领涨次数</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leadingStocksBody">
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -60,18 +129,13 @@
         </div>
     </footer>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        document.getElementById('fetchDataBtn').addEventListener('click', function() {
-            const loadingDiv = document.getElementById('loadingDiv');
-            const resultDiv = document.getElementById('resultDiv');
-            const jsonResult = document.getElementById('jsonResult');
-            
-            // 显示加载中
-            loadingDiv.classList.remove('d-none');
-            resultDiv.classList.add('d-none');
-            
-            // 发起API请求
+        document.addEventListener('DOMContentLoaded', function() {
+            // 页面加载完成后立即获取数据
+            fetchHKStockData();
+        });
+        
+        function fetchHKStockData() {
             fetch('/api/hkstock')
                 .then(response => {
                     if (!response.ok) {
@@ -80,22 +144,300 @@
                     return response.json();
                 })
                 .then(data => {
-                    // 隐藏加载中
-                    loadingDiv.classList.add('d-none');
+                    // 更新数据更新时间
+                    document.getElementById('updateInfo').innerHTML = 
+                        `数据更新时间: ${data.update_time}`;
                     
-                    // 显示结果
-                    jsonResult.textContent = JSON.stringify(data, null, 2);
-                    resultDiv.classList.remove('d-none');
+                    // 处理数据并绘制图表
+                    renderCumulativeChart(data.daily_data);
+                    renderMonthlyChart(data.daily_data);
+                    renderLeadingStocks(data.top_leading_stocks);
                 })
                 .catch(error => {
-                    // 隐藏加载中
-                    loadingDiv.classList.add('d-none');
+                    console.error('获取数据失败:', error);
+                    document.getElementById('updateInfo').innerHTML = 
+                        `<div class="alert alert-danger">获取数据失败: ${error.message}</div>`;
                     
-                    // 显示错误信息
-                    jsonResult.textContent = '获取数据失败: ' + error.message;
-                    resultDiv.classList.remove('d-none');
+                    // 隐藏加载动画
+                    document.getElementById('cumulativeChartLoading').style.display = 'none';
+                    document.getElementById('monthlyChartLoading').style.display = 'none';
+                    document.getElementById('leadingStocksLoading').style.display = 'none';
                 });
-        });
+        }
+        
+        function renderCumulativeChart(dailyData) {
+            // 隐藏加载动画
+            document.getElementById('cumulativeChartLoading').style.display = 'none';
+            
+            // 准备数据
+            const dates = dailyData.map(item => item['日期']);
+            const cumulativeValues = dailyData.map(item => item['历史累计净买额'] * 10000); // 转换为亿元
+            
+            // 创建图表
+            const ctx = document.getElementById('cumulativeChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: '历史累计净买入额(亿元)',
+                        data: cumulativeValues,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '南向资金累计净买入额走势',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `累计净买入额: ${context.raw.toFixed(2)}亿元`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '日期'
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 20
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '累计净买入额(亿元)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function renderMonthlyChart(dailyData) {
+            // 隐藏加载动画
+            document.getElementById('monthlyChartLoading').style.display = 'none';
+            
+            // 按月份分组数据
+            const monthlyData = {};
+            const monthDays = {};
+            const currentDate = new Date();
+            const currentYear = currentDate.getFullYear();
+            const currentMonth = currentDate.getMonth() + 1;
+            
+            // 记录每个月的交易日
+            const tradingDaysPerMonth = {};
+            
+            dailyData.forEach(item => {
+                const date = new Date(item['日期']);
+                const year = date.getFullYear();
+                const month = date.getMonth() + 1;
+                const monthKey = `${year}-${month.toString().padStart(2, '0')}`;
+                
+                if (!monthlyData[monthKey]) {
+                    monthlyData[monthKey] = 0;
+                    monthDays[monthKey] = 0;
+                    tradingDaysPerMonth[monthKey] = new Set();
+                }
+                
+                monthlyData[monthKey] += item['当日成交净买额'];
+                monthDays[monthKey]++;
+                tradingDaysPerMonth[monthKey].add(item['日期']);
+            });
+            
+            // 准备图表数据
+            const months = Object.keys(monthlyData).sort();
+            const netBuyValues = months.map(month => monthlyData[month]);
+            
+            // 检查最新月份是否是当前月份，如果是则计算预估值
+            const latestMonth = months[months.length - 1];
+            const [latestYear, latestMonthNum] = latestMonth.split('-').map(Number);
+            
+            let estimatedValue = null;
+            let actualValue = null;
+            let isEstimated = false;
+            let estimatedTradingDays = 0;
+            
+            if (latestYear === currentYear && latestMonthNum === currentMonth) {
+                // 保存当前实际值
+                actualValue = monthlyData[latestMonth];
+                
+                // 计算当月已过交易日的平均每日净买入额
+                const avgDailyBuy = actualValue / monthDays[latestMonth];
+                
+                // 估算当月总交易日数
+                // 查找历史同月的平均交易日数据
+                let totalTradingDaysCount = 0;
+                let monthsWithSameMonthNum = 0;
+                
+                for (const month of months) {
+                    const [year, monthNum] = month.split('-').map(Number);
+                    if (monthNum === latestMonthNum && year !== latestYear) {
+                        totalTradingDaysCount += tradingDaysPerMonth[month].size;
+                        monthsWithSameMonthNum++;
+                    }
+                }
+                
+                // 如果有历史同月数据，使用平均值；否则使用一个默认值（如21天）
+                let avgTradingDaysInMonth = 21; // 默认值
+                if (monthsWithSameMonthNum > 0) {
+                    avgTradingDaysInMonth = Math.round(totalTradingDaysCount / monthsWithSameMonthNum);
+                }
+                
+                estimatedTradingDays = avgTradingDaysInMonth;
+                
+                // 计算预估值
+                estimatedValue = avgDailyBuy * estimatedTradingDays;
+                isEstimated = true;
+            }
+            
+            // 创建图表数据集
+            const datasets = [{
+                label: '月度净买入额(亿元)',
+                data: netBuyValues,
+                backgroundColor: netBuyValues.map(value => 
+                    value >= 0 ? 'rgba(75, 192, 192, 0.6)' : 'rgba(255, 99, 132, 0.6)'
+                ),
+                borderColor: netBuyValues.map(value => 
+                    value >= 0 ? 'rgb(75, 192, 192)' : 'rgb(255, 99, 132)'
+                ),
+                borderWidth: 1
+            }];
+            
+            // 如果有预估值，添加预估值数据集
+            if (isEstimated) {
+                // 创建一个新数组，只有最后一个月有预估值，其他月份为null
+                const estimatedData = months.map((month, index) => {
+                    return (index === months.length - 1) ? estimatedValue : null;
+                });
+                
+                datasets.push({
+                    label: '月度预估值(亿元)',
+                    data: estimatedData,
+                    backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                    borderColor: 'rgb(255, 159, 64)',
+                    borderWidth: 1,
+                    borderDash: [5, 5]
+                });
+            }
+            
+            // 创建图表
+            const ctx = document.getElementById('monthlyChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: months,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '南向资金月度净买入额',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const datasetIndex = context.datasetIndex;
+                                    const dataIndex = context.dataIndex;
+                                    
+                                    if (datasetIndex === 0) {
+                                        return `实际净买入额: ${context.raw.toFixed(2)}亿元`;
+                                    } else if (datasetIndex === 1 && dataIndex === months.length - 1) {
+                                        return `预估月底值: ${context.raw.toFixed(2)}亿元`;
+                                    }
+                                    return '';
+                                },
+                                afterLabel: function(context) {
+                                    const monthKey = months[context.dataIndex];
+                                    const isLast = context.dataIndex === months.length - 1;
+                                    
+                                    if (isLast && isEstimated && context.datasetIndex === 0) {
+                                        return `已有${monthDays[monthKey]}个交易日数据`;
+                                    } else if (isLast && isEstimated && context.datasetIndex === 1) {
+                                        return `基于已有数据估算月底值`;
+                                    } else if (context.datasetIndex === 0) {
+                                        return `共${monthDays[monthKey]}个交易日`;
+                                    }
+                                    return '';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '净买入额(亿元)'
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // 如果有预估值，添加说明
+            if (isEstimated) {
+                const chartContainer = document.getElementById('monthlyChart').parentNode;
+                const estimatedNote = document.createElement('div');
+                estimatedNote.className = 'estimated-value';
+                estimatedNote.innerHTML = `
+                    <strong>注意：</strong> ${latestMonth}月当前实际值为${actualValue.toFixed(2)}亿元（${monthDays[latestMonth]}个交易日），
+                    预估月底值为${estimatedValue.toFixed(2)}亿元，
+                    基于当月平均每日净买入额(${(actualValue/monthDays[latestMonth]).toFixed(2)}亿元/天)
+                    乘以估计的当月总交易日数(${estimatedTradingDays}天)计算得出。实际值可能会有所不同。
+                `;
+                chartContainer.appendChild(estimatedNote);
+            }
+        }
+        
+        function renderLeadingStocks(topStocks) {
+            // 隐藏加载动画，显示表格
+            document.getElementById('leadingStocksLoading').style.display = 'none';
+            document.getElementById('leadingStocksTable').style.display = 'block';
+            
+            // 填充表格数据
+            const tableBody = document.getElementById('leadingStocksBody');
+            tableBody.innerHTML = '';
+            
+            topStocks.forEach((stock, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${stock.name}</td>
+                    <td>${stock.code}</td>
+                    <td>${stock.count}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
     </script>
 </body>
 </html>

@@ -437,13 +437,12 @@ def get_hkstock_data():
         # 转换日期列为标准格式
         df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
         
-        # 获取最近半年的数据
-        half_year_ago = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
-        recent_data = df[df['日期'] >= half_year_ago].copy()
+        # 获取所有数据，不再限制半年
+        all_data = df.copy()
         
         # 计算每日净买额和累计净买额
         daily_data = []
-        for _, row in recent_data.iterrows():
+        for _, row in all_data.iterrows():
             daily_data.append({
                 '日期': row['日期'],
                 '当日成交净买额': float(row['当日成交净买额']),
@@ -455,11 +454,15 @@ def get_hkstock_data():
                 '领涨股涨跌幅': float(row['领涨股-涨跌幅'])
             })
         
-        # 统计领涨股出现次数
+        # 获取最近半年的数据用于领涨股统计
+        half_year_ago = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
+        recent_data = df[df['日期'] >= half_year_ago].copy()
+        
+        # 统计领涨股出现次数（仅统计半年内数据）
         leading_stocks = {}
-        for item in daily_data:
-            stock_name = item['领涨股']
-            stock_code = item['领涨股代码']
+        for _, row in recent_data.iterrows():
+            stock_name = row['领涨股']
+            stock_code = row['领涨股-代码']
             if stock_name in leading_stocks:
                 leading_stocks[stock_name]['count'] += 1
             else:
@@ -473,7 +476,7 @@ def get_hkstock_data():
                               for k, v in leading_stocks.items()]
         leading_stocks_list.sort(key=lambda x: x['count'], reverse=True)
         
-        # 取前20名领涨股（修改这里，从10改为20）
+        # 取前20名领涨股
         top_leading_stocks = leading_stocks_list[:20]
         
         # 构建结果数据
