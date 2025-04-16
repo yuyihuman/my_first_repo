@@ -1,0 +1,11 @@
+/* 港股通页面专用样式 */
+.construction-icon {
+    margin: 2rem 0;
+    color: #ffc107;
+}
+
+.jumbotron {
+    background-color: #f8f9fa;
+    padding: 2rem;
+    border-radius: 0.3rem;
+}

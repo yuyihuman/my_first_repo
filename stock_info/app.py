@@ -59,6 +59,10 @@ def check_static():
 def serve_cdn(filename):
     return send_from_directory('static/cdn', filename)
 
+@app.route('/hkstock')
+def hkstock():
+    return render_template('hkstock.html')
+
 if __name__ == '__main__':
     # 生产环境中关闭调试模式
     debug_mode = False  # 局域网访问时设为False
