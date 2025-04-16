@@ -59,6 +59,12 @@ def check_static():
 def serve_cdn(filename):
     return send_from_directory('static/cdn', filename)
 
+@app.route('/api/hkstock')
+def hkstock_data():
+    """获取港股通数据API"""
+    data = data_fetcher.get_hkstock_data()
+    return jsonify(data)
+
 @app.route('/hkstock')
 def hkstock():
     return render_template('hkstock.html')
