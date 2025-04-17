@@ -434,31 +434,40 @@ def get_hkstock_data():
         import akshare as ak
         df = ak.stock_hsgt_hist_em(symbol="南向资金")
         
+        # 获取恒生指数数据
+        hsi_df = ak.stock_hk_index_daily_sina(symbol="HSI")
+        # 将日期列转换为相同格式以便合并
+        hsi_df['date'] = pd.to_datetime(hsi_df['date']).dt.strftime('%Y-%m-%d')
+        # 创建一个日期到收盘价的映射
+        hsi_close_dict = dict(zip(hsi_df['date'], hsi_df['close']))
+        
         # 转换日期列为标准格式
         df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
         
-        # 获取所有数据，不再限制半年
-        all_data = df.copy()
-        
         # 计算每日净买额和累计净买额
         daily_data = []
-        for _, row in all_data.iterrows():
+        for _, row in df.iterrows():
+            date = row['日期']
+            # 获取对应日期的恒生指数收盘价，如果不存在则为None
+            hsi_close = hsi_close_dict.get(date)
+            
             daily_data.append({
-                '日期': row['日期'],
+                '日期': date,
                 '当日成交净买额': float(row['当日成交净买额']),
                 '买入成交额': float(row['买入成交额']),
                 '卖出成交额': float(row['卖出成交额']),
                 '历史累计净买额': float(row['历史累计净买额']),
                 '领涨股': row['领涨股'],
                 '领涨股代码': row['领涨股-代码'],
-                '领涨股涨跌幅': float(row['领涨股-涨跌幅'])
+                '领涨股涨跌幅': float(row['领涨股-涨跌幅']),
+                '恒生指数': float(hsi_close) if hsi_close is not None else None
             })
         
-        # 获取最近半年的数据用于领涨股统计
+        # 获取最近半年的数据
         half_year_ago = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
         recent_data = df[df['日期'] >= half_year_ago].copy()
         
-        # 统计领涨股出现次数（仅统计半年内数据）
+        # 统计领涨股出现次数
         leading_stocks = {}
         for _, row in recent_data.iterrows():
             stock_name = row['领涨股']

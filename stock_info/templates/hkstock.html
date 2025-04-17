@@ -173,28 +173,49 @@
             const dates = dailyData.map(item => item['日期']);
             const cumulativeValues = dailyData.map(item => item['历史累计净买额'] * 10000); // 转换为亿元
             
+            // 准备恒生指数数据
+            const hsiValues = dailyData.map(item => item['恒生指数']);
+            
             // 创建图表
             const ctx = document.getElementById('cumulativeChart').getContext('2d');
             new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: dates,
-                    datasets: [{
-                        label: '历史累计净买入额(亿元)',
-                        data: cumulativeValues,
-                        borderColor: 'rgb(75, 192, 192)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        tension: 0.1,
-                        fill: true
-                    }]
+                    datasets: [
+                        {
+                            label: '历史累计净买入额(亿元)',
+                            data: cumulativeValues,
+                            borderColor: 'rgb(75, 192, 192)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            tension: 0.1,
+                            fill: true,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '恒生指数',
+                            data: hsiValues,
+                            borderColor: 'rgb(255, 99, 132)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.1,
+                            fill: false,
+                            yAxisID: 'y1'
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
                     plugins: {
                         title: {
                             display: true,
-                            text: '南向资金累计净买入额走势',
+                            text: '南向资金累计净买入额与恒生指数走势',
                             font: {
                                 size: 16
                             }
@@ -202,7 +223,12 @@
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return `累计净买入额: ${context.raw.toFixed(2)}亿元`;
+                                    const datasetIndex = context.datasetIndex;
+                                    if (datasetIndex === 0) {
+                                        return `累计净买入额: ${context.raw.toFixed(2)}亿元`;
+                                    } else if (datasetIndex === 1) {
+                                        return `恒生指数: ${context.raw.toFixed(2)}`;
+                                    }
                                 }
                             }
                         }
@@ -221,9 +247,25 @@
                             }
                         },
                         y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
                             title: {
                                 display: true,
                                 text: '累计净买入额(亿元)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '恒生指数'
+                            },
+                            // 确保这个轴的网格线不显示，避免与左侧Y轴的网格线重叠
+                            grid: {
+                                drawOnChartArea: false
                             }
                         }
                     }
