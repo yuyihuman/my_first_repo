@@ -69,6 +69,18 @@ def hkstock_data():
 def hkstock():
     return render_template('hkstock.html')
 
+@app.route('/northbound')
+def northbound():
+    """港股通北向资金页面"""
+    return render_template('northbound.html')
+
+@app.route('/api/northbound')
+def api_northbound():
+    """获取北向资金数据的API"""
+    refresh = request.args.get('refresh', 'false').lower() == 'true'
+    data = data_fetcher.get_northbound_data(refresh=refresh)
+    return jsonify(data)
+
 if __name__ == '__main__':
     # 生产环境中关闭调试模式
     debug_mode = False  # 局域网访问时设为False
