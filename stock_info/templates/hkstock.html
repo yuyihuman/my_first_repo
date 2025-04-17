@@ -290,6 +290,9 @@
             // 记录每个月的交易日
             const tradingDaysPerMonth = {};
             
+            // 新增：用于存储每月的指数平均值
+            const monthlyIndexData = {};
+            
             dailyData.forEach(item => {
                 const date = new Date(item['日期']);
                 const year = date.getFullYear();
@@ -300,16 +303,34 @@
                     monthlyData[monthKey] = 0;
                     monthDays[monthKey] = 0;
                     tradingDaysPerMonth[monthKey] = new Set();
+                    // 新增：初始化月度指数数据
+                    monthlyIndexData[monthKey] = {
+                        indexSum: 0,
+                        days: 0
+                    };
                 }
                 
                 monthlyData[monthKey] += item['当日成交净买额'];
                 monthDays[monthKey]++;
                 tradingDaysPerMonth[monthKey].add(item['日期']);
+                
+                // 新增：累计指数数据
+                if (item['恒生指数'] !== null) {
+                    monthlyIndexData[monthKey].indexSum += item['恒生指数'];
+                    monthlyIndexData[monthKey].days += 1;
+                }
             });
             
             // 准备图表数据
             const months = Object.keys(monthlyData).sort();
             const netBuyValues = months.map(month => monthlyData[month]);
+            
+            // 新增：计算每月平均指数
+            const avgIndexValues = months.map(month => 
+                monthlyIndexData[month].days > 0 ? 
+                monthlyIndexData[month].indexSum / monthlyIndexData[month].days : 
+                null
+            );
             
             // 检查最新月份是否是当前月份，如果是则计算预估值
             const latestMonth = months[months.length - 1];
@@ -389,7 +410,44 @@
                 type: 'bar',
                 data: {
                     labels: months,
-                    datasets: datasets
+                    datasets: [
+                        {
+                            label: '月度净买入额(亿元)',
+                            data: netBuyValues,
+                            backgroundColor: netBuyValues.map(value => 
+                                value >= 0 ? 'rgba(75, 192, 192, 0.6)' : 'rgba(255, 99, 132, 0.6)'
+                            ),
+                            borderColor: netBuyValues.map(value => 
+                                value >= 0 ? 'rgb(75, 192, 192)' : 'rgb(255, 99, 132)'
+                            ),
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        },
+                        // 如果有预估值，添加预估值数据集
+                        ...(isEstimated ? [{
+                            label: '月度预估值(亿元)',
+                            data: months.map((month, index) => {
+                                return (index === months.length - 1) ? estimatedValue : null;
+                            }),
+                            backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                            borderColor: 'rgb(255, 159, 64)',
+                            borderWidth: 1,
+                            borderDash: [5, 5],
+                            yAxisID: 'y'
+                        }] : []),
+                        // 新增：添加恒生指数折线图
+                        {
+                            label: '恒生指数',
+                            data: avgIndexValues,
+                            type: 'line',
+                            fill: false,
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 2,
+                            pointRadius: 3,
+                            yAxisID: 'y1'
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
@@ -397,7 +455,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: '南向资金月度净买入额',
+                            text: '南向资金月度净买入额与恒生指数走势',
                             font: {
                                 size: 16
                             }
@@ -406,12 +464,14 @@
                             callbacks: {
                                 label: function(context) {
                                     const datasetIndex = context.datasetIndex;
-                                    const dataIndex = context.dataIndex;
+                                    const value = context.raw;
                                     
                                     if (datasetIndex === 0) {
-                                        return `实际净买入额: ${context.raw.toFixed(2)}亿元`;
-                                    } else if (datasetIndex === 1 && dataIndex === months.length - 1) {
-                                        return `预估月底值: ${context.raw.toFixed(2)}亿元`;
+                                        return `实际净买入额: ${value ? value.toFixed(2) : 0}亿元`;
+                                    } else if (datasetIndex === 1 && isEstimated) {
+                                        return `预估月底值: ${value ? value.toFixed(2) : 0}亿元`;
+                                    } else if (datasetIndex === (isEstimated ? 2 : 1)) {
+                                        return `恒生指数: ${value ? value.toFixed(2) : 0}`;
                                     }
                                     return '';
                                 },
@@ -442,6 +502,18 @@
                             title: {
                                 display: true,
                                 text: '净买入额(亿元)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '恒生指数'
+                            },
+                            grid: {
+                                drawOnChartArea: false
                             }
                         }
                     }
