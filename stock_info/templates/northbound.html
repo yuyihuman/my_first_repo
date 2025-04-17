@@ -35,6 +35,14 @@
             margin-top: 20px;
             background-color: #f8f9fa;
         }
+        .stock-link {
+            color: #0d6efd;
+            text-decoration: none;
+        }
+        .stock-link:hover {
+            text-decoration: underline;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -460,11 +468,14 @@
             tableBody.innerHTML = '';
             
             leadingStocks.forEach((stock, index) => {
+                // 提取纯数字的股票代码
+                const pureNumberCode = stock.code.replace(/[^\d]/g, '');
+                
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${index + 1}</td>
-                    <td>${stock.name}</td>
-                    <td>${stock.code}</td>
+                    <td><a href="/stock_info?code=${pureNumberCode}" class="stock-link">${stock.name}</a></td>
+                    <td><a href="/stock_info?code=${pureNumberCode}" class="stock-link">${stock.code}</a></td>
                     <td>${stock.count}</td>
                 `;
                 tableBody.appendChild(row);
