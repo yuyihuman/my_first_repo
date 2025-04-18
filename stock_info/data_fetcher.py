@@ -797,6 +797,62 @@ def fetch_macro_china_money_supply():
         # 获取货币供应量数据
         money_supply_df = ak.macro_china_supply_of_money()
         
+        # 获取上海新房价格数据
+        try:
+            # 获取上海房价数据
+            house_price_df = ak.macro_china_new_house_price(city_first="上海")
+            
+            # 确保日期列是字符串类型
+            house_price_df['日期'] = house_price_df['日期'].astype(str)
+            
+            # 创建日期到房价数据的映射
+            house_price_dict = {}
+            for _, row in house_price_df.iterrows():
+                date_str = row['日期']
+                
+                # 转换日期格式为 YYYY-MM 或 YYYY.MM
+                if '-' in date_str:
+                    # 如果日期格式为 "2023-01-01"，转换为 "2023-01"
+                    year_month = '-'.join(date_str.split('-')[:2])
+                    # 也创建 YYYY.MM 格式的键
+                    year_month_dot = year_month.replace('-', '.')
+                else:
+                    # 处理其他可能的格式
+                    year_month = date_str
+                    year_month_dot = date_str
+                
+                # 获取房价指数并转换为同比增长率（即减去100）：
+                new_house_price = float(row['新建商品住宅价格指数-同比']) if '新建商品住宅价格指数-同比' in row and not pd.isna(row['新建商品住宅价格指数-同比']) else None
+                second_house_price = float(row['二手住宅价格指数-同比']) if '二手住宅价格指数-同比' in row and not pd.isna(row['二手住宅价格指数-同比']) else None
+                
+                # 将指数转换为增长率（减去100）
+                if new_house_price is not None:
+                    new_house_price = new_house_price - 100
+                if second_house_price is not None:
+                    second_house_price = second_house_price - 100
+                
+                # 使用两种格式的日期作为键，确保能匹配到货币供应量数据
+                house_data = {
+                    '新建商品住宅价格指数_同比': new_house_price,
+                    '二手住宅价格指数_同比': second_house_price
+                }
+                
+                house_price_dict[year_month] = house_data
+                house_price_dict[year_month_dot] = house_data
+                
+                # 还要考虑YYYY.M格式(没有前导0的月份)
+                if '-' in date_str:
+                    year, month = date_str.split('-')[:2]
+                    month_no_zero = month.lstrip('0')
+                    year_month_dot_no_zero = f"{year}.{month_no_zero}"
+                    house_price_dict[year_month_dot_no_zero] = house_data
+        
+        except Exception as e:
+            print(f"获取上海房价数据失败: {e}")
+            import traceback
+            print(traceback.format_exc())
+            house_price_dict = {}
+        
         # 确保数据框不为空
         if money_supply_df.empty:
             return {
@@ -842,12 +898,40 @@ def fetch_macro_china_money_supply():
                 m1_growth = float(row[m1_growth_col]) if not pd.isna(row[m1_growth_col]) else None
                 m0_growth = float(row[m0_growth_col]) if not pd.isna(row[m0_growth_col]) else None
                 
+                # 创建基本数据项
                 item = {
                     '月份': formatted_date,
                     '货币和准货币_广义货币M2_同比增长': m2_growth,
                     '货币_狭义货币M1_同比增长': m1_growth,
                     '流通中现金_M0_同比增长': m0_growth
                 }
+                
+                # 添加房价数据（如果存在）
+                if formatted_date in house_price_dict:
+                    item['上海新建商品住宅价格指数_同比'] = house_price_dict[formatted_date]['新建商品住宅价格指数_同比']
+                    item['上海二手住宅价格指数_同比'] = house_price_dict[formatted_date]['二手住宅价格指数_同比']
+                else:
+                    # 尝试其他可能的日期格式
+                    found = False
+                    for key in house_price_dict.keys():
+                        # 检查年份和月份是否匹配
+                        if '-' in formatted_date and '-' in key:
+                            if formatted_date.split('-')[0] == key.split('-')[0] and formatted_date.split('-')[1] == key.split('-')[1]:
+                                item['上海新建商品住宅价格指数_同比'] = house_price_dict[key]['新建商品住宅价格指数_同比']
+                                item['上海二手住宅价格指数_同比'] = house_price_dict[key]['二手住宅价格指数_同比']
+                                found = True
+                                break
+                        elif '.' in formatted_date and '.' in key:
+                            if formatted_date.split('.')[0] == key.split('.')[0] and formatted_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
+                                item['上海新建商品住宅价格指数_同比'] = house_price_dict[key]['新建商品住宅价格指数_同比']
+                                item['上海二手住宅价格指数_同比'] = house_price_dict[key]['二手住宅价格指数_同比']
+                                found = True
+                                break
+                    
+                    if not found:
+                        item['上海新建商品住宅价格指数_同比'] = None
+                        item['上海二手住宅价格指数_同比'] = None
+                
                 data.append(item)
                 
             except (ValueError, TypeError, KeyError) as e:
@@ -865,12 +949,14 @@ def fetch_macro_china_money_supply():
         with open(cache_file, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         
-        print(f"成功获取并缓存货币供应量数据，共{len(data)}条记录（2000年以后）")
+        print(f"成功获取并缓存货币供应量和房价数据，共{len(data)}条记录（2000年以后）")
         
         return result
     
     except Exception as e:
-        print(f"获取中国货币供应量数据失败: {str(e)}")
+        print(f"获取中国宏观经济数据失败: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return {
             'status': 'error',
             'message': str(e)
