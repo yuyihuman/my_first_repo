@@ -35,6 +35,13 @@
             margin-top: 20px;
             background-color: #f8f9fa;
         }
+        /* 添加股票行的鼠标悬停样式 */
+        .stock-row {
+            cursor: pointer;
+        }
+        .stock-row:hover {
+            background-color: #f0f8ff !important;
+        }
     </style>
 </head>
 <body>
@@ -124,6 +131,9 @@
                             <tbody id="leadingStocksBody">
                             </tbody>
                         </table>
+                        <div class="alert alert-info mt-3">
+                            <i class="bi bi-info-circle"></i> 点击任意股票行可跳转至港股个股信息页面查看详细信息
+                        </div>
                     </div>
                 </div>
             </div>
@@ -553,6 +563,12 @@
             
             topStocks.forEach((stock, index) => {
                 const row = document.createElement('tr');
+                // 添加stock-row类和点击事件
+                row.className = 'stock-row';
+                row.onclick = function() {
+                    // 跳转到港股个股信息页面并传递股票代码
+                    window.location.href = `/hkstock_info?code=${stock.code.replace(/\D/g, '')}`;
+                };
                 row.innerHTML = `
                     <td>${index + 1}</td>
                     <td>${stock.name}</td>
