@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中国宏观经济数据 - 股票信息分析平台</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <!-- 添加Chart.js库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            margin: 20px 0;
+            height: 400px;
+        }
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+        .data-table {
+            margin-top: 30px;
+        }
+        .log-container {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px dashed #dee2e6;
+            padding-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">股票信息分析平台</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/stock_info">个股信息</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/hkstock_info">港股个股信息</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/lhb">龙虎榜</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/hkstock">港股通南向</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/northbound">港股通北向</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/macro_china">中国宏观数据</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5">
+        <div class="jumbotron">
+            <h1 class="display-4 text-center">中国宏观经济数据</h1>
+            <p class="lead text-center">货币供应量数据分析</p>
+            <hr class="my-4">
+            
+            <div id="updateInfo" class="alert alert-info text-center">
+                正在加载数据，请稍候...
+            </div>
+            
+            <!-- 刷新按钮 -->
+            <div class="text-center mb-4">
+                <button id="refreshBtn" class="btn btn-primary">
+                    <span id="refreshSpinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                    刷新数据
+                </button>
+            </div>
+            
+            <!-- 货币供应量图表 -->
+            <div class="chart-container">
+                <div id="moneySupplyChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="moneySupplyChart"></canvas>
+            </div>
+            
+            <!-- 数据表格 -->
+            <div class="data-table">
+                <h3>货币供应量数据表</h3>
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>月份</th>
+                                <th>M2同比增长(%)</th>
+                                <th>M1同比增长(%)</th>
+                                <th>M0同比增长(%)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="moneySupplyTableBody">
+                            <tr>
+                                <td colspan="4" class="text-center">加载中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 日志显示区域 -->
+            <div class="mt-5">
+                <h3>API响应日志</h3>
+                <div class="log-container" id="apiLogContainer">
+                    <div class="log-entry">等待API响应...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer mt-auto py-3 bg-light">
+        <div class="container text-center">
+            <span class="text-muted">© 2024 股票信息分析平台</span>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 全局变量
+        let moneySupplyChart = null;
+        
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            // 获取货币供应量数据
+            fetchMoneySupplyData();
+            
+            // 刷新按钮点击事件
+            document.getElementById('refreshBtn').addEventListener('click', function() {
+                fetchMoneySupplyData(true);
+            });
+        });
+        
+        // 获取货币供应量数据
+        function fetchMoneySupplyData(showLoading = false) {
+            if (showLoading) {
+                // 显示刷新按钮的加载状态
+                document.getElementById('refreshSpinner').classList.remove('d-none');
+                document.getElementById('refreshBtn').disabled = true;
+            }
+            
+            // 显示图表加载状态
+            document.getElementById('moneySupplyChartLoading').style.display = 'flex';
+            
+            // 发起API请求
+            fetch('/api/macro/money_supply')
+                .then(response => response.json())
+                .then(data => {
+                    // 记录API响应到日志区域
+                    logApiResponse(data);
+                    
+                    if (data.status === 'success') {
+                        // 更新最后更新时间
+                        document.getElementById('updateInfo').innerHTML = 
+                            `最后更新时间: ${data.last_update}`;
+                        
+                        // 处理数据并显示图表
+                        processAndDisplayData(data.data);
+                    } else {
+                        // 显示错误信息
+                        document.getElementById('updateInfo').innerHTML = 
+                            `<div class="alert alert-danger">获取数据失败: ${data.message}</div>`;
+                        
+                        // 隐藏加载状态
+                        document.getElementById('moneySupplyChartLoading').style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('获取数据出错:', error);
+                    document.getElementById('updateInfo').innerHTML = 
+                        `<div class="alert alert-danger">获取数据出错: ${error.message}</div>`;
+                    
+                    // 记录错误到日志区域
+                    logApiResponse({status: 'error', message: error.message});
+                    
+                    // 隐藏加载状态
+                    document.getElementById('moneySupplyChartLoading').style.display = 'none';
+                })
+                .finally(() => {
+                    if (showLoading) {
+                        // 恢复刷新按钮状态
+                        document.getElementById('refreshSpinner').classList.add('d-none');
+                        document.getElementById('refreshBtn').disabled = false;
+                    }
+                });
+        }
+        
+        // 处理数据并显示图表和表格
+        function processAndDisplayData(data) {
+            // 反转数据以便按时间顺序显示（从早到晚）
+            const sortedData = [...data].reverse();
+            
+            // 提取数据
+            const months = sortedData.map(item => item.月份);
+            const m2Growth = sortedData.map(item => item.货币和准货币_广义货币M2_同比增长);
+            const m1Growth = sortedData.map(item => item.货币_狭义货币M1_同比增长);
+            const m0Growth = sortedData.map(item => item.流通中现金_M0_同比增长);
+            
+            // 创建图表
+            createMoneySupplyChart(months, m2Growth, m1Growth, m0Growth);
+            
+            // 更新表格
+            updateMoneySupplyTable(data);
+            
+            // 隐藏加载状态
+            document.getElementById('moneySupplyChartLoading').style.display = 'none';
+        }
+        
+        // 创建货币供应量图表
+        function createMoneySupplyChart(months, m2Growth, m1Growth, m0Growth) {
+            const ctx = document.getElementById('moneySupplyChart').getContext('2d');
+            
+            // 销毁旧图表（如果存在）
+            if (moneySupplyChart) {
+                moneySupplyChart.destroy();
+            }
+            
+            // 创建新图表
+            moneySupplyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: months,
+                    datasets: [
+                        {
+                            label: 'M2同比增长(%)',
+                            data: m2Growth,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            tension: 0.1
+                        },
+                        {
+                            label: 'M1同比增长(%)',
+                            data: m1Growth,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            tension: 0.1
+                        },
+                        {
+                            label: 'M0同比增长(%)',
+                            data: m0Growth,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '中国货币供应量同比增长率(%)'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: '同比增长率(%)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 更新货币供应量表格
+        function updateMoneySupplyTable(data) {
+            const tableBody = document.getElementById('moneySupplyTableBody');
+            tableBody.innerHTML = '';
+            
+            // 按日期降序排序（最新的在前面）
+            data.sort((a, b) => {
+                return b.月份.localeCompare(a.月份);
+            });
+            
+            // 添加表格行
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item.月份}</td>
+                    <td>${item.货币和准货币_广义货币M2_同比增长.toFixed(2)}</td>
+                    <td>${item.货币_狭义货币M1_同比增长.toFixed(2)}</td>
+                    <td>${item.流通中现金_M0_同比增长.toFixed(2)}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+        
+        // 记录API响应到日志区域
+        function logApiResponse(data) {
+            const logContainer = document.getElementById('apiLogContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            
+            // 格式化时间
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            
+            // 格式化日志内容
+            let logContent = `[${timeStr}] 状态: ${data.status}`;
+            if (data.status === 'error') {
+                logContent += `, 错误: ${data.message}`;
+                logEntry.style.color = 'red';
+            } else if (data.status === 'success') {
+                logContent += `, 数据条数: ${data.data ? data.data.length : 0}`;
+                logEntry.style.color = 'green';
+            }
+            
+            logEntry.textContent = logContent;
+            
+            // 添加到日志容器的顶部
+            logContainer.insertBefore(logEntry, logContainer.firstChild);
+            
+            // 限制日志条目数量
+            const maxLogEntries = 50;
+            while (logContainer.children.length > maxLogEntries) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+    </script>
+</body>
+</html>

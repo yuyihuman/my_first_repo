@@ -771,3 +771,107 @@ def get_hkstock_finance(stock_code):
         import traceback
         print(traceback.format_exc())
         raise Exception(f"获取港股财务数据失败: {e}")
+
+def fetch_macro_china_money_supply():
+    """
+    获取中国货币供应量数据（仅2000年以后的数据）
+    
+    Returns:
+        dict: 包含货币供应量数据的字典
+    """
+    try:
+        # 检查缓存
+        cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache', 'macro')
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_file = os.path.join(cache_dir, 'money_supply.json')
+        
+        # 检查缓存是否存在且在24小时内
+        if os.path.exists(cache_file):
+            file_time = os.path.getmtime(cache_file)
+            current_time = datetime.now().timestamp()
+            # 如果缓存文件在24小时内，直接返回缓存数据
+            if current_time - file_time < 24 * 60 * 60:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        
+        # 获取货币供应量数据
+        money_supply_df = ak.macro_china_supply_of_money()
+        
+        # 确保数据框不为空
+        if money_supply_df.empty:
+            return {
+                'status': 'error',
+                'message': '获取的数据为空'
+            }
+        
+        # 转换为字典列表
+        data = []
+        
+        # 根据实际列名使用正确的列
+        date_col = '统计时间'
+        m2_growth_col = '货币和准货币（广义货币M2）同比增长'
+        m1_growth_col = '货币(狭义货币M1)同比增长'
+        m0_growth_col = '流通中现金(M0)同比增长'
+        
+        # 按日期排序（从新到旧）
+        money_supply_df = money_supply_df.sort_values(by=date_col, ascending=False)
+        
+        # 获取所有历史数据，但只保留2000年以后的
+        for _, row in money_supply_df.iterrows():
+            try:
+                date_str = str(row[date_col])
+                
+                # 处理日期格式
+                if '-' in date_str:
+                    # 如果日期格式为 "2023-01"，保持原样
+                    formatted_date = date_str
+                    # 提取年份
+                    year = int(formatted_date.split('-')[0])
+                else:
+                    # 处理格式如 "2023.01" 或 "2023.1"
+                    formatted_date = date_str
+                    # 提取年份
+                    year = int(formatted_date.split('.')[0])
+                
+                # 只保留2000年以后的数据
+                if year < 2000:
+                    continue
+                
+                # 处理NaN值，将其转换为None
+                m2_growth = float(row[m2_growth_col]) if not pd.isna(row[m2_growth_col]) else None
+                m1_growth = float(row[m1_growth_col]) if not pd.isna(row[m1_growth_col]) else None
+                m0_growth = float(row[m0_growth_col]) if not pd.isna(row[m0_growth_col]) else None
+                
+                item = {
+                    '月份': formatted_date,
+                    '货币和准货币_广义货币M2_同比增长': m2_growth,
+                    '货币_狭义货币M1_同比增长': m1_growth,
+                    '流通中现金_M0_同比增长': m0_growth
+                }
+                data.append(item)
+                
+            except (ValueError, TypeError, KeyError) as e:
+                print(f"处理行数据时出错: {e}, 行数据: {row.to_dict()}")
+                continue
+        
+        # 准备返回数据
+        result = {
+            'status': 'success',
+            'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data': data
+        }
+        
+        # 保存到缓存
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        
+        print(f"成功获取并缓存货币供应量数据，共{len(data)}条记录（2000年以后）")
+        
+        return result
+    
+    except Exception as e:
+        print(f"获取中国货币供应量数据失败: {str(e)}")
+        return {
+            'status': 'error',
+            'message': str(e)
+        }

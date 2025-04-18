@@ -97,6 +97,26 @@ def get_hkstock_info(stock_code):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# 添加宏观经济数据相关路由
+@app.route('/macro_china')
+def macro_china():
+    """渲染中国宏观经济数据页面"""
+    return render_template('macro_china.html')
+
+@app.route('/api/macro/money_supply')
+def api_macro_money_supply():
+    """API端点：获取货币供应量数据"""
+    try:
+        # 调用数据获取函数
+        money_supply_data = data_fetcher.fetch_macro_china_money_supply()
+        return jsonify(money_supply_data)
+    except Exception as e:
+        app.logger.error(f"获取货币供应量数据时出错: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'获取数据失败: {str(e)}'
+        })
+
 if __name__ == '__main__':
     # 生产环境中关闭调试模式
     debug_mode = False  # 局域网访问时设为False
