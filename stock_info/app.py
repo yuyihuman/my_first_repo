@@ -81,6 +81,22 @@ def api_northbound():
     data = data_fetcher.get_northbound_data(refresh=refresh)
     return jsonify(data)
 
+# 添加以下路由
+
+@app.route('/hkstock_info')
+def hkstock_info():
+    """港股个股信息页面"""
+    return render_template('hkstock_info.html')
+
+@app.route('/api/hkstock_info/<stock_code>')
+def get_hkstock_info(stock_code):
+    """获取港股个股信息API"""
+    try:
+        data = data_fetcher.get_hkstock_finance(stock_code)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     # 生产环境中关闭调试模式
     debug_mode = False  # 局域网访问时设为False

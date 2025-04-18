@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>个股信息 - 股票信息分析平台</title>
+    <title>港股个股信息 - 股票信息分析平台</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/stock_info.css') }}">
     <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
-    <!-- 添加Chart.js库 -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -21,11 +20,11 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav">
                     <li class="nav-item">
-                        <a class="nav-link active" href="/stock_info">个股信息</a>
+                        <a class="nav-link" href="/stock_info">个股信息</a>
                     </li>
-                    <!-- 添加港股个股信息标签 -->
+                    <!-- 确保港股个股信息标签紧跟在个股信息标签后面，并标记为active -->
                     <li class="nav-item">
-                        <a class="nav-link" href="/hkstock_info">港股个股信息</a>
+                        <a class="nav-link active" href="/hkstock_info">港股个股信息</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="/lhb">龙虎榜</a>
@@ -47,12 +46,12 @@
             <div class="col-md-6 mx-auto">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">股票查询</h5>
+                        <h5 class="card-title">港股查询</h5>
                         <div class="input-group">
-                            <input type="text" id="stockCode" class="form-control" placeholder="请输入股票代码（6位数字）">
+                            <input type="text" id="stockCode" class="form-control" placeholder="请输入港股代码（5位数字或不带前缀的代码）">
                             <button class="btn btn-primary" id="searchBtn">查询</button>
                         </div>
-                        <div class="form-text">例如：000001（平安银行）、600000（浦发银行）</div>
+                        <div class="form-text">例如：00700（腾讯控股）、02318（中国平安）</div>
                     </div>
                 </div>
             </div>
@@ -90,7 +89,7 @@
                                             <th>毛利率(%)</th>
                                             <th>稀释每股收益</th>
                                             <th>归属母公司净利润</th>
-                                            <th>实收资本</th>  <!-- 新增列 -->
+                                            <th>实收资本</th>
                                         </tr>
                                     </thead>
                                     <tbody id="financialData">
@@ -124,6 +123,6 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{{ url_for('static', filename='js/stock_info.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/hkstock_info.js') }}"></script>
 </body>
 </html>
