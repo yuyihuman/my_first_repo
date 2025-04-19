@@ -800,14 +800,6 @@ def fetch_macro_china_money_supply():
         # 获取货币供应量总量数据
         money_supply_total_df = ak.macro_china_money_supply()
         
-        # 打印列名以便调试
-        print("货币供应量增速数据列名:", money_supply_df.columns.tolist())
-        print("货币供应量总量数据列名:", money_supply_total_df.columns.tolist())
-        
-        # 打印总量数据的前几行，用于调试
-        print("货币供应量总量数据前5行:")
-        print(money_supply_total_df.head().to_string())
-        
         # 根据实际列名确定日期列和数据列
         # 尝试可能的日期列名
         date_col = None
@@ -819,7 +811,6 @@ def fetch_macro_china_money_supply():
         if date_col is None:
             # 如果找不到预期的日期列，使用第一列作为日期列
             date_col = money_supply_df.columns[0]
-            print(f"未找到预期的日期列，使用第一列 '{date_col}' 作为日期列")
         
         # 尝试可能的增长率列名
         m2_growth_col = None
@@ -834,26 +825,23 @@ def fetch_macro_china_money_supply():
             elif 'M0' in col and '同比' in col:
                 m0_growth_col = col
         
-        # 如果找不到特定的列，打印警告并尝试使用可能的替代列
+        # 如果找不到特定的列，尝试使用可能的替代列
         if m2_growth_col is None:
             for col in money_supply_df.columns:
                 if 'M2' in col or ('货币' in col and '广义' in col and '同比' in col):
                     m2_growth_col = col
-                    print(f"使用 '{m2_growth_col}' 作为M2增长率列")
                     break
         
         if m1_growth_col is None:
             for col in money_supply_df.columns:
                 if 'M1' in col or ('货币' in col and '狭义' in col and '同比' in col):
                     m1_growth_col = col
-                    print(f"使用 '{m1_growth_col}' 作为M1增长率列")
                     break
         
         if m0_growth_col is None:
             for col in money_supply_df.columns:
                 if 'M0' in col or ('流通中现金' in col and '同比' in col):
                     m0_growth_col = col
-                    print(f"使用 '{m0_growth_col}' 作为M0增长率列")
                     break
         
         # 创建货币总量的映射字典
@@ -869,29 +857,13 @@ def fetch_macro_china_money_supply():
         if total_date_col is None:
             # 如果找不到预期的日期列，使用第一列作为日期列
             total_date_col = money_supply_total_df.columns[0]
-            print(f"总量数据中未找到预期的日期列，使用第一列 '{total_date_col}' 作为日期列")
-        
-        print(f"使用 '{total_date_col}' 作为总量数据的日期列")
         
         # 确定总量数据的列名
         m2_total_col = '货币和准货币(M2)-数量(亿元)'
         m1_total_col = '货币(M1)-数量(亿元)'
         m0_total_col = '流通中的现金(M0)-数量(亿元)'
         
-        print(f"使用 '{m2_total_col}' 作为M2总量列")
-        print(f"使用 '{m1_total_col}' 作为M1总量列")
-        print(f"使用 '{m0_total_col}' 作为M0总量列")
-        
-        # 检查这些列是否存在于数据框中
-        if m2_total_col not in money_supply_total_df.columns:
-            print(f"警告: '{m2_total_col}' 不在总量数据列中")
-        if m1_total_col not in money_supply_total_df.columns:
-            print(f"警告: '{m1_total_col}' 不在总量数据列中")
-        if m0_total_col not in money_supply_total_df.columns:
-            print(f"警告: '{m0_total_col}' 不在总量数据列中")
-        
         # 处理货币总量数据
-        print("开始处理货币总量数据...")
         processed_rows = 0
         for _, row in money_supply_total_df.iterrows():
             try:
@@ -905,15 +877,9 @@ def fetch_macro_china_money_supply():
                     year = match.group(1)
                     month = match.group(2).lstrip('0')  # 去掉前导零
                     formatted_date = f"{year}.{month}"
-                    
-                    # 记录转换后的日期格式
-                    if processed_rows < 5:
-                        print(f"  原始日期: {date_str} -> 转换后: {formatted_date}")
                 else:
                     # 如果无法匹配，保持原样
                     formatted_date = date_str
-                    if processed_rows < 5:
-                        print(f"  无法转换日期格式: {date_str}")
                 
                 # 使用正确的列名获取总量数据
                 m2_total = None
@@ -930,7 +896,6 @@ def fetch_macro_china_money_supply():
                             m2_total = float(m2_total)
                             m2_total = round(m2_total, 2)
                         except (ValueError, TypeError):
-                            print(f"无法将M2总量转换为浮点数: {m2_total}")
                             m2_total = None
                 
                 if m1_total_col in money_supply_total_df.columns:
@@ -942,7 +907,6 @@ def fetch_macro_china_money_supply():
                             m1_total = float(m1_total)
                             m1_total = round(m1_total, 2)
                         except (ValueError, TypeError):
-                            print(f"无法将M1总量转换为浮点数: {m1_total}")
                             m1_total = None
                 
                 if m0_total_col in money_supply_total_df.columns:
@@ -954,16 +918,7 @@ def fetch_macro_china_money_supply():
                             m0_total = float(m0_total)
                             m0_total = round(m0_total, 2)
                         except (ValueError, TypeError):
-                            print(f"无法将M0总量转换为浮点数: {m0_total}")
                             m0_total = None
-                
-                # 记录一些样本数据用于调试
-                if processed_rows < 5:
-                    print(f"处理总量数据行 {processed_rows+1}:")
-                    print(f"  日期: {formatted_date}")
-                    print(f"  M2总量: {m2_total}")
-                    print(f"  M1总量: {m1_total}")
-                    print(f"  M0总量: {m0_total}")
                 
                 money_data = {
                     'M2总量(亿元)': m2_total,
@@ -976,17 +931,8 @@ def fetch_macro_china_money_supply():
                 
                 processed_rows += 1
             except Exception as e:
-                print(f"处理货币总量数据行时出错: {e}, 行数据: {row.to_dict()}")
+                print(f"处理货币总量数据行时出错: {e}")
                 continue
-        
-        print(f"成功处理了 {processed_rows} 行货币总量数据")
-        print(f"货币总量字典中有 {len(money_total_dict)} 个日期条目")
-        
-        # 打印一些样本键值用于调试
-        print("货币总量字典中的一些样本键值:")
-        sample_keys = list(money_total_dict.keys())[:5]
-        for key in sample_keys:
-            print(f"  {key}: {money_total_dict[key]}")
         
         # 获取上海新房价格数据
         try:
@@ -1051,8 +997,6 @@ def fetch_macro_china_money_supply():
         
         except Exception as e:
             print(f"获取上海房价数据失败: {e}")
-            import traceback
-            print(traceback.format_exc())
             house_price_dict = {}
         
         # 确保数据框不为空
@@ -1065,12 +1009,25 @@ def fetch_macro_china_money_supply():
         # 转换为字典列表
         data = []
         
+        # 修改排序逻辑：先将日期转换为可比较的格式再排序
+        def convert_date_for_sorting(date_str):
+            # 处理格式如 "2023.9" 或 "2023-09"
+            if '.' in date_str:
+                year, month = date_str.split('.')
+                # 确保月份是两位数
+                month = month.zfill(2)
+                return f"{year}{month}"
+            elif '-' in date_str:
+                year, month = date_str.split('-')[:2]
+                return f"{year}{month}"
+            return date_str
+        
+        # 创建一个临时列用于排序
+        money_supply_df['sort_date'] = money_supply_df[date_col].astype(str).apply(convert_date_for_sorting)
         # 按日期排序（从新到旧）
-        if date_col:
-            money_supply_df = money_supply_df.sort_values(by=date_col, ascending=False)
+        money_supply_df = money_supply_df.sort_values(by='sort_date', ascending=False)
         
         # 获取所有历史数据，但只保留2000年以后的
-        print("开始处理货币增速数据...")
         processed_rows = 0
         matched_with_total = 0
         
@@ -1124,23 +1081,12 @@ def fetch_macro_china_money_supply():
                     '流通中现金_M0_同比增长': m0_growth
                 }
                 
-                # 记录一些样本数据用于调试
-                if processed_rows < 5:
-                    print(f"处理增速数据行 {processed_rows+1}:")
-                    print(f"  日期: {formatted_date}")
-                    print(f"  M2增速: {m2_growth}")
-                    print(f"  M1增速: {m1_growth}")
-                    print(f"  M0增速: {m0_growth}")
-                
                 # 添加货币总量数据（如果存在）
                 if formatted_date in money_total_dict:
                     item['M2总量(亿元)'] = money_total_dict[formatted_date]['M2总量(亿元)']
                     item['M1总量(亿元)'] = money_total_dict[formatted_date]['M1总量(亿元)']
                     item['M0总量(亿元)'] = money_total_dict[formatted_date]['M0总量(亿元)']
                     matched_with_total += 1
-                    
-                    if processed_rows < 5:
-                        print(f"  找到匹配的总量数据: {money_total_dict[formatted_date]}")
                 else:
                     # 尝试其他可能的日期格式
                     found = False
@@ -1153,18 +1099,12 @@ def fetch_macro_china_money_supply():
                                 item['M0总量(亿元)'] = money_total_dict[key]['M0总量(亿元)']
                                 found = True
                                 matched_with_total += 1
-                                
-                                if processed_rows < 5:
-                                    print(f"  通过年月匹配找到总量数据: {money_total_dict[key]}")
                                 break
                     
                     if not found:
                         item['M2总量(亿元)'] = None
                         item['M1总量(亿元)'] = None
                         item['M0总量(亿元)'] = None
-                        
-                        if processed_rows < 5:
-                            print(f"  未找到匹配的总量数据")
                 
                 # 添加房价数据（如果存在）
                 if formatted_date in house_price_dict:
@@ -1204,11 +1144,10 @@ def fetch_macro_china_money_supply():
                 processed_rows += 1
                 
             except (ValueError, TypeError, KeyError) as e:
-                print(f"处理行数据时出错: {e}, 行数据: {row.to_dict()}")
+                print(f"处理行数据时出错: {e}")
                 continue
         
-        print(f"成功处理了 {processed_rows} 行货币增速数据")
-        print(f"其中 {matched_with_total} 行找到了匹配的总量数据")
+        print(f"成功获取并缓存货币供应量、总量和房价数据，共{len(data)}条记录（2000年以后）")
         
         # 准备返回数据
         result = {
@@ -1220,8 +1159,6 @@ def fetch_macro_china_money_supply():
         # 保存到缓存
         with open(cache_file, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
-        
-        print(f"成功获取并缓存货币供应量、总量和房价数据，共{len(data)}条记录（2000年以后）")
         
         return result
     
