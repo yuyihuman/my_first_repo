@@ -237,6 +237,11 @@
                 return item.货币和准货币_广义货币M2_同比增长 !== null ? 
                     item.货币和准货币_广义货币M2_同比增长 : null;
             });
+            // 添加M1增速数据
+            const m1Growth = sortedData.map(item => {
+                return item.货币_狭义货币M1_同比增长 !== null ? 
+                    item.货币_狭义货币M1_同比增长 : null;
+            });
             const secondHandHousingData = sortedData.map(item => {
                 // 处理null值，如果是null则返回null
                 return item.上海二手住宅价格指数_同比 !== null ? 
@@ -244,7 +249,7 @@
             });
             
             // 创建图表
-            createMoneySupplyChart(months, m2Growth, secondHandHousingData);
+            createMoneySupplyChart(months, m2Growth, m1Growth, secondHandHousingData);
             
             // 更新表格
             updateMoneySupplyTable(data);
@@ -254,7 +259,7 @@
         }
         
         // 创建货币供应量图表
-        function createMoneySupplyChart(months, m2Growth, secondHandHousingData) {
+        function createMoneySupplyChart(months, m2Growth, m1Growth, secondHandHousingData) {
             const ctx = document.getElementById('moneySupplyChart').getContext('2d');
             
             // 销毁旧图表（如果存在）
@@ -278,6 +283,14 @@
                             spanGaps: true
                         },
                         {
+                            label: 'M1同比增长(%)',
+                            data: m1Growth,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
                             label: '上海二手住宅价格指数同比(%)',
                             data: secondHandHousingData,
                             borderColor: 'rgba(75, 192, 192, 1)',
@@ -294,7 +307,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'M2与上海二手住宅价格指数同比变化(%)'
+                            text: 'M2、M1与上海二手住宅价格指数同比变化(%)'
                         },
                         tooltip: {
                             mode: 'index',
