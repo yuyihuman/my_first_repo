@@ -99,13 +99,7 @@
                 正在加载数据，请稍候...
             </div>
             
-            <!-- 刷新按钮 -->
-            <div class="text-center mb-4">
-                <button id="refreshBtn" class="btn btn-primary">
-                    <span id="refreshSpinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
-                    刷新数据
-                </button>
-            </div>
+            <!-- 移除刷新按钮部分 -->
             
             <!-- 货币供应量图表 -->
             <div class="chart-container">
@@ -166,19 +160,12 @@
             // 获取货币供应量数据
             fetchMoneySupplyData();
             
-            // 刷新按钮点击事件
-            document.getElementById('refreshBtn').addEventListener('click', function() {
-                fetchMoneySupplyData(true);
-            });
+            // 移除刷新按钮点击事件
         });
         
         // 获取货币供应量数据
         function fetchMoneySupplyData(showLoading = false) {
-            if (showLoading) {
-                // 显示刷新按钮的加载状态
-                document.getElementById('refreshSpinner').classList.remove('d-none');
-                document.getElementById('refreshBtn').disabled = true;
-            }
+            // 移除刷新按钮相关代码
             
             // 显示图表加载状态
             document.getElementById('moneySupplyChartLoading').style.display = 'flex';
@@ -216,14 +203,8 @@
                     
                     // 隐藏加载状态
                     document.getElementById('moneySupplyChartLoading').style.display = 'none';
-                })
-                .finally(() => {
-                    if (showLoading) {
-                        // 恢复刷新按钮状态
-                        document.getElementById('refreshSpinner').classList.add('d-none');
-                        document.getElementById('refreshBtn').disabled = false;
-                    }
                 });
+                // 移除finally部分，因为它只处理刷新按钮状态
         }
         
         // 处理数据并显示图表和表格
@@ -320,6 +301,21 @@
                             title: {
                                 display: true,
                                 text: '同比变化率(%)'
+                            },
+                            // 添加0轴线配置
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.8)'; // 0轴线加粗，颜色更深
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)'; // 其他网格线保持原样
+                                },
+                                lineWidth: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 2; // 0轴线加粗
+                                    }
+                                    return 1; // 其他网格线保持原样
+                                }
                             }
                         },
                         x: {
