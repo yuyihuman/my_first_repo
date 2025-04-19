@@ -863,8 +863,14 @@ def fetch_macro_china_money_supply():
         m1_total_col = '货币(M1)-数量(亿元)'
         m0_total_col = '流通中的现金(M0)-数量(亿元)'
         
-        # 处理货币总量数据
-        processed_rows = 0
+        # 处理货币总量数据，并准备计算环比数据
+        # 首先将数据按日期排序
+        money_supply_total_df['sort_date'] = money_supply_total_df[total_date_col].astype(str)
+        money_supply_total_df = money_supply_total_df.sort_values(by='sort_date')
+        
+        # 创建一个列表来存储处理后的总量数据，以便计算环比
+        processed_total_data = []
+        
         for _, row in money_supply_total_df.iterrows():
             try:
                 date_str = str(row[total_date_col])
@@ -920,19 +926,54 @@ def fetch_macro_china_money_supply():
                         except (ValueError, TypeError):
                             m0_total = None
                 
-                money_data = {
+                # 将处理后的数据添加到列表中
+                processed_total_data.append({
+                    'date': formatted_date,
                     'M2总量(亿元)': m2_total,
                     'M1总量(亿元)': m1_total,
                     'M0总量(亿元)': m0_total
-                }
+                })
                 
-                # 使用转换后的日期格式作为键
-                money_total_dict[formatted_date] = money_data
-                
-                processed_rows += 1
             except Exception as e:
                 print(f"处理货币总量数据行时出错: {e}")
                 continue
+        
+        # 计算环比数据
+        for i in range(1, len(processed_total_data)):
+            current = processed_total_data[i]
+            previous = processed_total_data[i-1]
+            
+            # 计算M2环比
+            if current['M2总量(亿元)'] is not None and previous['M2总量(亿元)'] is not None and previous['M2总量(亿元)'] != 0:
+                m2_mom = ((current['M2总量(亿元)'] - previous['M2总量(亿元)']) / previous['M2总量(亿元)']) * 100
+                current['M2总量环比(%)'] = round(m2_mom, 2)
+            else:
+                current['M2总量环比(%)'] = None
+            
+            # 计算M1环比
+            if current['M1总量(亿元)'] is not None and previous['M1总量(亿元)'] is not None and previous['M1总量(亿元)'] != 0:
+                m1_mom = ((current['M1总量(亿元)'] - previous['M1总量(亿元)']) / previous['M1总量(亿元)']) * 100
+                current['M1总量环比(%)'] = round(m1_mom, 2)
+            else:
+                current['M1总量环比(%)'] = None
+            
+            # 计算M0环比
+            if current['M0总量(亿元)'] is not None and previous['M0总量(亿元)'] is not None and previous['M0总量(亿元)'] != 0:
+                m0_mom = ((current['M0总量(亿元)'] - previous['M0总量(亿元)']) / previous['M0总量(亿元)']) * 100
+                current['M0总量环比(%)'] = round(m0_mom, 2)
+            else:
+                current['M0总量环比(%)'] = None
+        
+        # 第一个数据点没有前值，所以环比为None
+        if processed_total_data:
+            processed_total_data[0]['M2总量环比(%)'] = None
+            processed_total_data[0]['M1总量环比(%)'] = None
+            processed_total_data[0]['M0总量环比(%)'] = None
+        
+        # 将处理后的数据转换为字典，以日期为键
+        for item in processed_total_data:
+            date = item.pop('date')
+            money_total_dict[date] = item
         
         # 获取上海新房价格数据
         try:
@@ -1081,11 +1122,15 @@ def fetch_macro_china_money_supply():
                     '流通中现金_M0_同比增长': m0_growth
                 }
                 
-                # 添加货币总量数据（如果存在）
+                # 添加货币总量数据和环比数据（如果存在）
                 if formatted_date in money_total_dict:
                     item['M2总量(亿元)'] = money_total_dict[formatted_date]['M2总量(亿元)']
                     item['M1总量(亿元)'] = money_total_dict[formatted_date]['M1总量(亿元)']
                     item['M0总量(亿元)'] = money_total_dict[formatted_date]['M0总量(亿元)']
+                    # 添加环比数据
+                    item['M2总量环比(%)'] = money_total_dict[formatted_date].get('M2总量环比(%)')
+                    item['M1总量环比(%)'] = money_total_dict[formatted_date].get('M1总量环比(%)')
+                    item['M0总量环比(%)'] = money_total_dict[formatted_date].get('M0总量环比(%)')
                     matched_with_total += 1
                 else:
                     # 尝试其他可能的日期格式
@@ -1097,6 +1142,10 @@ def fetch_macro_china_money_supply():
                                 item['M2总量(亿元)'] = money_total_dict[key]['M2总量(亿元)']
                                 item['M1总量(亿元)'] = money_total_dict[key]['M1总量(亿元)']
                                 item['M0总量(亿元)'] = money_total_dict[key]['M0总量(亿元)']
+                                # 添加环比数据
+                                item['M2总量环比(%)'] = money_total_dict[key].get('M2总量环比(%)')
+                                item['M1总量环比(%)'] = money_total_dict[key].get('M1总量环比(%)')
+                                item['M0总量环比(%)'] = money_total_dict[key].get('M0总量环比(%)')
                                 found = True
                                 matched_with_total += 1
                                 break
@@ -1105,6 +1154,9 @@ def fetch_macro_china_money_supply():
                         item['M2总量(亿元)'] = None
                         item['M1总量(亿元)'] = None
                         item['M0总量(亿元)'] = None
+                        item['M2总量环比(%)'] = None
+                        item['M1总量环比(%)'] = None
+                        item['M0总量环比(%)'] = None
                 
                 # 添加房价数据（如果存在）
                 if formatted_date in house_price_dict:
