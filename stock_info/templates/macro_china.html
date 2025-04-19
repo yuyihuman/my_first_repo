@@ -120,20 +120,19 @@
             
             <!-- 数据表格 -->
             <div class="data-table">
-                <h3>货币供应量数据表</h3>
+                <h3>货币供应量与房价数据表</h3>
                 <div class="table-responsive">
                     <table class="table table-striped table-hover">
                         <thead>
                             <tr>
                                 <th>月份</th>
                                 <th>M2同比增长(%)</th>
-                                <th>M1同比增长(%)</th>
-                                <th>M0同比增长(%)</th>
+                                <th>上海二手住宅价格指数同比(%)</th>
                             </tr>
                         </thead>
                         <tbody id="moneySupplyTableBody">
                             <tr>
-                                <td colspan="4" class="text-center">加载中...</td>
+                                <td colspan="3" class="text-center">加载中...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -231,14 +230,21 @@
             // 反转数据以便按时间顺序显示（从早到晚）
             const sortedData = [...data].reverse();
             
-            // 提取数据
+            // 提取数据并处理null值
             const months = sortedData.map(item => item.月份);
-            const m2Growth = sortedData.map(item => item.货币和准货币_广义货币M2_同比增长);
-            const m1Growth = sortedData.map(item => item.货币_狭义货币M1_同比增长);
-            const m0Growth = sortedData.map(item => item.流通中现金_M0_同比增长);
+            const m2Growth = sortedData.map(item => {
+                // 处理null值，如果是null则返回null（Chart.js会自动跳过）
+                return item.货币和准货币_广义货币M2_同比增长 !== null ? 
+                    item.货币和准货币_广义货币M2_同比增长 : null;
+            });
+            const secondHandHousingData = sortedData.map(item => {
+                // 处理null值，如果是null则返回null
+                return item.上海二手住宅价格指数_同比 !== null ? 
+                    item.上海二手住宅价格指数_同比 : null;
+            });
             
             // 创建图表
-            createMoneySupplyChart(months, m2Growth, m1Growth, m0Growth);
+            createMoneySupplyChart(months, m2Growth, secondHandHousingData);
             
             // 更新表格
             updateMoneySupplyTable(data);
@@ -248,7 +254,7 @@
         }
         
         // 创建货币供应量图表
-        function createMoneySupplyChart(months, m2Growth, m1Growth, m0Growth) {
+        function createMoneySupplyChart(months, m2Growth, secondHandHousingData) {
             const ctx = document.getElementById('moneySupplyChart').getContext('2d');
             
             // 销毁旧图表（如果存在）
@@ -267,21 +273,18 @@
                             data: m2Growth,
                             borderColor: 'rgba(255, 99, 132, 1)',
                             backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                            tension: 0.1
+                            tension: 0.1,
+                            // 设置为true，允许跳过null值而不断线
+                            spanGaps: true
                         },
                         {
-                            label: 'M1同比增长(%)',
-                            data: m1Growth,
-                            borderColor: 'rgba(54, 162, 235, 1)',
-                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                            tension: 0.1
-                        },
-                        {
-                            label: 'M0同比增长(%)',
-                            data: m0Growth,
+                            label: '上海二手住宅价格指数同比(%)',
+                            data: secondHandHousingData,
                             borderColor: 'rgba(75, 192, 192, 1)',
                             backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                            tension: 0.1
+                            tension: 0.1,
+                            // 设置为true，允许跳过null值而不断线
+                            spanGaps: true
                         }
                     ]
                 },
@@ -291,7 +294,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: '中国货币供应量同比增长率(%)'
+                            text: 'M2与上海二手住宅价格指数同比变化(%)'
                         },
                         tooltip: {
                             mode: 'index',
@@ -302,7 +305,7 @@
                         y: {
                             title: {
                                 display: true,
-                                text: '同比增长率(%)'
+                                text: '同比变化率(%)'
                             }
                         },
                         x: {
@@ -315,7 +318,7 @@
                 }
             });
         }
-        
+
         // 更新货币供应量表格
         function updateMoneySupplyTable(data) {
             const tableBody = document.getElementById('moneySupplyTableBody');
@@ -329,11 +332,16 @@
             // 添加表格行
             data.forEach(item => {
                 const row = document.createElement('tr');
+                // 处理可能的null值，显示为"-"
+                const m2Value = item.货币和准货币_广义货币M2_同比增长 !== null ? 
+                    item.货币和准货币_广义货币M2_同比增长.toFixed(2) : "-";
+                const secondHandValue = item.上海二手住宅价格指数_同比 !== null ? 
+                    item.上海二手住宅价格指数_同比.toFixed(2) : "-";
+                
                 row.innerHTML = `
                     <td>${item.月份}</td>
-                    <td>${item.货币和准货币_广义货币M2_同比增长.toFixed(2)}</td>
-                    <td>${item.货币_狭义货币M1_同比增长.toFixed(2)}</td>
-                    <td>${item.流通中现金_M0_同比增长.toFixed(2)}</td>
+                    <td>${m2Value}</td>
+                    <td>${secondHandValue}</td>
                 `;
                 tableBody.appendChild(row);
             });
