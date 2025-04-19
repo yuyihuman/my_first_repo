@@ -975,6 +975,77 @@ def fetch_macro_china_money_supply():
             date = item.pop('date')
             money_total_dict[date] = item
         
+        # 新增：计算从2011年1月开始的指数值
+        # 首先找到2011年1月的数据作为基准点
+        base_date = "2011.1"
+        base_data = None
+        
+        # 创建一个按日期排序的数据列表，用于计算指数
+        sorted_dates = []
+        for date_str in money_total_dict.keys():
+            try:
+                # 解析日期格式为年和月
+                if '.' in date_str:
+                    year, month = date_str.split('.')
+                    year = int(year)
+                    month = int(month)
+                    # 创建一个可排序的日期字符串 (YYYYMM格式)
+                    sort_key = f"{year:04d}{month:02d}"
+                    sorted_dates.append((sort_key, date_str))
+            except Exception as e:
+                print(f"解析日期 {date_str} 出错: {e}")
+                continue
+        
+        # 按日期排序
+        sorted_dates.sort()
+        sorted_date_strings = [date_tuple[1] for date_tuple in sorted_dates]
+        
+        # 查找基准日期
+        if base_date in money_total_dict:
+            base_data = money_total_dict[base_date]
+        else:
+            # 如果找不到精确的2011.1，尝试找最接近的日期
+            for date_str in sorted_date_strings:
+                if '.' in date_str:
+                    year, month = date_str.split('.')
+                    if int(year) == 2011 and int(month) == 1:
+                        base_date = date_str
+                        base_data = money_total_dict[date_str]
+                        break
+        
+        # 如果找到了基准日期，计算指数
+        if base_data:
+            # 获取基准值
+            base_m2 = base_data.get('M2总量(亿元)')
+            base_m1 = base_data.get('M1总量(亿元)')
+            base_m0 = base_data.get('M0总量(亿元)')
+            
+            # 为每个日期计算指数值
+            for date_str in sorted_date_strings:
+                if date_str in money_total_dict:
+                    current_data = money_total_dict[date_str]
+                    
+                    # 计算M2指数
+                    if base_m2 is not None and current_data.get('M2总量(亿元)') is not None:
+                        m2_index = (current_data['M2总量(亿元)'] / base_m2) * 100
+                        current_data['M2指数(2011.1=100)'] = round(m2_index, 2)
+                    else:
+                        current_data['M2指数(2011.1=100)'] = None
+                    
+                    # 计算M1指数
+                    if base_m1 is not None and current_data.get('M1总量(亿元)') is not None:
+                        m1_index = (current_data['M1总量(亿元)'] / base_m1) * 100
+                        current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                    else:
+                        current_data['M1指数(2011.1=100)'] = None
+                    
+                    # 计算M0指数
+                    if base_m0 is not None and current_data.get('M0总量(亿元)') is not None:
+                        m0_index = (current_data['M0总量(亿元)'] / base_m0) * 100
+                        current_data['M0指数(2011.1=100)'] = round(m0_index, 2)
+                    else:
+                        current_data['M0指数(2011.1=100)'] = None
+        
         # 获取上海新房价格数据
         try:
             # 获取上海房价数据
@@ -1131,6 +1202,10 @@ def fetch_macro_china_money_supply():
                     item['M2总量环比(%)'] = money_total_dict[formatted_date].get('M2总量环比(%)')
                     item['M1总量环比(%)'] = money_total_dict[formatted_date].get('M1总量环比(%)')
                     item['M0总量环比(%)'] = money_total_dict[formatted_date].get('M0总量环比(%)')
+                    # 添加指数数据
+                    item['M2指数(2011.1=100)'] = money_total_dict[formatted_date].get('M2指数(2011.1=100)')
+                    item['M1指数(2011.1=100)'] = money_total_dict[formatted_date].get('M1指数(2011.1=100)')
+                    item['M0指数(2011.1=100)'] = money_total_dict[formatted_date].get('M0指数(2011.1=100)')
                     matched_with_total += 1
                 else:
                     # 尝试其他可能的日期格式
@@ -1146,6 +1221,10 @@ def fetch_macro_china_money_supply():
                                 item['M2总量环比(%)'] = money_total_dict[key].get('M2总量环比(%)')
                                 item['M1总量环比(%)'] = money_total_dict[key].get('M1总量环比(%)')
                                 item['M0总量环比(%)'] = money_total_dict[key].get('M0总量环比(%)')
+                                # 添加指数数据
+                                item['M2指数(2011.1=100)'] = money_total_dict[key].get('M2指数(2011.1=100)')
+                                item['M1指数(2011.1=100)'] = money_total_dict[key].get('M1指数(2011.1=100)')
+                                item['M0指数(2011.1=100)'] = money_total_dict[key].get('M0指数(2011.1=100)')
                                 found = True
                                 matched_with_total += 1
                                 break
@@ -1157,6 +1236,9 @@ def fetch_macro_china_money_supply():
                         item['M2总量环比(%)'] = None
                         item['M1总量环比(%)'] = None
                         item['M0总量环比(%)'] = None
+                        item['M2指数(2011.1=100)'] = None
+                        item['M1指数(2011.1=100)'] = None
+                        item['M0指数(2011.1=100)'] = None
                 
                 # 添加房价数据（如果存在）
                 if formatted_date in house_price_dict:
@@ -1200,7 +1282,7 @@ def fetch_macro_china_money_supply():
                 continue
         
         print(f"成功获取并缓存货币供应量、总量和房价数据，共{len(data)}条记录（2000年以后）")
-        
+
         # 准备返回数据
         result = {
             'status': 'success',
@@ -1215,10 +1297,18 @@ def fetch_macro_china_money_supply():
         return result
     
     except Exception as e:
-        print(f"获取中国宏观经济数据失败: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
+        print(f"获取货币供应量数据失败: {e}")
+        # 如果缓存文件存在，尝试读取缓存
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as cache_e:
+                print(f"读取缓存文件失败: {cache_e}")
+        
+        # 返回错误信息
         return {
             'status': 'error',
-            'message': str(e)
+            'message': f'获取数据失败: {str(e)}',
+            'data': []
         }
