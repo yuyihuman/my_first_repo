@@ -1046,7 +1046,9 @@ def fetch_macro_china_money_supply():
                     else:
                         current_data['M0指数(2011.1=100)'] = None
         
+        
         # 获取上海新房价格数据
+        house_price_dict = {}  # 初始化为空字典
         try:
             # 获取上海房价数据
             house_price_df = ak.macro_china_new_house_price(city_first="上海")
@@ -1110,7 +1112,60 @@ def fetch_macro_china_money_supply():
         except Exception as e:
             print(f"获取上海房价数据失败: {e}")
             house_price_dict = {}
+
+        # 新增：计算上海住宅价格指数
+        # 找到基准日期（2011.1）的房价数据
+        base_house_price_data = None
+        for date_str in sorted_date_strings:
+            if date_str in house_price_dict and '.' in date_str:
+                year, month = date_str.split('.')
+                if int(year) == 2011 and int(month) == 1:
+                    base_date_house = date_str
+                    base_house_price_data = house_price_dict[date_str]
+                    break
         
+        # 如果找不到2011.1的数据，使用最早的数据作为基准
+        if base_house_price_data is None and house_price_dict:
+            earliest_date = sorted_date_strings[0]
+            for date_str in sorted_date_strings:
+                if date_str in house_price_dict:
+                    earliest_date = date_str
+                    base_house_price_data = house_price_dict[date_str]
+                    break
+            print(f"未找到2011.1的房价数据，使用{earliest_date}作为基准")
+        
+        # 如果找到了基准日期的房价数据，计算指数
+        if base_house_price_data:
+            # 初始化基准指数值为100
+            new_house_index_base = 100.0
+            second_house_index_base = 100.0
+            
+            # 为每个日期计算房价指数
+            for date_str in sorted_date_strings:
+                if date_str in house_price_dict:
+                    # 计算从基准日期到当前日期的累积变化
+                    new_house_index = new_house_index_base
+                    second_house_index = second_house_index_base
+                    
+                    # 使用环比数据累积计算
+                    for i, curr_date in enumerate(sorted_date_strings):
+                        if curr_date == date_str:
+                            break
+                        
+                        if curr_date in house_price_dict:
+                            mom_new = house_price_dict[curr_date].get('新建商品住宅价格指数_环比')
+                            mom_second = house_price_dict[curr_date].get('二手住宅价格指数_环比')
+                            
+                            if mom_new is not None:
+                                new_house_index *= (1 + mom_new / 100)
+                            
+                            if mom_second is not None:
+                                second_house_index *= (1 + mom_second / 100)
+                    
+                    # 保存计算结果
+                    house_price_dict[date_str]['新建商品住宅价格指数(2011.1=100)'] = round(new_house_index, 2)
+                    house_price_dict[date_str]['二手住宅价格指数(2011.1=100)'] = round(second_house_index, 2)
+
         # 确保数据框不为空
         if money_supply_df.empty:
             return {
@@ -1246,6 +1301,8 @@ def fetch_macro_china_money_supply():
                     item['上海二手住宅价格指数_同比'] = house_price_dict[formatted_date]['二手住宅价格指数_同比']
                     item['上海新建商品住宅价格指数_环比'] = house_price_dict[formatted_date]['新建商品住宅价格指数_环比']
                     item['上海二手住宅价格指数_环比'] = house_price_dict[formatted_date]['二手住宅价格指数_环比']
+                    item['上海新建商品住宅价格指数(2011.1=100)'] = house_price_dict[formatted_date].get('新建商品住宅价格指数(2011.1=100)')
+                    item['上海二手住宅价格指数(2011.1=100)'] = house_price_dict[formatted_date].get('二手住宅价格指数(2011.1=100)')
                 else:
                     # 尝试其他可能的日期格式
                     found = False
@@ -1257,6 +1314,8 @@ def fetch_macro_china_money_supply():
                                 item['上海二手住宅价格指数_同比'] = house_price_dict[key]['二手住宅价格指数_同比']
                                 item['上海新建商品住宅价格指数_环比'] = house_price_dict[key]['新建商品住宅价格指数_环比']
                                 item['上海二手住宅价格指数_环比'] = house_price_dict[key]['二手住宅价格指数_环比']
+                                item['上海新建商品住宅价格指数(2011.1=100)'] = house_price_dict[key].get('新建商品住宅价格指数(2011.1=100)')
+                                item['上海二手住宅价格指数(2011.1=100)'] = house_price_dict[key].get('二手住宅价格指数(2011.1=100)')
                                 found = True
                                 break
                         elif '.' in formatted_date and '.' in key:
@@ -1265,6 +1324,8 @@ def fetch_macro_china_money_supply():
                                 item['上海二手住宅价格指数_同比'] = house_price_dict[key]['二手住宅价格指数_同比']
                                 item['上海新建商品住宅价格指数_环比'] = house_price_dict[key]['新建商品住宅价格指数_环比']
                                 item['上海二手住宅价格指数_环比'] = house_price_dict[key]['二手住宅价格指数_环比']
+                                item['上海新建商品住宅价格指数(2011.1=100)'] = house_price_dict[key].get('新建商品住宅价格指数(2011.1=100)')
+                                item['上海二手住宅价格指数(2011.1=100)'] = house_price_dict[key].get('二手住宅价格指数(2011.1=100)')
                                 found = True
                                 break
                     
@@ -1273,6 +1334,8 @@ def fetch_macro_china_money_supply():
                         item['上海二手住宅价格指数_同比'] = None
                         item['上海新建商品住宅价格指数_环比'] = None
                         item['上海二手住宅价格指数_环比'] = None
+                        item['上海新建商品住宅价格指数(2011.1=100)'] = None
+                        item['上海二手住宅价格指数(2011.1=100)'] = None
                 
                 data.append(item)
                 processed_rows += 1
