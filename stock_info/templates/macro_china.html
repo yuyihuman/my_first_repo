@@ -112,6 +112,17 @@
                 <canvas id="moneySupplyChart"></canvas>
             </div>
             
+            <!-- 新增：指数对比图表 -->
+            <div class="chart-container">
+                <div id="indexComparisonChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="indexComparisonChart"></canvas>
+            </div>
+            
             <!-- 数据表格 -->
             <div class="data-table">
                 <h3>货币供应量与房价数据表</h3>
@@ -154,21 +165,19 @@
     <script>
         // 全局变量
         let moneySupplyChart = null;
+        let indexComparisonChart = null;
         
         // 页面加载完成后执行
         document.addEventListener('DOMContentLoaded', function() {
             // 获取货币供应量数据
             fetchMoneySupplyData();
-            
-            // 移除刷新按钮点击事件
         });
         
         // 获取货币供应量数据
         function fetchMoneySupplyData(showLoading = false) {
-            // 移除刷新按钮相关代码
-            
             // 显示图表加载状态
             document.getElementById('moneySupplyChartLoading').style.display = 'flex';
+            document.getElementById('indexComparisonChartLoading').style.display = 'flex';
             
             // 发起API请求
             fetch('/api/macro/money_supply')
@@ -191,6 +200,7 @@
                         
                         // 隐藏加载状态
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
+                        document.getElementById('indexComparisonChartLoading').style.display = 'none';
                     }
                 })
                 .catch(error => {
@@ -203,8 +213,8 @@
                     
                     // 隐藏加载状态
                     document.getElementById('moneySupplyChartLoading').style.display = 'none';
+                    document.getElementById('indexComparisonChartLoading').style.display = 'none';
                 });
-                // 移除finally部分，因为它只处理刷新按钮状态
         }
         
         // 处理数据并显示图表和表格
@@ -233,11 +243,15 @@
             // 创建图表
             createMoneySupplyChart(months, m2Growth, m1Growth, secondHandHousingData);
             
+            // 创建指数对比图表
+            createIndexComparisonChart(sortedData);
+            
             // 更新表格
             updateMoneySupplyTable(data);
             
             // 隐藏加载状态
             document.getElementById('moneySupplyChartLoading').style.display = 'none';
+            document.getElementById('indexComparisonChartLoading').style.display = 'none';
         }
         
         // 创建货币供应量图表
@@ -322,6 +336,112 @@
                             title: {
                                 display: true,
                                 text: '月份'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 新增：创建指数对比图表
+        function createIndexComparisonChart(data) {
+            // 筛选2011年1月之后的数据
+            const filteredData = data.filter(item => {
+                if (item['月份'].includes('.')) {
+                    const [year, month] = item['月份'].split('.');
+                    return parseInt(year) >= 2011;
+                } else if (item['月份'].includes('-')) {
+                    const [year, month] = item['月份'].split('-');
+                    return parseInt(year) >= 2011;
+                }
+                return false;
+            });
+            
+            const labels = filteredData.map(item => item['月份']);
+            const m2IndexData = filteredData.map(item => item['M2指数(2011.1=100)']);
+            const m1IndexData = filteredData.map(item => item['M1指数(2011.1=100)']);
+            const houseIndexData = filteredData.map(item => item['上海二手住宅价格指数(2011.1=100)']);
+            
+            const ctx = document.getElementById('indexComparisonChart').getContext('2d');
+            
+            // 销毁旧图表（如果存在）
+            if (indexComparisonChart) {
+                indexComparisonChart.destroy();
+            }
+            
+            // 创建新图表
+            indexComparisonChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'M2指数(2011.1=100)',
+                            data: m2IndexData,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: 'M1指数(2011.1=100)',
+                            data: m1IndexData,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: '上海二手住宅价格指数(2011.1=100)',
+                            data: houseIndexData,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'M2、M1和上海二手房价指数对比(2011.1=100)',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        legend: {
+                            position: 'top',
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: '指数值(2011.1=100)'
                             }
                         }
                     }

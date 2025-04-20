@@ -951,7 +951,12 @@ def fetch_macro_china_money_supply():
                 current['M2总量环比(%)'] = None
             
             # 计算M1环比
-            if current['M1总量(亿元)'] is not None and previous['M1总量(亿元)'] is not None and previous['M1总量(亿元)'] != 0:
+            # 特殊处理2024年1月的M1环比值
+            current_date = current.get('date', '')
+            if current_date == '2024.1':
+                # 2024年1月M1计算方法变更，将环比值设为0
+                current['M1总量环比(%)'] = 0
+            elif current['M1总量(亿元)'] is not None and previous['M1总量(亿元)'] is not None and previous['M1总量(亿元)'] != 0:
                 m1_mom = ((current['M1总量(亿元)'] - previous['M1总量(亿元)']) / previous['M1总量(亿元)']) * 100
                 current['M1总量环比(%)'] = round(m1_mom, 2)
             else:
@@ -1032,12 +1037,50 @@ def fetch_macro_china_money_supply():
                     else:
                         current_data['M2指数(2011.1=100)'] = None
                     
-                    # 计算M1指数
-                    if base_m1 is not None and current_data.get('M1总量(亿元)') is not None:
+                    # 特殊处理M1指数
+                    if date_str == '2023.12' and base_m1 is not None and current_data.get('M1总量(亿元)') is not None:
+                        # 记录2023年12月的M1指数值
                         m1_index = (current_data['M1总量(亿元)'] / base_m1) * 100
-                        current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                        dec_2023_m1_index = round(m1_index, 2)
+                        current_data['M1指数(2011.1=100)'] = dec_2023_m1_index
+                    elif date_str == '2024.1':
+                        # 2024年1月的M1指数与2023年12月保持一致
+                        if dec_2023_m1_index is not None:
+                            current_data['M1指数(2011.1=100)'] = dec_2023_m1_index
+                        else:
+                            # 如果没有找到2023年12月的数据，仍然使用常规计算方法
+                            if base_m1 is not None and current_data.get('M1总量(亿元)') is not None:
+                                m1_index = (current_data['M1总量(亿元)'] / base_m1) * 100
+                                current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                            else:
+                                current_data['M1指数(2011.1=100)'] = None
+                    elif date_str > '2024.1' and base_m1 is not None:
+                        # 2024年1月之后的月份，基于2024年1月的指数值和总量变化计算
+                        # 查找2024年1月的数据
+                        jan_2024_data = None
+                        for d in sorted_date_strings:
+                            if d == '2024.1' and d in money_total_dict:
+                                jan_2024_data = money_total_dict[d]
+                                break
+                        
+                        if jan_2024_data and 'M1指数(2011.1=100)' in jan_2024_data and jan_2024_data['M1指数(2011.1=100)'] is not None and jan_2024_data.get('M1总量(亿元)') is not None and current_data.get('M1总量(亿元)') is not None:
+                            # 基于2024年1月的指数和总量变化计算
+                            m1_index = jan_2024_data['M1指数(2011.1=100)'] * (current_data['M1总量(亿元)'] / jan_2024_data['M1总量(亿元)'])
+                            current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                        else:
+                            # 如果没有找到2024年1月的数据，使用常规计算方法
+                            if current_data.get('M1总量(亿元)') is not None:
+                                m1_index = (current_data['M1总量(亿元)'] / base_m1) * 100
+                                current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                            else:
+                                current_data['M1指数(2011.1=100)'] = None
                     else:
-                        current_data['M1指数(2011.1=100)'] = None
+                        # 2024年1月之前的月份，使用常规计算方法
+                        if base_m1 is not None and current_data.get('M1总量(亿元)') is not None:
+                            m1_index = (current_data['M1总量(亿元)'] / base_m1) * 100
+                            current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                        else:
+                            current_data['M1指数(2011.1=100)'] = None
                     
                     # 计算M0指数
                     if base_m0 is not None and current_data.get('M0总量(亿元)') is not None:
