@@ -1,47 +1,123 @@
 from flask import Flask, render_template, jsonify, request, send_from_directory
-import data_fetcher
+# 导入新的数据模块
+from data import (
+    ensure_cache_directories,
+    get_lhb_top10,
+    get_stock_financial_data,
+    get_hkstock_data,
+    get_northbound_data,
+    get_hkstock_finance,
+    fetch_macro_china_money_supply
+)
 import os
+import logging
 
 # 创建应用实例
 app = Flask(__name__)
 
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+
 # 确保缓存目录存在
-data_fetcher.ensure_cache_directories()
+ensure_cache_directories()
 
 # 设置静态文件缓存时间（1天）
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400
 
+# 主页
 @app.route('/')
 def index():
     return render_template('index.html')
 
+# A股个股信息页面
 @app.route('/stock_info')
 def stock_info():
     return render_template('stock_info.html')
 
+# 龙虎榜页面
 @app.route('/lhb')
 def lhb():
     return render_template('lhb.html')
 
+# 港股通南向资金页面
+@app.route('/hkstock')
+def hkstock():
+    return render_template('hkstock.html')
+
+# 港股通北向资金页面
+@app.route('/northbound')
+def northbound():
+    return render_template('northbound.html')
+
+# 港股个股信息页面
+@app.route('/hkstock_info')
+def hkstock_info():
+    return render_template('hkstock_info.html')
+
+# 中国宏观经济数据页面
+@app.route('/macro_china')
+def macro_china():
+    return render_template('macro_china.html')
+
+# API路由 - 龙虎榜数据
 @app.route('/api/lhb_data')
 def lhb_data():
     # 确保缓存目录存在
-    data_fetcher.ensure_cache_directories()
+    ensure_cache_directories()
     # 获取龙虎榜数据
-    data = data_fetcher.get_lhb_top10()
+    data = get_lhb_top10()
     return jsonify(data)
 
+# API路由 - A股财务数据
 @app.route('/api/stock_finance')
 def stock_finance():
     # 确保缓存目录存在
-    data_fetcher.ensure_cache_directories()
+    ensure_cache_directories()
     stock_code = request.args.get('code', '')
     if not stock_code:
         return jsonify({'error': '请提供股票代码'})
     
-    data = data_fetcher.get_stock_financial_data(stock_code)
+    data = get_stock_financial_data(stock_code)
     return jsonify(data)
 
+# API路由 - 港股通南向资金数据
+@app.route('/api/hkstock')
+def api_hkstock_data():
+    """获取港股通南向资金数据API"""
+    data = get_hkstock_data()
+    return jsonify(data)
+
+# API路由 - 港股通北向资金数据
+@app.route('/api/northbound')
+def api_northbound():
+    """获取北向资金数据的API"""
+    refresh = request.args.get('refresh', 'false').lower() == 'true'
+    data = get_northbound_data(refresh=refresh)
+    return jsonify(data)
+
+# API路由 - 港股个股财务数据
+@app.route('/api/hkstock_info/<stock_code>')
+def api_hkstock_info(stock_code):
+    """获取港股个股信息API"""
+    try:
+        data = get_hkstock_finance(stock_code)
+        return jsonify(data)
+    except Exception as e:
+        app.logger.error(f"获取港股个股信息出错: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# API路由 - 中国货币供应量数据
+@app.route('/api/macro/money_supply')
+def macro_money_supply():
+    """获取中国货币供应量数据API"""
+    try:
+        data = fetch_macro_china_money_supply()
+        return jsonify(data)
+    except Exception as e:
+        app.logger.error(f"获取货币供应量数据时出错: {e}")
+        return jsonify({"status": "error", "message": str(e)})
+
+# 工具路由 - 检查静态资源
 @app.route('/check_static')
 def check_static():
     """检查静态资源是否正确加载"""
@@ -54,68 +130,11 @@ def check_static():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
 
-# 添加本地CDN资源路由（可选，如果您决定本地化CDN资源）
+# 工具路由 - 本地CDN资源
 @app.route('/cdn/<path:filename>')
 def serve_cdn(filename):
+    """提供本地CDN资源"""
     return send_from_directory('static/cdn', filename)
-
-@app.route('/api/hkstock')
-def hkstock_data():
-    """获取港股通数据API"""
-    data = data_fetcher.get_hkstock_data()
-    return jsonify(data)
-
-@app.route('/hkstock')
-def hkstock():
-    return render_template('hkstock.html')
-
-@app.route('/northbound')
-def northbound():
-    """港股通北向资金页面"""
-    return render_template('northbound.html')
-
-@app.route('/api/northbound')
-def api_northbound():
-    """获取北向资金数据的API"""
-    refresh = request.args.get('refresh', 'false').lower() == 'true'
-    data = data_fetcher.get_northbound_data(refresh=refresh)
-    return jsonify(data)
-
-# 添加以下路由
-
-@app.route('/hkstock_info')
-def hkstock_info():
-    """港股个股信息页面"""
-    return render_template('hkstock_info.html')
-
-@app.route('/api/hkstock_info/<stock_code>')
-def get_hkstock_info(stock_code):
-    """获取港股个股信息API"""
-    try:
-        data = data_fetcher.get_hkstock_finance(stock_code)
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# 添加宏观经济数据相关路由
-@app.route('/macro_china')
-def macro_china():
-    """渲染中国宏观经济数据页面"""
-    return render_template('macro_china.html')
-
-@app.route('/api/macro/money_supply')
-def api_macro_money_supply():
-    """API端点：获取货币供应量数据"""
-    try:
-        # 调用数据获取函数
-        money_supply_data = data_fetcher.fetch_macro_china_money_supply()
-        return jsonify(money_supply_data)
-    except Exception as e:
-        app.logger.error(f"获取货币供应量数据时出错: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': f'获取数据失败: {str(e)}'
-        })
 
 if __name__ == '__main__':
     # 生产环境中关闭调试模式

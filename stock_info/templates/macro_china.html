@@ -225,17 +225,18 @@
             // 提取数据并处理null值
             const months = sortedData.map(item => item.月份);
             const m2Growth = sortedData.map(item => {
-                // 处理null值，如果是null则返回null（Chart.js会自动跳过）
-                return item.货币和准货币_广义货币M2_同比增长 !== null ? 
-                    item.货币和准货币_广义货币M2_同比增长 : null;
+                // 修正字段名：使用正确的字段名
+                return item.货币和准货币_广义货币M2_同比 !== null ? 
+                    item.货币和准货币_广义货币M2_同比 : null;
             });
             // 添加M1增速数据
             const m1Growth = sortedData.map(item => {
-                return item.货币_狭义货币M1_同比增长 !== null ? 
-                    item.货币_狭义货币M1_同比增长 : null;
+                // 修正字段名：使用正确的字段名
+                return item.货币_狭义货币M1_同比 !== null ? 
+                    item.货币_狭义货币M1_同比 : null;
             });
             const secondHandHousingData = sortedData.map(item => {
-                // 处理null值，如果是null则返回null
+                // 修正字段名：使用正确的字段名
                 return item.上海二手住宅价格指数_同比 !== null ? 
                     item.上海二手住宅价格指数_同比 : null;
             });
@@ -462,13 +463,19 @@
             // 添加表格行
             data.forEach(item => {
                 const row = document.createElement('tr');
-                // 处理可能的null值，显示为"-"
-                const m2Value = item.货币和准货币_广义货币M2_同比增长 !== null ? 
-                    item.货币和准货币_广义货币M2_同比增长.toFixed(2) : "-";
-                const m1Value = item.货币_狭义货币M1_同比增长 !== null ? 
-                    item.货币_狭义货币M1_同比增长.toFixed(2) : "-";
-                const secondHandValue = item.上海二手住宅价格指数_同比 !== null ? 
-                    item.上海二手住宅价格指数_同比.toFixed(2) : "-";
+                
+                // 修正字段名：使用正确的字段名并添加空值检查
+                const m2Value = item.货币和准货币_广义货币M2_同比 !== undefined && item.货币和准货币_广义货币M2_同比 !== null 
+                    ? item.货币和准货币_广义货币M2_同比.toFixed(2) 
+                    : "-";
+                    
+                const m1Value = item.货币_狭义货币M1_同比 !== undefined && item.货币_狭义货币M1_同比 !== null 
+                    ? item.货币_狭义货币M1_同比.toFixed(2) 
+                    : "-";
+                    
+                const secondHandValue = item.上海二手住宅价格指数_同比 !== undefined && item.上海二手住宅价格指数_同比 !== null 
+                    ? item.上海二手住宅价格指数_同比.toFixed(2) 
+                    : "-";
                 
                 row.innerHTML = `
                     <td>${item.月份}</td>
