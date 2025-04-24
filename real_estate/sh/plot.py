@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pypinyin import pinyin, Style
 import argparse
 import datetime
+import matplotlib.dates as mdates
 
 # 在绘图前设置全局字体
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置默认字体为黑体
@@ -33,8 +34,8 @@ df = pd.DataFrame(data)
 # 剔除价格为0和小于20000的异常值
 df = df[(df['price'] != 0) & (df['price'] >= 20000)]
 
-# 将面积转换为字符串类型，然后提取数字
-df['area'] = df['area'].astype(str).str.extract('(\d+)').astype(float)
+# 将面积转换为字符串类型，然后提取数字 - 修复无效的转义序列
+df['area'] = df['area'].astype(str).str.extract(r'(\d+)').astype(float)
 
 # 按日期排序
 df['date'] = pd.to_datetime(df['date'], format='%Y.%m.%d')
@@ -62,17 +63,33 @@ for area_range in area_ranges:
     area_min, area_max = area_range
 
     # 筛选符合面积范围的数据
-    filtered_df = df[(df['area'] >= area_min) & (df['area'] < area_max)]
+    filtered_df = df[(df['area'] >= area_min) & (df['area'] < area_max)].copy()  # 使用.copy()创建副本避免SettingWithCopyWarning
 
-    # 计算移动平均线
-    filtered_df['moving_avg'] = filtered_df['price'].rolling(window=20, min_periods=20).mean()
-
+    # 添加月份列
+    filtered_df['year_month'] = filtered_df['date'].dt.strftime('%Y-%m')
+    
+    # 计算每月平均价格
+    monthly_avg = filtered_df.groupby('year_month')['price'].mean().reset_index()
+    monthly_avg['date'] = pd.to_datetime(monthly_avg['year_month'])
+    
+    # 确保每月都有数据（如果某月没有数据，使用上个月的数据）
+    all_months = pd.date_range(start=filtered_df['date'].min(), end=filtered_df['date'].max(), freq='MS')
+    all_months_df = pd.DataFrame({'date': all_months})
+    all_months_df['year_month'] = all_months_df['date'].dt.strftime('%Y-%m')
+    
+    # 合并实际数据和所有月份
+    monthly_avg_complete = pd.merge(all_months_df, monthly_avg[['year_month', 'price']], 
+                                    on='year_month', how='left')
+    
+    # 向前填充缺失值（使用上个月的数据）- 修复弃用警告
+    monthly_avg_complete['price'] = monthly_avg_complete['price'].ffill()
+    
     # 创建一个图形对象
     fig, axes = plt.subplots(nrows=3, figsize=(10, 15))
 
-    # 绘制价格移动平均线图
-    axes[0].plot(filtered_df['date'], filtered_df['moving_avg'], label='Moving Average', color='blue')
-    axes[0].scatter(filtered_df['date'], filtered_df['price'], label='Price', color='red', marker='o')
+    # 绘制价格月度均值图
+    axes[0].plot(monthly_avg_complete['date'], monthly_avg_complete['price'], label='月度均价', color='blue')
+    axes[0].scatter(filtered_df['date'], filtered_df['price'], label='成交价', color='red', marker='o', alpha=0.3)
     
     # 添加固定价格水平线
     price_levels = range(30000, 100000, 10000)  # 从30000到90000每隔10000的水平线
@@ -82,11 +99,11 @@ for area_range in area_ranges:
 
     # 添加平均价格的水平线
     avg_price = filtered_df['price'].mean()
-    axes[0].axhline(avg_price, color='green', linestyle='--', linewidth=1, label=f'Average Price: {avg_price:.2f}')
+    axes[0].axhline(avg_price, color='green', linestyle='--', linewidth=1, label=f'总均价: {avg_price:.2f}')
 
-    axes[0].set_title(f'Moving Average Price vs Date (Area: {area_min}-{area_max})')
-    axes[0].set_xlabel('Date')
-    axes[0].set_ylabel('Price')
+    axes[0].set_title(f'月度均价 vs 日期 (面积: {area_min}-{area_max})')
+    axes[0].set_xlabel('日期')
+    axes[0].set_ylabel('价格')
     axes[0].legend(loc='upper left')
 
     # 绘制年度成交量柱状图
@@ -99,7 +116,6 @@ for area_range in area_ranges:
     if current_year in yearly_transactions.index:
         # 计算前几年每月销售占比
         filtered_df['month'] = filtered_df['date'].dt.month
-        filtered_df['year_month'] = filtered_df['date'].dt.strftime('%Y-%m')
         
         # 获取历史年份（不包括当前年份）
         historical_years = [year for year in yearly_transactions.index if year < current_year]
@@ -168,9 +184,9 @@ for area_range in area_ranges:
     else:
         bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
     
-    axes[1].set_title(f'Yearly Transactions (Area: {area_min}-{area_max})')
-    axes[1].set_xlabel('Year')
-    axes[1].set_ylabel('Transactions')
+    axes[1].set_title(f'年度成交量 (面积: {area_min}-{area_max})')
+    axes[1].set_xlabel('年份')
+    axes[1].set_ylabel('成交量')
     axes[1].set_xticks(yearly_transactions.index)
     axes[1].set_xticklabels(yearly_transactions.index, rotation=45)
     
@@ -187,12 +203,25 @@ for area_range in area_ranges:
     if current_year in yearly_transactions.index:
         axes[1].legend(loc='upper left')
 
-    # 绘制月度成交量折线图
+    # 绘制月度成交量柱状图（改进版）
     monthly_transactions = filtered_df.groupby(filtered_df['date'].dt.to_period('M')).size()
-    axes[2].plot(monthly_transactions.index.to_timestamp(), monthly_transactions.values, label='Monthly Transactions', color='green')
-    axes[2].set_title(f'Monthly Transactions (Area: {area_min}-{area_max})')
-    axes[2].set_xlabel('Year')
-    axes[2].set_ylabel('Transactions')
+    
+    # 将月度数据按季度重新采样，使柱子更宽
+    monthly_dates = monthly_transactions.index.to_timestamp()
+    
+    # 设置柱子宽度
+    width = 20  # 以天为单位的宽度
+    
+    # 绘制柱状图，增加宽度
+    bars2 = axes[2].bar(monthly_dates, monthly_transactions.values, 
+                       width=width, color='green', alpha=0.7, 
+                       align='center', label='月度成交量')
+    
+    # 不添加数值标签
+    
+    axes[2].set_title(f'月度成交量 (面积: {area_min}-{area_max})')
+    axes[2].set_xlabel('年份')
+    axes[2].set_ylabel('成交量')
     axes[2].legend(loc='upper left')
     
     # 设置横坐标只显示年份
@@ -200,7 +229,14 @@ for area_range in area_ranges:
     unique_years = sorted(set(years))
     axes[2].set_xticks([pd.Timestamp(year=year, month=1, day=1) for year in unique_years])
     axes[2].set_xticklabels(unique_years, rotation=45)
-
+    
+    # 调整x轴范围，确保所有柱子都能显示
+    if len(monthly_dates) > 0:
+        date_min = min(monthly_dates)
+        date_max = max(monthly_dates)
+        # 在两端各增加一个月的空间
+        axes[2].set_xlim(date_min - pd.Timedelta(days=30), date_max + pd.Timedelta(days=30))
+    
     # 保存图像
     image_path = f'plot_{area_min}_{area_max}.png'
     plt.tight_layout()
