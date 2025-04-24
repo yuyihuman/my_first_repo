@@ -8,6 +8,7 @@ from pypinyin import pinyin, Style
 import argparse
 import datetime
 import matplotlib.dates as mdates
+import numpy as np
 
 # 在绘图前设置全局字体
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置默认字体为黑体
@@ -206,18 +207,31 @@ for area_range in area_ranges:
     # 绘制月度成交量柱状图（改进版）
     monthly_transactions = filtered_df.groupby(filtered_df['date'].dt.to_period('M')).size()
     
-    # 将月度数据按季度重新采样，使柱子更宽
-    monthly_dates = monthly_transactions.index.to_timestamp()
+    # 将月度数据按年份分组
+    monthly_df = pd.DataFrame({
+        'date': monthly_transactions.index.to_timestamp(),
+        'count': monthly_transactions.values
+    })
+    monthly_df['year'] = monthly_df['date'].dt.year
     
     # 设置柱子宽度
     width = 20  # 以天为单位的宽度
     
-    # 绘制柱状图，增加宽度
-    bars2 = axes[2].bar(monthly_dates, monthly_transactions.values, 
-                       width=width, color='green', alpha=0.7, 
-                       align='center', label='月度成交量')
+    # 定义两种交替的颜色
+    colors = ['#4CAF50', '#2196F3']  # 绿色和蓝色
     
-    # 不添加数值标签
+    # 获取所有年份并排序
+    years = sorted(monthly_df['year'].unique())
+    
+    # 为每个年份绘制柱状图，使用交替的颜色
+    for i, year in enumerate(years):
+        year_data = monthly_df[monthly_df['year'] == year]
+        color = colors[i % len(colors)]  # 交替使用两种颜色
+        
+        # 绘制该年份的柱状图
+        bars2 = axes[2].bar(year_data['date'], year_data['count'], 
+                           width=width, color=color, alpha=0.7, 
+                           align='center', label=f'{year}年')
     
     axes[2].set_title(f'月度成交量 (面积: {area_min}-{area_max})')
     axes[2].set_xlabel('年份')
@@ -225,15 +239,14 @@ for area_range in area_ranges:
     axes[2].legend(loc='upper left')
     
     # 设置横坐标只显示年份
-    years = monthly_transactions.index.to_timestamp().year
-    unique_years = sorted(set(years))
+    unique_years = sorted(set(monthly_df['year']))
     axes[2].set_xticks([pd.Timestamp(year=year, month=1, day=1) for year in unique_years])
     axes[2].set_xticklabels(unique_years, rotation=45)
     
     # 调整x轴范围，确保所有柱子都能显示
-    if len(monthly_dates) > 0:
-        date_min = min(monthly_dates)
-        date_max = max(monthly_dates)
+    if len(monthly_df) > 0:
+        date_min = min(monthly_df['date'])
+        date_max = max(monthly_df['date'])
         # 在两端各增加一个月的空间
         axes[2].set_xlim(date_min - pd.Timedelta(days=30), date_max + pd.Timedelta(days=30))
     
