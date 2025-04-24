@@ -29,7 +29,7 @@ def scroll_up():
     start_x = 500  # X coordinate remains the same
     start_y = 1700  # Starting Y coordinate
     end_x = 500    # X coordinate remains the same
-    end_y = 900  # Ending Y coordinate is `pixels` amount up from start_y
+    end_y = 1100  # Ending Y coordinate is `pixels` amount up from start_y
     adb_command(f"adb shell input swipe {start_x} {start_y} {end_x} {end_y}")
     time.sleep(1)  # wait for the scroll to finish
 
