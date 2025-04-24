@@ -2,9 +2,15 @@ import json
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 from PIL import Image, ImageDraw, ImageFont
 from pypinyin import pinyin, Style
 import argparse
+import datetime
+
+# 在绘图前设置全局字体
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置默认字体为黑体
+plt.rcParams['axes.unicode_minus'] = False  # 解决保存图像时负号'-'显示为方块的问题
 
 def get_pinyin_initials(text):
     return ''.join([item[0][0] for item in pinyin(text, style=Style.FIRST_LETTER)])
@@ -85,19 +91,101 @@ for area_range in area_ranges:
 
     # 绘制年度成交量柱状图
     yearly_transactions = filtered_df.groupby(filtered_df['date'].dt.year).size()
-    bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+    
+    # 获取当前年份
+    current_year = datetime.datetime.now().year
+    
+    # 检查是否有当前年份的数据
+    if current_year in yearly_transactions.index:
+        # 计算前几年每月销售占比
+        filtered_df['month'] = filtered_df['date'].dt.month
+        filtered_df['year_month'] = filtered_df['date'].dt.strftime('%Y-%m')
+        
+        # 获取历史年份（不包括当前年份）
+        historical_years = [year for year in yearly_transactions.index if year < current_year]
+        
+        if len(historical_years) > 0:
+            # 计算历史年份的月度销售占比
+            monthly_ratios = {}
+            for year in historical_years:
+                year_data = filtered_df[filtered_df['year'] == year]
+                year_total = year_data.shape[0]
+                if year_total > 0:  # 避免除以零
+                    for month in range(1, 13):
+                        month_data = year_data[year_data['month'] == month]
+                        month_count = month_data.shape[0]
+                        if month not in monthly_ratios:
+                            monthly_ratios[month] = []
+                        monthly_ratios[month].append(month_count / year_total)
+            
+            # 计算每月平均占比
+            avg_monthly_ratios = {month: sum(ratios)/len(ratios) if ratios else 0 
+                                for month, ratios in monthly_ratios.items()}
+            
+            # 获取当前年份已有数据的最后一个月
+            current_year_data = filtered_df[filtered_df['year'] == current_year]
+            current_months = current_year_data['month'].unique()
+            last_month = max(current_months) if len(current_months) > 0 else 0
+            
+            # 计算当前年份已有销量
+            current_year_sales = current_year_data.shape[0]
+            
+            # 如果当前年份有数据且不是12月（即年份未结束）
+            if last_month > 0 and last_month < 12:
+                # 计算已有月份的总占比
+                completed_ratio = sum([avg_monthly_ratios.get(m, 0) for m in range(1, last_month + 1)])
+                
+                # 避免除以零
+                if completed_ratio > 0:
+                    # 预测全年销量
+                    predicted_total = current_year_sales / completed_ratio
+                    
+                    # 创建预测数据
+                    actual_sales = yearly_transactions[current_year]
+                    predicted_additional = max(0, predicted_total - actual_sales)  # 确保预测增量为正
+                    
+                    # 绘制实际销量和预测销量
+                    bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+                    
+                    # 在当前年份的柱子上叠加预测部分
+                    if predicted_additional > 0:
+                        axes[1].bar([current_year], [predicted_additional], bottom=[actual_sales], 
+                                   color='lightblue', alpha=0.7, label='预测销量')
+                        
+                        # 在柱子顶部添加预测总量标签
+                        total_height = actual_sales + predicted_additional
+                        axes[1].annotate(f'预测: {int(total_height)}',
+                                       xy=(current_year, total_height),
+                                       xytext=(0, 5),
+                                       textcoords="offset points",
+                                       ha='center', va='bottom')
+                else:
+                    bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+            else:
+                bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+        else:
+            bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+    else:
+        bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+    
     axes[1].set_title(f'Yearly Transactions (Area: {area_min}-{area_max})')
     axes[1].set_xlabel('Year')
     axes[1].set_ylabel('Transactions')
     axes[1].set_xticks(yearly_transactions.index)
     axes[1].set_xticklabels(yearly_transactions.index, rotation=45)
+    
+    # 为每个柱子添加数值标签
     for bar in bars:
         height = bar.get_height()
-        axes[1].annotate('{}'.format(height),
+        axes[1].annotate('{}'.format(int(height)),
                          xy=(bar.get_x() + bar.get_width() / 2, height),
                          xytext=(0, 3),
                          textcoords="offset points",
                          ha='center', va='bottom')
+    
+    # 添加图例
+    if current_year in yearly_transactions.index:
+        axes[1].legend(loc='upper left')
 
     # 绘制月度成交量折线图
     monthly_transactions = filtered_df.groupby(filtered_df['date'].dt.to_period('M')).size()
