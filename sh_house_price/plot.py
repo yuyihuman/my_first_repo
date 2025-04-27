@@ -308,7 +308,15 @@ ImageDraw.Draw(combined_image).text(title_position, title_text, fill='black', fo
 
 # 保存组合图像
 final_image_path = f"images/final/{current_community}.png"
-combined_image.save(final_image_path)
+
+# 缩放图像到50%
+combined_image_resized = combined_image.resize(
+    (int(combined_image.width * 0.3), int(combined_image.height * 0.3)), 
+    Image.LANCZOS  # 使用LANCZOS算法提供更好的缩小质量
+)
+
+# 保存缩放后的图像
+combined_image_resized.save(final_image_path)
 
 # 删除中间过程的图像文件
 for image_path in images:
