@@ -25,8 +25,13 @@ args = parser.parse_args()
 current_community = args.name
 filename = get_pinyin_initials(current_community)  # 自动提取拼音首字母
 
+# 确保目录存在
+os.makedirs("data_files", exist_ok=True)
+os.makedirs("images/temp", exist_ok=True)
+os.makedirs("images/final", exist_ok=True)
+
 # 加载JSON文件并解析成Python对象
-with open(filename, 'r', encoding='utf-8') as file:
+with open(f"data_files/{filename}", 'r', encoding='utf-8') as file:
     data = json.load(file)
 
 # 转换成DataFrame格式
@@ -251,11 +256,11 @@ for area_range in area_ranges:
         axes[2].set_xlim(date_min - pd.Timedelta(days=30), date_max + pd.Timedelta(days=30))
     
     # 保存图像
-    image_path = f'plot_{area_min}_{area_max}.png'
+    image_path = f'images/temp/plot_{area_min}_{area_max}.png'
     plt.tight_layout()
-    plt.savefig(image_path)
-    images.append(image_path)
+    plt.savefig(image_path, dpi=300, bbox_inches='tight')
     plt.close()
+    images.append(image_path)
 
 # 合并所有面积区间的图像并添加标题
 combined_image_height = 0
@@ -302,7 +307,7 @@ title_position = ((combined_image.width - title_width) // 2, 20)
 ImageDraw.Draw(combined_image).text(title_position, title_text, fill='black', font=title_font)
 
 # 保存组合图像
-final_image_path = current_community + '.png'
+final_image_path = f"images/final/{current_community}.png"
 combined_image.save(final_image_path)
 
 # 删除中间过程的图像文件

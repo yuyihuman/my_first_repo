@@ -22,7 +22,7 @@ def set_resolution(width, height):
 
 def capture_screenshot(filename="screenshot.png"):
     adb_command(f"adb shell screencap -p /sdcard/{filename}")
-    adb_command(f"adb pull /sdcard/{filename} {filename}")
+    adb_command(f"adb pull /sdcard/{filename} images/temp/{filename}")
     adb_command(f"adb shell rm /sdcard/{filename}")
 
 def scroll_up():
@@ -33,9 +33,16 @@ def scroll_up():
     adb_command(f"adb shell input swipe {start_x} {start_y} {end_x} {end_y}")
     time.sleep(1)  # wait for the scroll to finish
 
-def preprocess_image(image_path="screenshot.png"):
-    # Open the image
-    img = Image.open(image_path)
+def preprocess_image(filename):
+    # 更新文件路径
+    input_path = f"images/temp/{filename}"
+    output_path = f"images/temp/preprocessed_{filename}"
+    
+    # 确保目录存在
+    os.makedirs("images/temp", exist_ok=True)
+    
+    # 图像处理代码
+    img = Image.open(input_path)
     # Remove top 210 pixels
     img = img.crop((0, 210, img.width, img.height))
     # Enhance image contrast
@@ -46,9 +53,8 @@ def preprocess_image(image_path="screenshot.png"):
     # Convert the image to binary (black and white) using a threshold
     threshold = 127
     img = img.point(lambda p: p > threshold and 255)
-    preprocessed_filename = "preprocessed_screenshot.png"
-    img.save(preprocessed_filename)
-    return preprocessed_filename
+    img.save(output_path)
+    return f"preprocessed_{filename}"
 
 def capture_and_ocr(screenshot_count=5, width=1080, height=1920, save_interval=10, json_filename="entries.json"):
     # 设置设备分辨率
@@ -56,10 +62,18 @@ def capture_and_ocr(screenshot_count=5, width=1080, height=1920, save_interval=1
     entries = []
     valid_communities = ['浦东', '嘉定', '金山', '松江', '青浦', '黄浦', '虹口', '崇明', '宝山']
     
+    # 确保目录存在
+    os.makedirs("data_files", exist_ok=True)
+    os.makedirs("images/temp", exist_ok=True)
+    os.makedirs("images/final", exist_ok=True)
+    
+    # 更新JSON文件路径
+    json_filepath = os.path.join("data_files", json_filename)
+    
     # 加载现有条目用于检查重复
     existing_entries = []
-    if os.path.exists(json_filename):
-        with open(json_filename, "r", encoding="utf-8") as f:
+    if os.path.exists(json_filepath):
+        with open(json_filepath, "r", encoding="utf-8") as f:
             content = f.read().strip()
             if content:
                 existing_entries = json.loads(content)
@@ -73,12 +87,12 @@ def capture_and_ocr(screenshot_count=5, width=1080, height=1920, save_interval=1
     for i in range(screenshot_count):
         filename = "screenshot.png"
         capture_screenshot(filename)
-        print(f"Screenshot saved as {filename}")
+        print(f"Screenshot saved as images/temp/{filename}")
         # Preprocess the image
         preprocessed_filename = preprocess_image(filename)
-        print(f"Preprocessed image saved as {preprocessed_filename}")
+        print(f"Preprocessed image saved as images/temp/{preprocessed_filename}")
         # OCR
-        img = Image.open(preprocessed_filename)
+        img = Image.open(f"images/temp/{preprocessed_filename}")
         text = pytesseract.image_to_string(img, lang='chi_sim', config='--psm 6')
         text = text.replace(' ', '')
         print(f"文本提取结果（第 {i+1} 部分）：\n{text}\n")
@@ -86,7 +100,7 @@ def capture_and_ocr(screenshot_count=5, width=1080, height=1920, save_interval=1
         # 检查是否包含"没有更多数据"
         if "没有更多数据" in text:
             print("检测到'没有更多数据'，退出循环")
-            save_entries(entries, json_filename)
+            save_entries(entries, json_filepath)
             break
 
         new_entries = parse_text(text, valid_communities)
@@ -103,11 +117,11 @@ def capture_and_ocr(screenshot_count=5, width=1080, height=1920, save_interval=1
                     
             if all_duplicates:
                 consecutive_duplicates += 1
-                print(f"连续重复数据: {consecutive_duplicates}/10")
+                print(f"连续重复数据: {consecutive_duplicates}/3")
                 
-            if consecutive_duplicates >= 10:
-                print("检测到连续10条重复数据，停止获取")
-                save_entries(entries, json_filename)
+            if consecutive_duplicates >= 3:
+                print("检测到连续3条重复数据，停止获取")
+                save_entries(entries, json_filepath)
                 break
         else:
             # 如果没有解析到条目，不计入连续重复
@@ -115,7 +129,7 @@ def capture_and_ocr(screenshot_count=5, width=1080, height=1920, save_interval=1
             
         entries.extend(new_entries)
         if (i + 1) % save_interval == 0 or i == screenshot_count - 1:
-            save_entries(entries, json_filename)
+            save_entries(entries, json_filepath)
             entries = []  # 清空已保存的条目
         if i < screenshot_count - 1:
             scroll_up()
@@ -156,41 +170,37 @@ def parse_text(text, valid_communities):
                     })
     return entries
 
-def save_entries(entries, filename="entries.json"):
+def save_entries(entries, filename):
+    # 确保目录存在
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    
+    # 加载现有数据
+    existing_entries = []
     if os.path.exists(filename):
         with open(filename, "r", encoding="utf-8") as f:
             content = f.read().strip()
             if content:
                 existing_entries = json.loads(content)
-            else:
-                existing_entries = []
-    else:
-        existing_entries = []
-
-    # 合并现有条目和新条目
+    
+    # 合并并保存
     all_entries = existing_entries + entries
-
-    # 去重
-    unique_entries = []
-    seen_entries = set()
-    for entry in all_entries:
-        entry_tuple = (entry['date'], entry['area'], entry['price'])
-        if entry_tuple not in seen_entries:
-            seen_entries.add(entry_tuple)
-            unique_entries.append(entry)
-
-    # 按照日期从新到旧排序
-    unique_entries.sort(key=lambda x: x['date'], reverse=True)
-
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(unique_entries, f, indent=4, ensure_ascii=False)
+        json.dump(all_entries, f, ensure_ascii=False, indent=4)
+    print(f"已保存 {len(entries)} 条记录到 {filename}，总计 {len(all_entries)} 条")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="OCR and JSON saving script")
-    parser.add_argument("-n", "--name", type=str, default="entries.json", help="The name of the JSON file to save")
+    # 设置命令行参数解析
+    parser = argparse.ArgumentParser(description="Capture and OCR real estate transaction data.")
+    parser.add_argument("-c", "--count", type=int, default=100, help="Number of screenshots to capture")
+    parser.add_argument("-n", "--name", type=str, required=True, help="Name of the community")
     args = parser.parse_args()
     
-    json_filename = args.name  # 从命令行参数获取json文件名
-    entries = capture_and_ocr(screenshot_count=30000, width=1080, height=1920, save_interval=10, json_filename=json_filename)
-    if entries:
-        save_entries(entries, json_filename)
+    # 获取小区名称并转换为拼音首字母
+    from pypinyin import pinyin, Style
+    def get_pinyin_initials(text):
+        return ''.join([item[0] for item in pinyin(text, style=Style.FIRST_LETTER)])
+    
+    filename = get_pinyin_initials(args.name)
+    
+    # 执行截图和OCR
+    capture_and_ocr(screenshot_count=args.count, json_filename=filename)
