@@ -6,13 +6,15 @@
     padding: 20px;
     background-color: #f8f9fa;
     margin-bottom: 30px;
+    overflow: auto;
+    max-height: 80vh; /* 添加最大高度限制，避免图片过大时占满整个屏幕 */
 }
 
 #houseImage {
-    max-width: 100%;
-    height: auto;
     margin: 0 auto;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    max-width: none; /* 确保图片按原始尺寸显示，不受容器宽度限制 */
+    display: block; /* 使图片居中显示更加准确 */
 }
 
 #noImageSelected {
