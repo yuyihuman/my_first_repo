@@ -136,6 +136,52 @@ def serve_cdn(filename):
     """提供本地CDN资源"""
     return send_from_directory('static/cdn', filename)
 
+# 上海房价页面路由
+@app.route('/sh_house_price')
+def sh_house_price():
+    return render_template('sh_house_price.html')
+
+# 获取上海房价图片列表API
+@app.route('/api/sh_house_price/images')
+def sh_house_price_images():
+    try:
+        # 图片目录路径
+        image_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                                'sh_house_price', 'images', 'final')
+        
+        # 获取所有图片文件
+        image_files = []
+        if os.path.exists(image_dir):
+            for file in os.listdir(image_dir):
+                if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                    # 去掉扩展名
+                    image_name = os.path.splitext(file)[0]
+                    image_files.append(image_name)
+        
+        return jsonify({
+            'status': 'success',
+            'images': sorted(image_files)
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
+
+# 提供图片文件
+@app.route('/sh_house_price/images/<image_name>')
+def serve_house_price_image(image_name):
+    image_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                            'sh_house_price', 'images', 'final')
+    
+    # 查找匹配的图片文件（不考虑扩展名）
+    for file in os.listdir(image_dir):
+        file_name_without_ext = os.path.splitext(file)[0]
+        if file_name_without_ext == image_name:
+            return send_from_directory(image_dir, file)
+    
+    return "图片未找到", 404
+
 if __name__ == '__main__':
     # 生产环境中关闭调试模式
     debug_mode = False  # 局域网访问时设为False
