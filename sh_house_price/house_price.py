@@ -47,6 +47,47 @@ def scroll_up():
     adb_command(f"adb shell input swipe {start_x} {start_y} {end_x} {end_y}")
     time.sleep(1)  # wait for the scroll to finish
 
+def tap_screen(x, y):
+    """点击屏幕上的指定坐标"""
+    adb_command(f"adb shell input tap {x} {y}")
+    time.sleep(1)  # 等待点击操作完成
+
+def check_and_click_load_more(filename="screenshot.png"):
+    """检查屏幕底部是否有"点击加载更多"文字，如果有则点击"""
+    input_path = f"images/temp/{filename}"
+    
+    # 打开图片
+    img = Image.open(input_path)
+    
+    # 截取屏幕底部区域进行OCR识别
+    bottom_height = 200  # 底部区域高度
+    bottom_area = img.crop((0, img.height - bottom_height, img.width, img.height))
+    
+    # 对底部区域进行OCR识别
+    text = pytesseract.image_to_string(bottom_area, lang='chi_sim', config='--psm 6')
+    text = text.replace(' ', '')
+    
+    # 检查是否包含"点击加载更多"或类似文字
+    load_more_patterns = ["点击加载更多", "加载更多", "点击查看更多", "查看更多"]
+    found_pattern = None
+    
+    for pattern in load_more_patterns:
+        if pattern in text:
+            found_pattern = pattern
+            break
+    
+    if found_pattern:
+        print(f'检测到"{found_pattern}"文字，准备点击')
+        # 计算点击位置（屏幕底部中间位置）
+        tap_x = img.width // 2
+        tap_y = img.height - bottom_height // 2
+        
+        # 点击该位置
+        tap_screen(tap_x, tap_y)
+        return True
+    
+    return False
+
 def preprocess_image(filename):
     # 更新文件路径
     input_path = f"images/temp/{filename}"
@@ -123,7 +164,7 @@ def save_entries(entries, filename):
         json.dump(all_entries, f, ensure_ascii=False, indent=4)
     print(f"已保存 {len(entries)} 条记录到 {filename}，总计 {len(all_entries)} 条")
 
-def capture_and_ocr(screenshot_count=5, width=1080, height=1920, save_interval=10, json_filename="entries.json"):
+def capture_and_ocr(screenshot_count=50000, width=1080, height=1920, save_interval=10, json_filename="entries.json"):
     # 设置设备分辨率
     set_resolution(width, height)
     entries = []
@@ -150,19 +191,30 @@ def capture_and_ocr(screenshot_count=5, width=1080, height=1920, save_interval=1
     
     # 用于跟踪连续重复的条目数量
     consecutive_duplicates = 0
+    screenshot_count = 0
     
-    for i in range(screenshot_count):
+    while True:  # 无限循环，直到满足退出条件
+        screenshot_count += 1
         filename = "screenshot.png"
         capture_screenshot(filename)
-        print(f"Screenshot saved as images/temp/{filename}")
+        print(f"截图 #{screenshot_count} 保存为 images/temp/{filename}")
+        
+        # 检查并点击"加载更多"按钮
+        clicked_load_more = check_and_click_load_more(filename)
+        if clicked_load_more:
+            # 如果点击了加载更多，等待内容加载并重新截图
+            time.sleep(2)  # 等待内容加载
+            capture_screenshot(filename)
+            print(f"点击加载更多后重新截图: images/temp/{filename}")
+        
         # Preprocess the image
         preprocessed_filename = preprocess_image(filename)
-        print(f"Preprocessed image saved as images/temp/{preprocessed_filename}")
+        print(f"预处理图像保存为 images/temp/{preprocessed_filename}")
         # OCR
         img = Image.open(f"images/temp/{preprocessed_filename}")
         text = pytesseract.image_to_string(img, lang='chi_sim', config='--psm 6')
         text = text.replace(' ', '')
-        print(f"文本提取结果（第 {i+1} 部分）：\n{text}\n")
+        print(f"文本提取结果（第 {screenshot_count} 部分）：\n{text}\n")
 
         # 检查是否包含"没有更多数据"
         if "没有更多数据" in text:
@@ -195,11 +247,16 @@ def capture_and_ocr(screenshot_count=5, width=1080, height=1920, save_interval=1
             consecutive_duplicates = 0
             
         entries.extend(new_entries)
-        if (i + 1) % save_interval == 0 or i == screenshot_count - 1:
+        if screenshot_count % save_interval == 0:
             save_entries(entries, json_filepath)
             entries = []  # 清空已保存的条目
-        if i < screenshot_count - 1:
-            scroll_up()
+        
+        scroll_up()
+    
+    # 确保最后的条目被保存
+    if entries:
+        save_entries(entries, json_filepath)
+    
     return entries
 
 def generate_plots(community_name):
