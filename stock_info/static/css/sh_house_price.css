@@ -17,7 +17,8 @@
     margin: 0 auto;
     /* 移除阴影效果 */
     /* box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); */
-    max-width: none; /* 确保图片按原始尺寸显示，不受容器宽度限制 */
+    max-width: 100%; /* 修改为100%，确保图片不会超出容器宽度 */
+    height: auto; /* 添加高度自动，保持图片比例 */
     display: block; /* 使图片居中显示更加准确 */
 }
 

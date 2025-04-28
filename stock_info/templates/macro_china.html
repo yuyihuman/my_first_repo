@@ -124,12 +124,13 @@
             </div>
             
             <!-- 日志显示区域 -->
-            <div class="mt-5">
+            <!-- 日志显示区域 -->
+            <!-- <div class="mt-5">
                 <h3>API响应日志</h3>
                 <div class="log-container" id="apiLogContainer">
                     <div class="log-entry">等待API响应...</div>
                 </div>
-            </div>
+            </div> -->
         </div>
     </div>
 
@@ -550,22 +551,24 @@
             });
         }
         
-        // 记录API响应到日志区域
+        // 记录API响应到日志
         function logApiResponse(data) {
+            // 由于日志区域已被注释掉，此函数可以保留但不执行任何操作
+            return;
+            
+            // 以下代码不会执行
             const logContainer = document.getElementById('apiLogContainer');
             const logEntry = document.createElement('div');
             logEntry.className = 'log-entry';
             
-            // 格式化时间
-            const now = new Date();
-            const timeStr = now.toLocaleTimeString();
+            const timestamp = new Date().toLocaleTimeString();
+            let logContent = `[${timestamp}] `;
             
-            // 格式化日志内容
-            let logContent = `[${timeStr}] 状态: ${data.status}`;
             if (data.status === 'error') {
-                logContent += `, 错误: ${data.message}`;
+                logContent += `错误: ${data.message}`;
                 logEntry.style.color = 'red';
-            } else if (data.status === 'success') {
+            } else {
+                logContent += `成功获取数据, 最后更新: ${data.last_update}`;
                 logContent += `, 数据条数: ${data.data ? data.data.length : 0}`;
                 logEntry.style.color = 'green';
             }
