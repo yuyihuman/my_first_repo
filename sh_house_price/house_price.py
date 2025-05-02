@@ -53,7 +53,7 @@ def tap_screen(x, y):
     time.sleep(1)  # 等待点击操作完成
 
 def check_and_click_load_more(filename="screenshot.png"):
-    """检查屏幕底部是否有"点击加载更多"文字，如果有则点击"""
+    """检查屏幕底部是否有"点击加载更多"文字或"加载失败"文字，如果有则点击"""
     input_path = f"images/temp/{filename}"
     
     # 打开图片
@@ -67,8 +67,8 @@ def check_and_click_load_more(filename="screenshot.png"):
     text = pytesseract.image_to_string(bottom_area, lang='chi_sim', config='--psm 6')
     text = text.replace(' ', '')
     
-    # 检查是否包含"点击加载更多"或类似文字
-    load_more_patterns = ["点击加载更多", "加载更多", "点击查看更多", "查看更多"]
+    # 检查是否包含"点击加载更多"或类似文字，或"加载失败"
+    load_more_patterns = ["点击加载更多", "加载更多", "点击查看更多", "查看更多", "加载失败"]
     found_pattern = None
     
     for pattern in load_more_patterns:
@@ -164,7 +164,7 @@ def save_entries(entries, filename):
         json.dump(all_entries, f, ensure_ascii=False, indent=4)
     print(f"已保存 {len(entries)} 条记录到 {filename}，总计 {len(all_entries)} 条")
 
-def capture_and_ocr(screenshot_count=50000, width=1080, height=1920, save_interval=10, json_filename="entries.json"):
+def capture_and_ocr(screenshot_count=50000, width=1080, height=1920, save_interval=10, json_filename="entries.json", max_duplicates=3):
     # 设置设备分辨率
     set_resolution(width, height)
     entries = []
@@ -236,10 +236,11 @@ def capture_and_ocr(screenshot_count=50000, width=1080, height=1920, save_interv
                     
             if all_duplicates:
                 consecutive_duplicates += 1
-                print(f"连续重复数据: {consecutive_duplicates}/3")
+                print(f"连续重复数据: {consecutive_duplicates}/{max_duplicates}")
                 
-            if consecutive_duplicates >= 3:
-                print("检测到连续3条重复数据，停止获取")
+            # 如果max_duplicates为0或负数，则禁用重复检测功能
+            if max_duplicates > 0 and consecutive_duplicates >= max_duplicates:
+                print(f"检测到连续{max_duplicates}条重复数据，停止获取")
                 save_entries(entries, json_filepath)
                 break
         else:
@@ -574,6 +575,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--count", type=int, default=100, help="截图数量")
     parser.add_argument("--collect", action="store_true", help="采集数据模式")
     parser.add_argument("--plot", action="store_true", help="生成图表模式")
+    parser.add_argument("--ignore_duplicates", action="store_true", help="忽略重复数据检测（默认检测3组重复后停止）")
     
     args = parser.parse_args()
     
@@ -594,7 +596,9 @@ if __name__ == "__main__":
     # 执行数据采集
     if args.collect:
         print(f"开始采集 {community_name} 的房价数据...")
-        capture_and_ocr(screenshot_count=args.count, json_filename=filename)
+        # 设置max_duplicates参数
+        max_duplicates = 0 if args.ignore_duplicates else 3
+        capture_and_ocr(screenshot_count=args.count, json_filename=filename, max_duplicates=max_duplicates)
     
     # 执行图表生成
     if args.plot:
