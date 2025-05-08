@@ -14,6 +14,29 @@ import datetime
 import matplotlib.dates as mdates
 import numpy as np
 from PIL import ImageEnhance
+import logging
+import sys
+
+# 创建logs目录
+os.makedirs("logs", exist_ok=True)
+
+# 设置日志
+log_timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+log_file = os.path.join("logs", f"{log_timestamp}_house_price.log")
+
+# 配置日志记录器
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file, encoding='utf-8'),
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# 重定向标准输出和标准错误到日志文件
+sys.stdout = open(log_file, 'a', encoding='utf-8')
+sys.stderr = open(log_file, 'a', encoding='utf-8')
 
 # 在绘图前设置全局字体
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置默认字体为黑体
@@ -28,7 +51,7 @@ def get_pinyin_initials(text):
 def adb_command(command):
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Error executing command: {command}\n{result.stderr}")
+        logger.error(f"Error executing command: {command}\n{result.stderr}")
     return result.stdout.strip()
 
 def set_resolution(width, height):
@@ -49,6 +72,7 @@ def scroll_up():
 
 def tap_screen(x, y):
     """点击屏幕上的指定坐标"""
+    logger.info(f"点击屏幕坐标: ({x}, {y})")
     adb_command(f"adb shell input tap {x} {y}")
     time.sleep(1)  # 等待点击操作完成
 
@@ -77,7 +101,7 @@ def check_and_click_load_more(filename="screenshot.png"):
             break
     
     if found_pattern:
-        print(f'检测到"{found_pattern}"文字，准备点击')
+        logger.info(f'检测到"{found_pattern}"文字，准备点击')
         # 计算点击位置（屏幕底部中间位置）
         tap_x = img.width // 2
         tap_y = img.height - bottom_height // 2
@@ -113,28 +137,28 @@ def preprocess_image(filename):
 
 def parse_text(text, valid_communities):
     entries = []
-    print("parse text")
+    logger.info("parse text")
     lines = text.split('\n')
     for i, line in enumerate(lines):
         line = line.strip()
-        print(line)
+        logger.info(line)
         if not line:
             continue
         if "号楼" in line:
             # Ensure there are enough lines available
             if i + 1 < len(lines):
                 date_line = lines[i + 1].strip()
-                print(date_line)
+                logger.info(date_line)
                 area_line = lines[i].strip().split("号楼")[-1]
-                print(area_line)
+                logger.info(area_line)
                 price_line = lines[i + 1].strip()
-                print(price_line)
+                logger.info(price_line)
                 match_date = re.search(r'(\d{4}\.\d{2}\.\d{2})成交', date_line)
-                print(match_date)
+                logger.info(str(match_date))
                 match_area = re.search(r'(\d{2,3})[a-zA-Z]', area_line)
-                print(match_area)
+                logger.info(str(match_area))
                 match_price = re.search(r'(\d+)元', price_line)
-                print(match_price)
+                logger.info(str(match_price))
                 if match_date and match_area and match_price:
                     date = match_date.group(1)
                     area = int(match_area.group(1))
@@ -158,11 +182,16 @@ def save_entries(entries, filename):
             if content:
                 existing_entries = json.loads(content)
     
-    # 合并并保存
+    # 合并条目
     all_entries = existing_entries + entries
+    
+    # 按日期排序（降序：最新的日期在前）
+    all_entries.sort(key=lambda x: x['date'], reverse=True)
+    
+    # 保存排序后的数据
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(all_entries, f, ensure_ascii=False, indent=4)
-    print(f"已保存 {len(entries)} 条记录到 {filename}，总计 {len(all_entries)} 条")
+    logger.info(f"已保存 {len(entries)} 条记录到 {filename}，总计 {len(all_entries)} 条")
 
 def capture_and_ocr(screenshot_count=50000, width=1080, height=1920, save_interval=10, json_filename="entries.json", max_duplicates=3):
     # 设置设备分辨率
@@ -197,7 +226,7 @@ def capture_and_ocr(screenshot_count=50000, width=1080, height=1920, save_interv
         screenshot_count += 1
         filename = "screenshot.png"
         capture_screenshot(filename)
-        print(f"截图 #{screenshot_count} 保存为 images/temp/{filename}")
+        logger.info(f"截图 #{screenshot_count} 保存为 images/temp/{filename}")
         
         # 检查并点击"加载更多"按钮
         clicked_load_more = check_and_click_load_more(filename)
@@ -205,20 +234,20 @@ def capture_and_ocr(screenshot_count=50000, width=1080, height=1920, save_interv
             # 如果点击了加载更多，等待内容加载并重新截图
             time.sleep(2)  # 等待内容加载
             capture_screenshot(filename)
-            print(f"点击加载更多后重新截图: images/temp/{filename}")
+            logger.info(f"点击加载更多后重新截图: images/temp/{filename}")
         
         # Preprocess the image
         preprocessed_filename = preprocess_image(filename)
-        print(f"预处理图像保存为 images/temp/{preprocessed_filename}")
+        logger.info(f"预处理图像保存为 images/temp/{preprocessed_filename}")
         # OCR
         img = Image.open(f"images/temp/{preprocessed_filename}")
         text = pytesseract.image_to_string(img, lang='chi_sim', config='--psm 6')
         text = text.replace(' ', '')
-        print(f"文本提取结果（第 {screenshot_count} 部分）：\n{text}\n")
+        logger.info(f"文本提取结果（第 {screenshot_count} 部分）：\n{text}\n")
 
         # 检查是否包含"没有更多数据"
         if "没有更多数据" in text:
-            print("检测到'没有更多数据'，退出循环")
+            logger.info("检测到'没有更多数据'，退出循环")
             save_entries(entries, json_filepath)
             break
 
@@ -236,11 +265,11 @@ def capture_and_ocr(screenshot_count=50000, width=1080, height=1920, save_interv
                     
             if all_duplicates:
                 consecutive_duplicates += 1
-                print(f"连续重复数据: {consecutive_duplicates}/{max_duplicates}")
+                logger.info(f"连续重复数据: {consecutive_duplicates}/{max_duplicates}")
                 
             # 如果max_duplicates为0或负数，则禁用重复检测功能
             if max_duplicates > 0 and consecutive_duplicates >= max_duplicates:
-                print(f"检测到连续{max_duplicates}条重复数据，停止获取")
+                logger.info(f"检测到连续{max_duplicates}条重复数据，停止获取")
                 save_entries(entries, json_filepath)
                 break
         else:
@@ -311,7 +340,7 @@ def generate_plots(community_name):
         
         # 检查筛选后的数据框是否为空
         if filtered_df.empty:
-            print(f"面积范围 {area_min}-{area_max} 没有数据，跳过")
+            logger.info(f"面积范围 {area_min}-{area_max} 没有数据，跳过")
             continue
     
         # 添加月份列
@@ -565,7 +594,7 @@ def generate_plots(community_name):
     for image_path in images:
         os.remove(image_path)
     
-    print(f"Combined image saved as {final_image_path}")
+    logger.info(f"Combined image saved as {final_image_path}")
     return final_image_path
 
 if __name__ == "__main__":
@@ -595,13 +624,13 @@ if __name__ == "__main__":
     
     # 执行数据采集
     if args.collect:
-        print(f"开始采集 {community_name} 的房价数据...")
+        logger.info(f"开始采集 {community_name} 的房价数据...")
         # 设置max_duplicates参数
         max_duplicates = 0 if args.ignore_duplicates else 3
         capture_and_ocr(screenshot_count=args.count, json_filename=filename, max_duplicates=max_duplicates)
     
     # 执行图表生成
     if args.plot:
-        print(f"开始生成 {community_name} 的房价分析图表...")
+        logger.info(f"开始生成 {community_name} 的房价分析图表...")
         image_path = generate_plots(community_name)
-        print(f"图表已生成: {image_path}")
+        logger.info(f"图表已生成: {image_path}")
