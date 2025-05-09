@@ -4,6 +4,45 @@ import os
 import logging
 from datetime import datetime
 import re
+import glob
+
+# 清除之前的所有日志文件
+def clear_previous_logs():
+    """清除之前的所有日志文件"""
+    log_dir = "logs"
+    if os.path.exists(log_dir):
+        log_files = glob.glob(os.path.join(log_dir, "*.log"))
+        for log_file in log_files:
+            try:
+                os.remove(log_file)
+                print(f"已删除日志文件: {log_file}")
+            except Exception as e:
+                print(f"删除日志文件 {log_file} 失败: {e}")
+    
+    # 清除之前的所有截图
+    screenshot_dir = "screenshots"
+    if os.path.exists(screenshot_dir):
+        screenshot_files = glob.glob(os.path.join(screenshot_dir, "*.png"))
+        for screenshot_file in screenshot_files:
+            try:
+                os.remove(screenshot_file)
+                print(f"已删除截图文件: {screenshot_file}")
+            except Exception as e:
+                print(f"删除截图文件 {screenshot_file} 失败: {e}")
+    
+    # 清除之前的所有UI层次结构文件
+    ui_dir = "ui_dumps"
+    if os.path.exists(ui_dir):
+        ui_files = glob.glob(os.path.join(ui_dir, "*.xml"))
+        for ui_file in ui_files:
+            try:
+                os.remove(ui_file)
+                print(f"已删除UI层次结构文件: {ui_file}")
+            except Exception as e:
+                print(f"删除UI层次结构文件 {ui_file} 失败: {e}")
+
+# 在程序开始时清除之前的所有日志
+clear_previous_logs()
 
 # 设置日志
 log_dir = "logs"
@@ -23,7 +62,7 @@ logger = logging.getLogger(__name__)
 def adb_command(command):
     """执行ADB命令并返回结果"""
     logger.info(f"执行ADB命令: {command}")
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    result = subprocess.run(command, shell=True, capture_output=True, text=True, encoding='utf-8')
     if result.returncode != 0:
         logger.error(f"命令执行失败: {result.stderr}")
     else:
@@ -106,40 +145,59 @@ def input_text(text):
         all_texts = []
         for i, txt in enumerate(ocr_result['text']):
             if txt.strip():  # 只考虑非空文本
-                x = ocr_result['left'][i] + ocr_result['width'][i] // 2
-                y = ocr_result['top'][i] + ocr_result['height'][i] // 2
+                # 只考虑汉字字符
+                is_chinese_char = False
+                for char in txt.strip():
+                    if '\u4e00' <= char <= '\u9fff':
+                        is_chinese_char = True
+                        break
+                
+                if not is_chinese_char:
+                    logger.info(f"跳过非汉字文本: '{txt.strip()}'")
+                    continue
+                    
+                # 计算中心点坐标
+                center_x = ocr_result['left'][i] + ocr_result['width'][i] // 2
+                center_y = ocr_result['top'][i] + ocr_result['height'][i] // 2
+                
                 all_texts.append({
                     'text': txt.strip(),
-                    'x': x,
-                    'y': y,
+                    'x': center_x,
+                    'y': center_y,
+                    'center_x': center_x,
+                    'center_y': center_y,
                     'left': ocr_result['left'][i],
-                    'right': ocr_result['left'][i] + ocr_result['width'][i]
+                    'right': ocr_result['left'][i] + ocr_result['width'][i],
+                    'width': ocr_result['width'][i],
+                    'height': ocr_result['height'][i]
                 })
         
         # 查找目标字符
         for item in all_texts:
             if item['text'] == target_char:
-                # 检查左右100像素内是否有其他字
+                # 检查与其他字符中心点的距离是否小于100像素
                 has_nearby_char = False
                 for other in all_texts:
                     if other['text'] != target_char:  # 不与自己比较
-                        # 检查水平距离
-                        if (abs(item['left'] - other['right']) < 100 or 
-                            abs(other['left'] - item['right']) < 100):
+                        # 计算两个字符中心点之间的距离
+                        distance = ((item['center_x'] - other['center_x']) ** 2 + 
+                                   (item['center_y'] - other['center_y']) ** 2) ** 0.5
+                        
+                        if distance < 100:
                             has_nearby_char = True
-                            logger.info(f"字符'{target_char}'左右100像素内有其他字符'{other['text']}'，跳过")
+                            logger.info(f"字符'{target_char}'中心点100像素内有其他汉字'{other['text']}'，距离为{distance:.2f}像素，跳过")
                             break
-                
+                    
                 if not has_nearby_char:
                     # 没有临近字符，可以选择
                     tap_x = item['x']
                     tap_y = y_start + item['y']
-                    logger.info(f"OCR识别到目标汉字'{target_char}'，且左右无临近字符，点击坐标: ({tap_x}, {tap_y})")
+                    logger.info(f"OCR识别到目标汉字'{target_char}'，且中心点100像素内无其他汉字，点击坐标: ({tap_x}, {tap_y})")
                     tap_screen(tap_x, tap_y)
                     return True
                 
         # 如果没有找到合适的目标字符（要么没找到，要么都有临近字符）
-        logger.warning(f"未找到合适的目标汉字'{target_char}'或所有候选都有临近字符")
+        logger.warning(f"未找到合适的目标汉字'{target_char}'或所有候选都有临近汉字")
         return False
 
     def check_full_screen_area(target_char):
@@ -596,7 +654,7 @@ if __name__ == "__main__":
     
     # 定义要搜索的位置列表
     # locations = ["嘉定新城", "松江新城", "徐家汇", "中信泰富又一城", "金地世家", "张江汤臣豪园", "上海康城"]
-    locations = ["铋地世家"]
+    locations = ["金地世家"]
     # 处理位置列表
     process_location_list(locations)
     
