@@ -89,13 +89,16 @@ def input_text(text):
     def check_candidate_area(target_char):
         """检查候选词区域是否已经出现目标汉字"""
         logger.info(f"检查候选词区域是否已出现'{target_char}'")
-        screenshot_file = "candidate_check.png"
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        screenshot_file = f"candidate_check_{target_char}_{timestamp}.png"
         capture_screenshot(screenshot_file)
         img = Image.open(f"screenshots/{screenshot_file}")
         y_start = 1163  # 固定起始像素
         y_end = 1316    # 固定结束像素
         candidate_area = img.crop((0, y_start, width, y_end))
-        candidate_area.save(f"screenshots/candidate_check_crop.png")
+        
+        crop_filename = f"candidate_check_crop_{target_char}_{timestamp}.png"
+        candidate_area.save(f"screenshots/{crop_filename}")
         
         ocr_result = pytesseract.image_to_data(candidate_area, lang='chi_sim', config='--psm 7', output_type=pytesseract.Output.DICT)
         
@@ -210,14 +213,21 @@ def input_text(text):
         logger.warning(f"在所有分段区域中均未找到目标汉字'{target_char}'")
         return False
 
+    # 记录是否有任何字符输入失败
+    any_char_failed = False
+    
     for char in text:
         if ord(char) > 127:  # 中文字符
             py = pypinyin.lazy_pinyin(char)[0]
             logger.info(f"为'{char}'输入拼音: {py}")
             
+            # 记录当前字符是否成功输入
+            current_char_success = False
+            
             # 先检查一次候选区，可能之前输入的拼音已经产生了候选词
             if check_candidate_area(char):
-                # 已经找到并选中了目标字符，直接进入下一个字符的处理
+                # 已经找到并选中了目标字符，标记成功并继续下一个字符
+                current_char_success = True
                 continue
                 
             # 逐个输入拼音字母，每输入一个字母后检查候选区
@@ -231,6 +241,7 @@ def input_text(text):
                     if check_candidate_area(char):
                         # 找到目标字符，标记为已找到并跳出循环
                         found_char = True
+                        current_char_success = True
                         break
                 else:
                     logger.warning(f"未找到字母键'{letter}'，跳过")
@@ -247,27 +258,34 @@ def input_text(text):
                 # 在1165像素下方的全部区域中识别目标汉字
                 if check_full_screen_area(char):
                     # 已找到并点击了目标字符
+                    current_char_success = True
                     continue
                 else:
-                    # 如果仍未找到，清空输入并返回False，表示输入失败
+                    # 如果仍未找到，清空输入并标记失败，但不立即返回
                     logger.warning(f"在全屏区域中仍未识别到目标汉字'{char}'，放弃当前搜索词的输入")
                     # 清空当前输入
                     adb_command("adb shell input keyevent 123")  # 移动光标到行尾
                     adb_command("adb shell input keyevent --longpress 67 67 67 67 67")  # 长按删除键
                     time.sleep(0.5)
-                    # 直接返回False，表示输入失败
-                    return False
+                    # 标记有字符输入失败
+                    any_char_failed = True
+                    # 不再继续尝试后续字符，直接跳出循环
+                    break
             
             time.sleep(0.8)
-        else:
-            adb_command(f'adb shell input text "{char}"')
-            time.sleep(0.3)
-    
-    time.sleep(1)  # 等待输入完成
-    
-    # 所有字符都成功输入，返回True
-    logger.info(f"成功输入所有文本: '{text}'")
-    return True
+            
+            # 如果当前字符输入失败，不再继续尝试后续字符
+            if not current_char_success:
+                any_char_failed = True
+                break
+
+    # 根据是否有字符输入失败来返回结果
+    if any_char_failed:
+        logger.warning(f"部分字符输入失败，整体输入失败: '{text}'")
+        return False
+    else:
+        logger.info(f"成功输入所有文本: '{text}'")
+        return True
 
 def capture_screenshot(filename="screenshot.png"):
     """截取屏幕并保存到本地"""
@@ -351,7 +369,8 @@ def click_first_search_result(search_term):
     logger.info(f"尝试通过OCR识别并点击包含 '{search_term}' 的第一个搜索结果")
     
     # 截取屏幕
-    screenshot_file = "search_results_ocr.png"
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    screenshot_file = f"search_results_ocr_{search_term}_{timestamp}.png"
     capture_screenshot(screenshot_file)
     
     # 使用OCR识别
@@ -367,7 +386,8 @@ def click_first_search_result(search_term):
     # 只识别纵向大于190像素的区域
     y_start = 190
     search_area = img.crop((0, y_start, width, height))
-    search_area.save(f"screenshots/search_area_crop.png")
+    crop_filename = f"search_area_crop_{search_term}_{timestamp}.png"
+    search_area.save(f"screenshots/{crop_filename}")
     
     # OCR识别
     ocr_result = pytesseract.image_to_data(search_area, lang='chi_sim', config='--psm 11', output_type=pytesseract.Output.DICT)
@@ -394,15 +414,14 @@ def click_first_search_result(search_term):
     if not found:
         logger.warning(f"OCR未识别到包含 '{search_term}' 的搜索结果")
         return False
-    
-    return found
 
 def verify_search_results(search_term):
     """验证搜索结果页面中包含多少个搜索词"""
     logger.info(f"验证搜索结果页面中包含多少个'{search_term}'")
     
     # 截取屏幕
-    screenshot_file = "search_results_verify.png"
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    screenshot_file = f"search_results_verify_{search_term}_{timestamp}.png"
     capture_screenshot(screenshot_file)
     
     # 使用OCR识别
@@ -444,7 +463,8 @@ def search_for_location(location_name, max_retries=3):
         logger.info(f"屏幕分辨率: {width}x{height}")
         
         # 1. 先截图查看当前界面
-        capture_screenshot("01_before_search.png")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        capture_screenshot(f"01_before_search_{location_name}_{timestamp}.png")
         
         # 2. 直接使用固定坐标
         search_box_x = 548
@@ -456,7 +476,8 @@ def search_for_location(location_name, max_retries=3):
         
         # 等待搜索框获得焦点
         time.sleep(1)
-        capture_screenshot("02_after_tap_search.png")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        capture_screenshot(f"02_after_tap_search_{location_name}_{timestamp}.png")
         
         # 3. 清空搜索框
         logger.info("清空搜索框...")
@@ -474,7 +495,8 @@ def search_for_location(location_name, max_retries=3):
             logger.warning(f"输入'{location_name}'失败，进入下一次尝试")
             retry_count += 1
             continue
-        capture_screenshot("03_after_input.png")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        capture_screenshot(f"03_after_input_{location_name}_{timestamp}.png")
         
         # 5. 点击搜索按钮或按回车键
         logger.info("点击搜索按钮或按回车键...")
@@ -486,7 +508,8 @@ def search_for_location(location_name, max_retries=3):
         time.sleep(3)
         
         # 7. 截图查看搜索结果
-        capture_screenshot("04_search_results.png")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        capture_screenshot(f"04_search_results_{location_name}_{timestamp}.png")
         
         # 8. 使用OCR识别并点击第一个搜索结果
         result_clicked = click_first_search_result(location_name)
@@ -500,7 +523,8 @@ def search_for_location(location_name, max_retries=3):
         
         # 9. 最终截图
         time.sleep(2)
-        capture_screenshot("05_final_result.png")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        capture_screenshot(f"05_final_result_{location_name}_{timestamp}.png")
         
         # 10. 验证搜索结果
         result_count = verify_search_results(location_name)
@@ -572,7 +596,7 @@ if __name__ == "__main__":
     
     # 定义要搜索的位置列表
     # locations = ["嘉定新城", "松江新城", "徐家汇", "中信泰富又一城", "金地世家", "张江汤臣豪园", "上海康城"]
-    locations = ["金地世家"]
+    locations = ["铋地世家"]
     # 处理位置列表
     process_location_list(locations)
     
