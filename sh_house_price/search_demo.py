@@ -139,6 +139,77 @@ def input_text(text):
         logger.warning(f"未找到合适的目标汉字'{target_char}'或所有候选都有临近字符")
         return False
 
+    def check_full_screen_area(target_char):
+        """在1165像素下方的区域中分段识别目标汉字"""
+        logger.info(f"在分段区域中查找目标汉字'{target_char}'")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        screenshot_file = f"full_screen_check_{target_char}_{timestamp}.png"
+        screenshot_path = capture_screenshot(screenshot_file)
+        
+        img = Image.open(screenshot_path)
+        width, height = img.size
+        
+        # 定义分段区域
+        segments = [
+            (1165, 1290),
+            (1290, 1416),
+            (1416, 1542),  # 将1416-1666分成两个区域
+            (1542, 1666),
+            (1666, 1793),
+            (1793, height)
+        ]
+        
+        # 依次检查每个区域
+        for i, (y_start, y_end) in enumerate(segments):
+            logger.info(f"检查区域 {i+1}: {y_start}-{y_end}像素")
+            
+            # 裁剪当前区域
+            segment_area = img.crop((0, y_start, width, y_end))
+            
+            # 保存裁剪区域图片
+            crop_filename = f"segment_{i+1}_crop_{target_char}_{timestamp}.png"
+            crop_path = os.path.join("screenshots", crop_filename)
+            segment_area.save(crop_path)
+            
+            # OCR识别当前区域
+            ocr_result = pytesseract.image_to_data(segment_area, lang='chi_sim', config='--psm 7', output_type=pytesseract.Output.DICT)
+            logger.info(f'区域{i+1} OCR结果: {ocr_result}')
+            
+            # 存储所有识别到的汉字及其位置
+            all_texts = []
+            for j, txt in enumerate(ocr_result['text']):
+                if txt.strip():
+                    # 只考虑汉字
+                    is_chinese_char = False
+                    for char in txt.strip():
+                        if '\u4e00' <= char <= '\u9fff':
+                            is_chinese_char = True
+                            break
+                    
+                    if not is_chinese_char:
+                        logger.info(f"跳过非汉字文本: '{txt.strip()}'")
+                        continue
+                    
+                    center_x = ocr_result['left'][j] + ocr_result['width'][j] // 2
+                    center_y = ocr_result['top'][j] + ocr_result['height'][j] // 2
+                    all_texts.append({
+                        'text': txt.strip(),
+                        'center_x': center_x,
+                        'center_y': center_y
+                    })
+            
+            # 查找目标字符
+            for item in all_texts:
+                if item['text'] == target_char:
+                    tap_x = item['center_x']
+                    tap_y = y_start + item['center_y']  # 转换为全屏坐标
+                    logger.info(f"在区域{i+1}中找到目标汉字'{target_char}'，点击坐标: ({tap_x}, {tap_y})")
+                    tap_screen(tap_x, tap_y)
+                    return True
+        
+        logger.warning(f"在所有分段区域中均未找到目标汉字'{target_char}'")
+        return False
+
     for char in text:
         if ord(char) > 127:  # 中文字符
             py = pypinyin.lazy_pinyin(char)[0]
@@ -164,10 +235,28 @@ def input_text(text):
                 else:
                     logger.warning(f"未找到字母键'{letter}'，跳过")
             
-            # 如果输入完所有拼音字母后仍未找到目标字符，再次检查
-            if not found_char and not check_candidate_area(char):
-                logger.warning(f"输入完整拼音后仍未识别到目标汉字'{char}'，尝试点击第一个候选词")
-                tap_screen(int(width*0.12), int(1163 + (1316-1163)*0.3))
+            # 如果输入完所有拼音字母后仍未找到目标字符
+            if not found_char:
+                logger.warning(f"输入完整拼音后仍未识别到目标汉字'{char}'")
+                
+                # 新增步骤：点击992, 1243位置
+                logger.info(f"点击坐标(992, 1243)以查看更多候选字")
+                tap_screen(992, 1243)
+                time.sleep(0.8)  # 等待更多候选字显示
+                
+                # 在1165像素下方的全部区域中识别目标汉字
+                if check_full_screen_area(char):
+                    # 已找到并点击了目标字符
+                    continue
+                else:
+                    # 如果仍未找到，清空输入并返回False，表示输入失败
+                    logger.warning(f"在全屏区域中仍未识别到目标汉字'{char}'，放弃当前搜索词的输入")
+                    # 清空当前输入
+                    adb_command("adb shell input keyevent 123")  # 移动光标到行尾
+                    adb_command("adb shell input keyevent --longpress 67 67 67 67 67")  # 长按删除键
+                    time.sleep(0.5)
+                    # 直接返回False，表示输入失败
+                    return False
             
             time.sleep(0.8)
         else:
@@ -175,6 +264,10 @@ def input_text(text):
             time.sleep(0.3)
     
     time.sleep(1)  # 等待输入完成
+    
+    # 所有字符都成功输入，返回True
+    logger.info(f"成功输入所有文本: '{text}'")
+    return True
 
 def capture_screenshot(filename="screenshot.png"):
     """截取屏幕并保存到本地"""
@@ -373,7 +466,14 @@ def search_for_location(location_name, max_retries=3):
         
         # 4. 输入搜索文本
         logger.info(f"输入搜索文本: {location_name}")
-        input_text(location_name)
+        input_success = input_text(location_name)
+        logger.info(f"输入文本结果: {'成功' if input_success else '失败'}")
+        
+        # 如果输入失败，直接进入下一次尝试
+        if not input_success:
+            logger.warning(f"输入'{location_name}'失败，进入下一次尝试")
+            retry_count += 1
+            continue
         capture_screenshot("03_after_input.png")
         
         # 5. 点击搜索按钮或按回车键
@@ -471,8 +571,8 @@ if __name__ == "__main__":
     device_info = get_device_info()
     
     # 定义要搜索的位置列表
-    locations = ["嘉定新城", "松江新城", "徐家汇", "中信泰富又一城"]
-    
+    # locations = ["嘉定新城", "松江新城", "徐家汇", "中信泰富又一城", "金地世家", "张江汤臣豪园", "上海康城"]
+    locations = ["金地世家"]
     # 处理位置列表
     process_location_list(locations)
     
