@@ -129,14 +129,14 @@ def input_text(text):
         """检查候选词区域是否已经出现目标汉字"""
         logger.info(f"检查候选词区域是否已出现'{target_char}'")
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        screenshot_file = f"candidate_check_{target_char}_{timestamp}.png"
+        screenshot_file = f"{timestamp}_candidate_check_{target_char}.png"
         capture_screenshot(screenshot_file)
         img = Image.open(f"screenshots/{screenshot_file}")
         y_start = 1163  # 固定起始像素
         y_end = 1316    # 固定结束像素
         candidate_area = img.crop((0, y_start, width, y_end))
         
-        crop_filename = f"candidate_check_crop_{target_char}_{timestamp}.png"
+        crop_filename = f"{timestamp}_candidate_check_crop_{target_char}.png"
         candidate_area.save(f"screenshots/{crop_filename}")
         
         ocr_result = pytesseract.image_to_data(candidate_area, lang='chi_sim', config='--psm 7', output_type=pytesseract.Output.DICT)
@@ -204,7 +204,7 @@ def input_text(text):
         """在1165像素下方的区域中分段识别目标汉字"""
         logger.info(f"在分段区域中查找目标汉字'{target_char}'")
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        screenshot_file = f"full_screen_check_{target_char}_{timestamp}.png"
+        screenshot_file = f"{timestamp}_full_screen_check_{target_char}.png"
         screenshot_path = capture_screenshot(screenshot_file)
         
         img = Image.open(screenshot_path)
@@ -228,7 +228,7 @@ def input_text(text):
             segment_area = img.crop((0, y_start, width, y_end))
             
             # 保存裁剪区域图片
-            crop_filename = f"segment_{i+1}_crop_{target_char}_{timestamp}.png"
+            crop_filename = f"{timestamp}_segment_{i+1}_crop_{target_char}.png"
             crop_path = os.path.join("screenshots", crop_filename)
             segment_area.save(crop_path)
             
@@ -428,7 +428,7 @@ def click_first_search_result(search_term):
     
     # 截取屏幕
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    screenshot_file = f"search_results_ocr_{search_term}_{timestamp}.png"
+    screenshot_file = f"{timestamp}_search_results_ocr_{search_term}.png"
     capture_screenshot(screenshot_file)
     
     # 使用OCR识别
@@ -444,7 +444,7 @@ def click_first_search_result(search_term):
     # 只识别纵向大于190像素的区域
     y_start = 190
     search_area = img.crop((0, y_start, width, height))
-    crop_filename = f"search_area_crop_{search_term}_{timestamp}.png"
+    crop_filename = f"{timestamp}_search_area_crop_{search_term}.png"
     search_area.save(f"screenshots/{crop_filename}")
     
     # OCR识别
@@ -479,7 +479,7 @@ def verify_search_results(search_term):
     
     # 截取屏幕
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    screenshot_file = f"search_results_verify_{search_term}_{timestamp}.png"
+    screenshot_file = f"{timestamp}_search_results_verify_{search_term}.png"
     capture_screenshot(screenshot_file)
     
     # 使用OCR识别
@@ -653,8 +653,8 @@ if __name__ == "__main__":
     device_info = get_device_info()
     
     # 定义要搜索的位置列表
-    # locations = ["嘉定新城", "松江新城", "徐家汇", "中信泰富又一城", "金地世家", "张江汤臣豪园", "上海康城"]
-    locations = ["金地世家"]
+    locations = ["嘉定新城", "松江新城", "徐家汇", "中信泰富又一城", "金地世家", "张江汤臣豪园", "上海康城", "紫竹半岛"]
+    # locations = ["金地世家"]
     # 处理位置列表
     process_location_list(locations)
     
