@@ -505,7 +505,7 @@ def verify_search_results(search_term):
     
     return count
 
-def search_for_location(location_name, max_retries=3):
+def search_for_location(location_name, max_retries=5):
     """在搜索框中搜索指定位置"""
     logger.info(f"开始搜索位置: {location_name}")
     
@@ -653,8 +653,9 @@ if __name__ == "__main__":
     device_info = get_device_info()
     
     # 定义要搜索的位置列表
-    locations = ["嘉定新城", "松江新城", "徐家汇", "中信泰富又一城", "金地世家", "张江汤臣豪园", "上海康城", "紫竹半岛"]
-    # locations = ["金地世家"]
+    locations = ["嘉定新城", "松江新城", "徐家汇", "中信泰富又一城", "金地世家", "张江汤臣豪园", "上海康城", "紫竹半岛","​​翠湖天地","​汤臣一品","苏河湾","仁恒河滨城","世茂滨江花园","​​大宁金茂府"]
+    # locations = ["​​大宁金茂府"]
+    locations = [location.replace('\u200b', '') for location in locations]
     # 处理位置列表
     process_location_list(locations)
     
