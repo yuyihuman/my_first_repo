@@ -7,5 +7,5 @@ screenshots/
 # 忽略 UI 转储文件夹（从代码中看到也有这个目录）
 ui_dumps/
 
-# 忽略临时图像文件
-images/temp/
+# 忽略整个images文件夹
+images/
