@@ -597,6 +597,48 @@ def generate_plots(community_name):
     logger.info(f"Combined image saved as {final_image_path}")
     return final_image_path
 
+def deduplicate_json_file(json_filepath):
+    """对JSON文件中的数据进行去重处理"""
+    logger.info(f"开始对 {json_filepath} 进行去重处理...")
+    
+    # 读取JSON文件
+    if not os.path.exists(json_filepath):
+        logger.warning(f"文件 {json_filepath} 不存在，无法进行去重")
+        return False
+    
+    with open(json_filepath, "r", encoding="utf-8") as f:
+        content = f.read().strip()
+        if not content:
+            logger.warning(f"文件 {json_filepath} 为空，无法进行去重")
+            return False
+        entries = json.loads(content)
+    
+    original_count = len(entries)
+    logger.info(f"原始数据条数: {original_count}")
+    
+    # 使用集合进行去重
+    unique_entries = []
+    unique_tuples = set()
+    
+    for entry in entries:
+        entry_tuple = (entry['date'], entry['area'], entry['price'])
+        if entry_tuple not in unique_tuples:
+            unique_tuples.add(entry_tuple)
+            unique_entries.append(entry)
+    
+    # 按日期排序（降序：最新的日期在前）
+    unique_entries.sort(key=lambda x: x['date'], reverse=True)
+    
+    # 保存去重后的数据
+    with open(json_filepath, "w", encoding="utf-8") as f:
+        json.dump(unique_entries, f, ensure_ascii=False, indent=4)
+    
+    new_count = len(unique_entries)
+    removed_count = original_count - new_count
+    logger.info(f"去重后数据条数: {new_count}，移除了 {removed_count} 条重复数据")
+    
+    return True
+
 if __name__ == "__main__":
     # 设置命令行参数解析
     parser = argparse.ArgumentParser(description="房价数据采集与分析工具")
@@ -628,6 +670,10 @@ if __name__ == "__main__":
         # 设置max_duplicates参数
         max_duplicates = 0 if args.ignore_duplicates else 3
         capture_and_ocr(screenshot_count=args.count, json_filename=filename, max_duplicates=max_duplicates)
+        
+        # 数据采集完成后进行去重处理
+        logger.info(f"数据采集完成，对 {community_name} 的房价数据进行去重...")
+        deduplicate_json_file(os.path.join("data_files", filename))
     
     # 执行图表生成
     if args.plot:
