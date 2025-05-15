@@ -579,7 +579,8 @@ def generate_plots(community_name):
     ImageDraw.Draw(combined_image).text(title_position, title_text, fill='black', font=title_font)
     
     # 保存组合图像
-    final_image_path = f"images/final/{community_name}.png"
+    current_date = datetime.datetime.now().strftime('%Y%m%d')
+    final_image_path = f"images/final/{community_name}_{current_date}.png"
     
     # 缩放图像到30%
     combined_image_resized = combined_image.resize(
