@@ -23,13 +23,13 @@ def setup_logger(log_file=None):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = os.path.join(log_dir, f"eastmoney_scraper_{timestamp}.log")
     
-    # 配置日志格式
+    # 配置日志格式（只输出到文件，时间格式更清晰）
     logging.basicConfig(
         level=logging.DEBUG,
-        format='%(asctime)s - %(levelname)s - %(message)s',
+        format='%(asctime)s %(levelname)s %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler()  # 同时输出到控制台
+            logging.FileHandler(log_file, encoding='utf-8')
         ]
     )
     
