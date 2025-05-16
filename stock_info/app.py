@@ -11,22 +11,55 @@ from data import (
 )
 import os
 import logging
+# 从logging.handlers中移除RotatingFileHandler导入
+# 使用基本的FileHandler
 
 # 创建应用实例
 app = Flask(__name__)
 
+# 确保日志目录存在
+log_dir = 'logs'
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
 # 配置日志
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# 清除现有的处理器（避免重复添加）
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+
+# 创建控制台处理器
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_format)
+
+# 创建文件处理器 - 使用FileHandler，模式设为'w'表示覆盖
+file_handler = logging.FileHandler(
+    os.path.join(log_dir, 'stock_info.log'), 
+    mode='w',  # 'w'模式表示覆盖写入
+    encoding='utf-8'
+)
+file_handler.setLevel(logging.INFO)
+file_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_format)
+
+# 添加处理器到logger
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
 
 # 确保缓存目录存在
 ensure_cache_directories()
 
-# 设置静态文件缓存时间（1天）
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400
+# 设置静态文件缓存时间（开发模式设为0，禁用缓存）
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # 主页
 @app.route('/')
 def index():
+    logger.info("访问主页")
     return render_template('index.html')
 
 # A股个股信息页面
@@ -173,6 +206,52 @@ def sh_house_price_images():
 def serve_house_price_image(image_name):
     image_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
                             'sh_house_price', 'images', 'final')
+    
+    # 查找匹配的图片文件（不考虑扩展名）
+    for file in os.listdir(image_dir):
+        file_name_without_ext = os.path.splitext(file)[0]
+        if file_name_without_ext == image_name:
+            return send_from_directory(image_dir, file)
+    
+    return "图片未找到", 404
+
+# 南向持股页面路由
+@app.route('/southbound_holdings')
+def southbound_holdings():
+    return render_template('southbound_holdings.html')
+
+# 获取南向持股图片列表API
+@app.route('/api/southbound_holdings/images')
+def southbound_holdings_images():
+    try:
+        # 图片目录路径
+        image_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                                'stockapi', 'charts')
+        
+        # 获取所有图片文件
+        image_files = []
+        if os.path.exists(image_dir):
+            for file in os.listdir(image_dir):
+                if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                    # 去掉扩展名
+                    image_name = os.path.splitext(file)[0]
+                    image_files.append(image_name)
+        
+        return jsonify({
+            'status': 'success',
+            'images': sorted(image_files)
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
+
+# 提供图片文件
+@app.route('/southbound_holdings/images/<image_name>')
+def serve_southbound_holdings_image(image_name):
+    image_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                            'stockapi', 'charts')
     
     # 查找匹配的图片文件（不考虑扩展名）
     for file in os.listdir(image_dir):
