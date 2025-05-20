@@ -62,7 +62,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     plugins: {
                         title: {
                             display: true,
-                            text: '最近半年龙虎榜出现次数前十的股票',
+                            text: '最近一年龙虎榜出现次数前三十的股票',
                             font: {
                                 size: 16
                             }

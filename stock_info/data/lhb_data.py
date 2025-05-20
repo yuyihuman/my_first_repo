@@ -6,8 +6,10 @@ import akshare as ak
 from datetime import datetime, timedelta
 from .cache_utils import CACHE_DIR, read_cache, save_cache, is_cache_expired
 
-# 缓存文件路径
-LHB_CACHE_FILE = os.path.join(CACHE_DIR, 'lhb_top10_cache.json')
+# 缓存文件路径，统一放到 cache 文件夹下
+LHB_CACHE_DIR = os.path.join(CACHE_DIR, 'lhb')
+os.makedirs(LHB_CACHE_DIR, exist_ok=True)
+LHB_CACHE_FILE = os.path.join(LHB_CACHE_DIR, 'lhb_top1000_cache.json')
 
 def get_lhb_top10():
     """
