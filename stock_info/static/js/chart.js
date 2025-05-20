@@ -13,22 +13,26 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             // 隐藏加载状态
             loading.style.display = 'none';
-            
+
+            // 只取前30个
+            const codes = data.codes.slice(0, 30);
+            const counts = data.counts.slice(0, 30);
+
             // 提取股票代码数组
-            const stockCodes = data.codes.map(item => {
+            const stockCodes = codes.map(item => {
                 // 从"股票名称(股票代码)"格式中提取股票代码
                 const match = item.match(/\((\d+)\)/);
                 return match ? match[1] : null;
             });
-            
+
             // 创建图表
             const chart = new Chart(lhbChart, {
                 type: 'bar',
                 data: {
-                    labels: data.codes,
+                    labels: codes,
                     datasets: [{
                         label: '龙虎榜出现次数',
-                        data: data.counts,
+                        data: counts,
                         backgroundColor: 'rgba(54, 162, 235, 0.7)',
                         borderColor: 'rgba(54, 162, 235, 1)',
                         borderWidth: 1

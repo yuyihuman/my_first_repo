@@ -11,10 +11,10 @@ LHB_CACHE_FILE = os.path.join(CACHE_DIR, 'lhb_top10_cache.json')
 
 def get_lhb_top10():
     """
-    获取最近半年龙虎榜出现次数前10的股票，使用缓存机制
+    获取近三年龙虎榜出现次数前300的股票，使用缓存机制
     
     Returns:
-        dict: 包含龙虎榜前10股票的代码和出现次数
+        dict: 包含龙虎榜前300股票的代码和出现次数
     """
     # 检查缓存是否存在且有效
     cache_data = read_cache(LHB_CACHE_FILE)
@@ -36,28 +36,23 @@ def _fetch_lhb_data():
     从API获取龙虎榜数据
     
     Returns:
-        dict: 包含龙虎榜前10股票的代码和出现次数
+        dict: 包含龙虎榜前1000股票的代码和出现次数
     """
-    # 计算最近半年的日期范围
+    # 计算最近一年的日期范围
     end_date = datetime.now().strftime('%Y%m%d')
-    start_date = (datetime.now() - timedelta(days=180)).strftime('%Y%m%d')
-    
+    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
     try:
         # 获取龙虎榜数据
         df = ak.stock_lhb_detail_em(start_date=start_date, end_date=end_date)
-        
         # 统计每只股票出现的次数
         stock_count = df.groupby(['代码', '名称']).size().reset_index(name='出现次数')
-        
-        # 按出现次数降序排序并获取前10名
-        top10 = stock_count.sort_values('出现次数', ascending=False).head(10)
-        
+        # 按出现次数降序排序并获取前1000名
+        top1000 = stock_count.sort_values('出现次数', ascending=False).head(1000)
         # 构建返回数据
         result = {
-            'codes': [f"{row['名称']}({row['代码']})" for _, row in top10.iterrows()],
-            'counts': top10['出现次数'].tolist()
+            'codes': [f"{row['名称']}({row['代码']})" for _, row in top1000.iterrows()],
+            'counts': top1000['出现次数'].tolist()
         }
-        
         return result
     except Exception as e:
         print(f"获取龙虎榜数据出错: {e}")
