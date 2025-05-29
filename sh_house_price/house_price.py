@@ -298,7 +298,8 @@ def generate_plots(community_name):
     os.makedirs("images/final", exist_ok=True)
     
     # 加载JSON文件并解析成Python对象
-    with open(f"data_files/{filename}", 'r', encoding='utf-8') as file:
+    json_file_path = f"data_files/{filename}"
+    with open(json_file_path, 'r', encoding='utf-8') as file:
         data = json.load(file)
     
     # 转换成DataFrame格式
@@ -313,6 +314,10 @@ def generate_plots(community_name):
     # 按日期排序
     df['date'] = pd.to_datetime(df['date'], format='%Y.%m.%d')
     df = df.sort_values(by='date')
+
+    # 获取最新的日期
+    latest_date = df['date'].max()
+    latest_date_str = latest_date.strftime('%Y年%m月%d日')
     
     # 计算每年价格的平均值
     df['year'] = df['date'].dt.year
@@ -560,9 +565,10 @@ def generate_plots(community_name):
             y_offset += img.height
     
     # 创建字体对象
-    font_path = "C:\\Windows\\Fonts\\simkai.ttf"  # 替换为您系统中的英文字体文件路径
-    font_size = 36
-    title_text = community_name
+    font_path = "C:\\Windows\\Fonts\\SimHei.ttf"  # 修改为黑体字体文件路径
+    font_size = 72  # 您设置的字体大小
+    # 修改标题文本以包含最新日期
+    title_text = f"{community_name} (数据截至: {latest_date_str})"
     title_font = ImageFont.truetype(font_path, font_size)
     
     # 计算标题的大小和位置
