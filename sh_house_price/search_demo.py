@@ -654,6 +654,7 @@ if __name__ == "__main__":
     
     # 定义要搜索的位置列表
     locations = ["嘉定新城","嘉定老城","松江新城","徐家汇","中信泰富又一城","金地世家","张江汤臣豪园","上海康城","紫竹半岛","​​翠湖天地","​汤臣一品","苏河湾","仁恒河滨城","世茂滨江花园","​​大宁金茂府","中远两湾城","五角场","唐镇"]
+    # locations = ["嘉定老城"]
     locations = [location.replace('\u200b', '') for location in locations]
     # 处理位置列表
     process_location_list(locations)
