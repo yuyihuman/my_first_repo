@@ -104,6 +104,17 @@
                 <canvas id="cumulativeChart"></canvas>
             </div>
             
+            <!-- 新增：近30天资金流入流出图表 -->
+            <div class="chart-container">
+                <div id="dailyFlowChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="dailyFlowChart"></canvas>
+            </div>
+            
             <!-- 月度净买入额柱状图 -->
             <div class="chart-container">
                 <div id="monthlyChartLoading" class="loading-overlay">
@@ -176,6 +187,7 @@
                     
                     // 处理数据并绘制图表
                     renderCumulativeChart(data.daily_data);
+                    renderDailyFlowChart(data.daily_data);  // 新增：调用近30天图表函数
                     renderMonthlyChart(data.daily_data);
                     renderLeadingStocks(data.top_leading_stocks);
                 })
@@ -186,6 +198,7 @@
                     
                     // 隐藏加载动画
                     document.getElementById('cumulativeChartLoading').style.display = 'none';
+                    document.getElementById('dailyFlowChartLoading').style.display = 'none';  // 新增
                     document.getElementById('monthlyChartLoading').style.display = 'none';
                     document.getElementById('leadingStocksLoading').style.display = 'none';
                 });
@@ -301,6 +314,94 @@
             });
         }
         
+        // 新增：绘制近30天资金流入流出图表
+        function renderDailyFlowChart(dailyData) {
+            // 隐藏加载动画
+            document.getElementById('dailyFlowChartLoading').style.display = 'none';
+            
+            // 获取近30天的数据
+            const recent30Days = dailyData.slice(-30);
+            
+            // 准备数据
+            const dates = recent30Days.map(item => item['日期']);
+            const dailyNetBuy = recent30Days.map(item => item['当日成交净买额']);
+            
+            // 创建图表
+            const ctx = document.getElementById('dailyFlowChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: dates,
+                    datasets: [
+                        {
+                            label: '当日净买入额(亿元)',
+                            data: dailyNetBuy,
+                            backgroundColor: dailyNetBuy.map(value => 
+                                value >= 0 ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)'
+                            ),
+                            borderColor: dailyNetBuy.map(value => 
+                                value >= 0 ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)'
+                            ),
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '近30天南向资金流入流出情况',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.raw;
+                                    const flowType = value >= 0 ? '流入' : '流出';
+                                    return `${flowType}: ${Math.abs(value).toFixed(2)}亿元`;
+                                }
+                            }
+                        },
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '日期'
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 15
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '净买入额(亿元)'
+                            },
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.3)';
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         function renderMonthlyChart(dailyData) {
             // 隐藏加载动画
             document.getElementById('monthlyChartLoading').style.display = 'none';
