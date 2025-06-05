@@ -22,8 +22,7 @@ def ensure_cache_directories():
     if not os.path.exists(os.path.join(CACHE_DIR, 'hkstock')):
         os.makedirs(os.path.join(CACHE_DIR, 'hkstock'))
     # 港股通北向数据缓存目录
-    if not os.path.exists(os.path.join(CACHE_DIR, 'northbound')):
-        os.makedirs(os.path.join(CACHE_DIR, 'northbound'))
+
     # 港股财务数据缓存目录
     if not os.path.exists(os.path.join(CACHE_DIR, 'hkstock_finance')):
         os.makedirs(os.path.join(CACHE_DIR, 'hkstock_finance'))

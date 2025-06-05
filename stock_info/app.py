@@ -5,7 +5,6 @@ from data import (
     get_lhb_top10,
     get_stock_financial_data,
     get_hkstock_data,
-    get_northbound_data,
     get_hkstock_finance,
     fetch_macro_china_money_supply
 )
@@ -77,10 +76,7 @@ def lhb():
 def hkstock():
     return render_template('hkstock.html')
 
-# 港股通北向资金页面
-@app.route('/northbound')
-def northbound():
-    return render_template('northbound.html')
+
 
 # 港股个股信息页面
 @app.route('/hkstock_info')
@@ -120,13 +116,7 @@ def api_hkstock_data():
     data = get_hkstock_data()
     return jsonify(data)
 
-# API路由 - 港股通北向资金数据
-@app.route('/api/northbound')
-def api_northbound():
-    """获取北向资金数据的API"""
-    refresh = request.args.get('refresh', 'false').lower() == 'true'
-    data = get_northbound_data(refresh=refresh)
-    return jsonify(data)
+
 
 # API路由 - 港股个股财务数据
 @app.route('/api/hkstock_info/<stock_code>')
