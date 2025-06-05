@@ -33,6 +33,7 @@
             border-radius: 5px;
             padding: 10px;
             margin-top: 20px;
+            margin-bottom: 25px;  /* 调整为25px，既不会离图片太远，也有足够间距 */
             background-color: #f8f9fa;
         }
         /* 添加股票行的鼠标悬停样式 */
@@ -104,17 +105,6 @@
                 <canvas id="cumulativeChart"></canvas>
             </div>
             
-            <!-- 新增：近30天资金流入流出图表 -->
-            <div class="chart-container">
-                <div id="dailyFlowChartLoading" class="loading-overlay">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2">加载中...</p>
-                </div>
-                <canvas id="dailyFlowChart"></canvas>
-            </div>
-            
             <!-- 月度净买入额柱状图 -->
             <div class="chart-container">
                 <div id="monthlyChartLoading" class="loading-overlay">
@@ -126,6 +116,17 @@
                 <canvas id="monthlyChart"></canvas>
             </div>
             
+            <!-- 新增：近30天资金流入流出图表 -->
+            <div class="chart-container">
+                <div id="dailyFlowChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="dailyFlowChart"></canvas>
+            </div>
+
             <!-- 领涨股统计 -->
             <div class="card mt-4">
                 <div class="card-header bg-primary text-white">
@@ -187,8 +188,8 @@
                     
                     // 处理数据并绘制图表
                     renderCumulativeChart(data.daily_data);
-                    renderDailyFlowChart(data.daily_data);  // 新增：调用近30天图表函数
                     renderMonthlyChart(data.daily_data);
+                    renderDailyFlowChart(data.daily_data);  // 新增：调用近30天图表函数
                     renderLeadingStocks(data.top_leading_stocks);
                 })
                 .catch(error => {
@@ -648,6 +649,7 @@
             });
             
             // 如果有预估值，添加说明
+            // 如果有预估值，添加说明
             if (isEstimated) {
                 const chartContainer = document.getElementById('monthlyChart').parentNode;
                 const estimatedNote = document.createElement('div');
@@ -659,6 +661,10 @@
                     乘以估计的当月总交易日数(${estimatedTradingDays}天)计算得出。实际值可能会有所不同。
                 `;
                 chartContainer.appendChild(estimatedNote);
+                
+                // 为第三张图表容器添加额外的顶部边距，确保不重叠
+                const dailyFlowChartContainer = document.getElementById('dailyFlowChart').parentNode;
+                dailyFlowChartContainer.style.marginTop = '100px';
             }
         }
         
