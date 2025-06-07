@@ -588,6 +588,20 @@ def generate_plots(community_name):
     current_date = datetime.datetime.now().strftime('%Y%m%d')
     final_image_path = f"images/final/{community_name}_{current_date}.png"
     
+    # 删除旧的图像文件（相同社区名称但不同日期的图像）
+    import glob
+    old_images_pattern = f"images/final/{community_name}_*.png"
+    old_images = glob.glob(old_images_pattern)
+    for old_image in old_images:
+        try:
+            os.remove(old_image)
+            logger.info(f"已删除旧图像: {old_image}")
+        except FileNotFoundError:
+            # 文件不存在，忽略
+            pass
+        except Exception as e:
+            logger.warning(f"删除旧图像失败 {old_image}: {e}")
+    
     # 缩放图像到30%
     combined_image_resized = combined_image.resize(
         (int(combined_image.width * 0.3), int(combined_image.height * 0.3)), 
