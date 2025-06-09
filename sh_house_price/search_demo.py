@@ -434,7 +434,7 @@ def click_first_search_result(search_term):
     # 使用OCR识别
     from PIL import Image
     import pytesseract
-    
+
     pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
     
     # 读取截图
@@ -473,6 +473,205 @@ def click_first_search_result(search_term):
         logger.warning(f"OCR未识别到包含 '{search_term}' 的搜索结果")
         return False
 
+def preprocess_image_for_ocr(image):
+    """图像预处理以提高OCR识别准确性"""
+    import cv2
+    import numpy as np
+    from PIL import Image  # 添加这行导入
+    
+    # 将PIL图像转换为OpenCV格式
+    img_array = np.array(image)
+    if len(img_array.shape) == 3:
+        img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+    else:
+        img_cv = img_array
+    
+    # 转换为灰度图
+    if len(img_cv.shape) == 3:
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img_cv
+    
+    # 应用高斯模糊去噪
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    
+    # 应用自适应阈值二值化
+    binary = cv2.adaptiveThreshold(
+        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+    )
+    
+    # 形态学操作去除噪点
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    
+    # 将OpenCV图像转换回PIL格式
+    processed_image = Image.fromarray(cleaned)
+    
+    return processed_image
+
+def split_image_for_ocr(image, block_height=200, overlap=50):
+    """将图片在纵向分割成小块进行OCR识别（横向保持完整）"""
+    from PIL import Image
+    import math
+    
+    width, height = image.size
+    blocks = []
+    block_positions = []
+    
+    # 只在纵向分块，横向保持完整宽度
+    y_blocks = math.ceil((height - overlap) / (block_height - overlap))
+    
+    for y in range(y_blocks):
+        # 计算当前块的纵向坐标
+        top = y * (block_height - overlap)
+        bottom = min(top + block_height, height)
+        
+        # 横向使用完整宽度
+        left = 0
+        right = width
+        
+        # 确保块有足够的高度
+        if bottom - top > 50:
+            block = image.crop((left, top, right, bottom))
+            blocks.append(block)
+            block_positions.append((left, top, right, bottom))
+    
+    return blocks, block_positions
+
+def preprocess_for_large_text(image):
+    """专门针对大字体文本的预处理"""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    
+    # 将PIL图像转换为OpenCV格式
+    img_array = np.array(image)
+    if len(img_array.shape) == 3:
+        img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+    else:
+        img_cv = img_array
+    
+    # 转换为灰度图
+    if len(img_cv.shape) == 3:
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img_cv
+    
+    # 对于大字体，使用更轻微的模糊
+    blurred = cv2.GaussianBlur(gray, (1, 1), 0)
+    
+    # 使用OTSU阈值而不是自适应阈值，更适合大字体
+    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # 使用更小的形态学核，避免大字体笔画粘连
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    
+    # 将OpenCV图像转换回PIL格式
+    processed_image = Image.fromarray(cleaned)
+    
+    return processed_image
+
+def ocr_image_blocks(image, search_term, timestamp):
+    """对图片进行纵向分块OCR识别"""
+    import pytesseract
+    from PIL import Image
+    
+    pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+    
+    # 分割图片（只在纵向分割）
+    blocks, positions = split_image_for_ocr(image)
+    
+    all_detected_texts = []
+    total_count = 0
+    
+    logger.info(f"图片已纵向分割为{len(blocks)}个条带进行OCR识别")
+    
+    for i, (block, pos) in enumerate(zip(blocks, positions)):
+        # 对每个小块尝试多种预处理方法
+        processed_block_standard = preprocess_image_for_ocr(block)
+        processed_block_large = preprocess_for_large_text(block)
+        
+        # 保存小块图片用于调试
+        block_file_standard = f"{timestamp}_strip_{i}_standard_{search_term}.png"
+        block_file_large = f"{timestamp}_strip_{i}_large_{search_term}.png"
+        processed_block_standard.save(f"screenshots/{block_file_standard}")
+        processed_block_large.save(f"screenshots/{block_file_large}")
+        
+        logger.info(f"=== 条带{i} OCR识别详情 (高度:{pos[1]}-{pos[3]}) ===")
+        
+        best_count = 0
+        best_texts = []
+        best_method = ""
+        
+        # 尝试不同的预处理方法和PSM模式
+        test_configs = [
+            (processed_block_standard, "标准预处理", 6),
+            (processed_block_large, "大字体预处理", 6),
+            (block, "原图", 6),
+            (processed_block_standard, "标准预处理", 8),
+            (processed_block_large, "大字体预处理", 8),
+            (processed_block_standard, "标准预处理", 7),
+            (processed_block_large, "大字体预处理", 7),
+            (processed_block_standard, "标准预处理", 13),
+            (processed_block_large, "大字体预处理", 13)
+        ]
+        
+        for test_img, method_name, psm_mode in test_configs:
+            try:
+                custom_config = f'--psm {psm_mode}'
+                ocr_data = pytesseract.image_to_data(test_img, lang='chi_sim', config=custom_config, output_type=pytesseract.Output.DICT)
+                
+                block_texts = []
+                valid_texts = []
+                
+                for j, conf in enumerate(ocr_data['conf']):
+                    text = ocr_data['text'][j].strip()
+                    confidence = int(conf)
+                    
+                    if text and confidence > 20:
+                        block_texts.append(text)
+                        valid_texts.append(f"'{text}'({confidence})")
+                
+                block_full_text = ''.join(block_texts)
+                block_count = block_full_text.count(search_term)
+                
+                logger.info(f"  {method_name}(PSM{psm_mode}): 找到{block_count}个'{search_term}' | 有效文字: {', '.join(valid_texts[:3])}{'...' if len(valid_texts) > 3 else ''}")
+                
+                # 记录最佳结果
+                if block_count > best_count:
+                    best_count = block_count
+                    best_texts = block_texts
+                    best_method = f"{method_name}(PSM{psm_mode})"
+                    
+                    # 详细记录最佳结果的文字信息
+                    if block_count > 0:
+                        for j, conf in enumerate(ocr_data['conf']):
+                            text = ocr_data['text'][j].strip()
+                            confidence = int(conf)
+                            if text:
+                                x = ocr_data['left'][j]
+                                y = ocr_data['top'][j]
+                                w = ocr_data['width'][j]
+                                h = ocr_data['height'][j]
+                                logger.info(f"    最佳结果文字: '{text}' | 置信度: {confidence} | 位置: ({x},{y},{x+w},{y+h})")
+                
+            except Exception as e:
+                logger.warning(f"  {method_name}(PSM{psm_mode})识别失败: {e}")
+        
+        # 使用最佳结果
+        if best_count > 0:
+            logger.info(f"  ✓ 最佳方法: {best_method} | 找到{best_count}个'{search_term}'")
+            total_count += best_count
+            all_detected_texts.extend(best_texts)
+        else:
+            logger.info(f"  ✗ 所有方法都未找到'{search_term}'")
+        
+        logger.info(f"=== 条带{i} 识别完成 ===")
+    
+    logger.info(f"所有条带识别完成，总共找到{total_count}个'{search_term}'")
+    return total_count, all_detected_texts
+
 def verify_search_results(search_term):
     """验证搜索结果页面中包含多少个搜索词"""
     logger.info(f"验证搜索结果页面中包含多少个'{search_term}'")
@@ -491,19 +690,74 @@ def verify_search_results(search_term):
     # 读取截图
     img = Image.open(f"screenshots/{screenshot_file}")
     
-    # OCR识别整个屏幕
-    ocr_result = pytesseract.image_to_string(img, lang='chi_sim')
-    # 去除所有空格
-    ocr_result = ocr_result.replace(" ", "").replace("\t", "").replace("\n", "").replace("\r", "")
+    # 方法1: 分块识别
+    logger.info("开始分块识别...")
+    block_count, block_texts = ocr_image_blocks(img, search_term, timestamp)
     
-    # 记录完整的OCR识别结果
-    logger.info(f"OCR识别结果(已去除空格):\n{ocr_result}")
+    # 方法2: 整图预处理识别（作为对比）
+    logger.info("开始整图预处理识别...")
+    processed_img = preprocess_image_for_ocr(img)
+    processed_file = f"{timestamp}_processed_{search_term}.png"
+    processed_img.save(f"screenshots/{processed_file}")
     
-    # 计算搜索词在结果中出现的次数
-    count = ocr_result.count(search_term)
-    logger.info(f"在搜索结果页面中找到{count}个'{search_term}'")
+    try:
+        ocr_data = pytesseract.image_to_data(processed_img, lang='chi_sim', output_type=pytesseract.Output.DICT)
+        
+        logger.info("=== 整图OCR识别详情 ===")
+        detected_texts = []
+        valid_whole_texts = []
+        
+        for i, conf in enumerate(ocr_data['conf']):
+            text = ocr_data['text'][i].strip()
+            confidence = int(conf)
+            
+            if text:
+                x = ocr_data['left'][i]
+                y = ocr_data['top'][i]
+                w = ocr_data['width'][i]
+                h = ocr_data['height'][i]
+                
+                logger.info(f"  文字: '{text}' | 置信度: {confidence} | 位置: ({x},{y},{x+w},{y+h})")
+                
+                if confidence > 30:
+                    detected_texts.append(text)
+                    valid_whole_texts.append(f"'{text}'({confidence})")
+        
+        if valid_whole_texts:
+            logger.info(f"整图有效文字(置信度>30): {', '.join(valid_whole_texts)}")
+        
+        full_text = ''.join(detected_texts)
+        whole_count = full_text.count(search_term)
+        logger.info(f"整图识别完整文本: {full_text}")
+        
+    except Exception as e:
+        logger.warning(f"整图OCR识别失败: {e}")
+        whole_count = 0
+        full_text = ""
     
-    return count
+    # 方法3: 原始图像识别（作为备用）
+    logger.info("开始原始图像识别...")
+    try:
+        original_ocr = pytesseract.image_to_string(img, lang='chi_sim')
+        original_clean = original_ocr.replace(" ", "").replace("\t", "").replace("\n", "").replace("\r", "")
+        original_count = original_clean.count(search_term)
+        logger.info(f"原始图像识别结果: {original_ocr}")
+        logger.info(f"原始图像清理后文本: {original_clean}")
+    except Exception as e:
+        logger.warning(f"原始图像OCR识别失败: {e}")
+        original_count = 0
+    
+    # 记录结果
+    logger.info(f"=== 最终识别结果对比 ===")
+    logger.info(f"分块识别找到{block_count}个'{search_term}'")
+    logger.info(f"整图预处理识别找到{whole_count}个'{search_term}'")
+    logger.info(f"原始图像识别找到{original_count}个'{search_term}'")
+    
+    # 返回最大的计数值
+    final_count = max(block_count, whole_count, original_count)
+    logger.info(f"最终结果: 找到{final_count}个'{search_term}'")
+    
+    return final_count
 
 def search_for_location(location_name, max_retries=5):
     """在搜索框中搜索指定位置"""
