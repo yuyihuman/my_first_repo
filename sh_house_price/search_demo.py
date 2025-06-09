@@ -126,7 +126,7 @@ def input_text(text):
     width, height = get_screen_resolution()
 
     def check_candidate_area(target_char):
-        """检查候选词区域是否已经出现目标汉字"""
+        """检查候选词区域是否已经出现目标汉字 - 增强版本"""
         logger.info(f"检查候选词区域是否已出现'{target_char}'")
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         screenshot_file = f"{timestamp}_candidate_check_{target_char}.png"
@@ -139,69 +139,130 @@ def input_text(text):
         crop_filename = f"{timestamp}_candidate_check_crop_{target_char}.png"
         candidate_area.save(f"screenshots/{crop_filename}")
         
-        ocr_result = pytesseract.image_to_data(candidate_area, lang='chi_sim', config='--psm 7', output_type=pytesseract.Output.DICT)
+        logger.info(f"=== 候选区域OCR识别详情 (目标字符: '{target_char}') ===")
         
-        # 存储所有识别到的文本及其位置
-        all_texts = []
-        for i, txt in enumerate(ocr_result['text']):
-            if txt.strip():  # 只考虑非空文本
-                # 只考虑汉字字符
-                is_chinese_char = False
-                for char in txt.strip():
-                    if '\u4e00' <= char <= '\u9fff':
-                        is_chinese_char = True
-                        break
-                
-                if not is_chinese_char:
-                    logger.info(f"跳过非汉字文本: '{txt.strip()}'")
-                    continue
-                    
-                # 计算中心点坐标
-                center_x = ocr_result['left'][i] + ocr_result['width'][i] // 2
-                center_y = ocr_result['top'][i] + ocr_result['height'][i] // 2
-                
-                all_texts.append({
-                    'text': txt.strip(),
-                    'x': center_x,
-                    'y': center_y,
-                    'center_x': center_x,
-                    'center_y': center_y,
-                    'left': ocr_result['left'][i],
-                    'right': ocr_result['left'][i] + ocr_result['width'][i],
-                    'width': ocr_result['width'][i],
-                    'height': ocr_result['height'][i]
-                })
+        # 准备多种预处理方法
+        processed_standard = preprocess_image_for_ocr(candidate_area)
+        processed_large = preprocess_for_large_text(candidate_area)
         
-        # 查找目标字符
-        for item in all_texts:
-            if item['text'] == target_char:
-                # 检查与其他字符中心点的距离是否小于100像素
-                has_nearby_char = False
-                for other in all_texts:
-                    if other['text'] != target_char:  # 不与自己比较
-                        # 计算两个字符中心点之间的距离
-                        distance = ((item['center_x'] - other['center_x']) ** 2 + 
-                                   (item['center_y'] - other['center_y']) ** 2) ** 0.5
+        # 保存预处理后的图片用于调试
+        processed_standard_file = f"{timestamp}_candidate_standard_{target_char}.png"
+        processed_large_file = f"{timestamp}_candidate_large_{target_char}.png"
+        processed_standard.save(f"screenshots/{processed_standard_file}")
+        processed_large.save(f"screenshots/{processed_large_file}")
+        
+        best_result = None
+        best_confidence = 0
+        best_method = ""
+        
+        # 测试配置：(图像, 方法名, PSM模式)
+        test_configs = [
+            (candidate_area, "原图", 6),
+            (processed_standard, "标准预处理", 6),
+            (processed_large, "大字体预处理", 6),
+            (candidate_area, "原图", 7),
+            (processed_standard, "标准预处理", 7),
+            (processed_large, "大字体预处理", 7),
+            (candidate_area, "原图", 8),
+            (processed_standard, "标准预处理", 8),
+            (processed_large, "大字体预处理", 8),
+            (candidate_area, "原图", 13),
+            (processed_standard, "标准预处理", 13),
+            (processed_large, "大字体预处理", 13)
+        ]
+        
+        for test_img, method_name, psm_mode in test_configs:
+            try:
+                custom_config = f'--psm {psm_mode}'
+                ocr_result = pytesseract.image_to_data(test_img, lang='chi_sim', config=custom_config, output_type=pytesseract.Output.DICT)
+                
+                logger.info(f"  {method_name}(PSM{psm_mode}): 开始识别...")
+                
+                # 存储所有识别到的文本及其位置
+                all_texts = []
+                valid_texts = []
+                
+                for i, txt in enumerate(ocr_result['text']):
+                    if txt.strip():  # 只考虑非空文本
+                        confidence = int(ocr_result['conf'][i])
                         
-                        if distance < 100:
-                            has_nearby_char = True
-                            logger.info(f"字符'{target_char}'中心点100像素内有其他汉字'{other['text']}'，距离为{distance:.2f}像素，跳过")
-                            break
-                    
-                if not has_nearby_char:
-                    # 没有临近字符，可以选择
-                    tap_x = item['x']
-                    tap_y = y_start + item['y']
-                    logger.info(f"OCR识别到目标汉字'{target_char}'，且中心点100像素内无其他汉字，点击坐标: ({tap_x}, {tap_y})")
-                    tap_screen(tap_x, tap_y)
-                    return True
+                        # 只考虑汉字字符
+                        is_chinese_char = False
+                        for char in txt.strip():
+                            if '\u4e00' <= char <= '\u9fff':
+                                is_chinese_char = True
+                                break
+                        
+                        if not is_chinese_char:
+                            logger.info(f"    跳过非汉字文本: '{txt.strip()}'(置信度:{confidence})")
+                            continue
+                        
+                        valid_texts.append(f"'{txt.strip()}'({confidence})")
+                        
+                        if confidence > 30:  # 置信度阈值
+                            # 计算中心点坐标
+                            center_x = ocr_result['left'][i] + ocr_result['width'][i] // 2
+                            center_y = ocr_result['top'][i] + ocr_result['height'][i] // 2
+                            
+                            all_texts.append({
+                                'text': txt.strip(),
+                                'x': center_x,
+                                'y': center_y,
+                                'center_x': center_x,
+                                'center_y': center_y,
+                                'left': ocr_result['left'][i],
+                                'right': ocr_result['left'][i] + ocr_result['width'][i],
+                                'width': ocr_result['width'][i],
+                                'height': ocr_result['height'][i],
+                                'confidence': confidence
+                            })
                 
-        # 如果没有找到合适的目标字符（要么没找到，要么都有临近字符）
-        logger.warning(f"未找到合适的目标汉字'{target_char}'或所有候选都有临近汉字")
-        return False
+                logger.info(f"    识别到的有效汉字: {', '.join(valid_texts[:5])}{'...' if len(valid_texts) > 5 else ''}")
+                
+                # 查找目标字符
+                for item in all_texts:
+                    if item['text'] == target_char:
+                        logger.info(f"    找到目标字符'{target_char}' | 置信度:{item['confidence']} | 位置:({item['center_x']},{item['center_y']})")
+                        
+                        # 检查与其他字符中心点的距离是否小于100像素
+                        has_nearby_char = False
+                        for other in all_texts:
+                            if other['text'] != target_char:  # 不与自己比较
+                                # 计算两个字符中心点之间的距离
+                                distance = ((item['center_x'] - other['center_x']) ** 2 + 
+                                           (item['center_y'] - other['center_y']) ** 2) ** 0.5
+                                
+                                if distance < 100:
+                                    has_nearby_char = True
+                                    logger.info(f"    字符'{target_char}'中心点100像素内有其他汉字'{other['text']}'，距离为{distance:.2f}像素")
+                                    break
+                        
+                        if not has_nearby_char and item['confidence'] > best_confidence:
+                            best_result = item
+                            best_confidence = item['confidence']
+                            best_method = f"{method_name}(PSM{psm_mode})"
+                            logger.info(f"    ✓ 更新最佳候选: 置信度{best_confidence} | 方法:{best_method}")
+                        elif has_nearby_char:
+                            logger.info(f"    ✗ 跳过: 有临近字符")
+                        else:
+                            logger.info(f"    ✗ 跳过: 置信度{item['confidence']}低于当前最佳{best_confidence}")
+                
+            except Exception as e:
+                logger.warning(f"  {method_name}(PSM{psm_mode})识别失败: {e}")
+        
+        # 使用最佳结果
+        if best_result:
+            tap_x = best_result['x']
+            tap_y = y_start + best_result['y']
+            logger.info(f"=== 最终选择: 方法{best_method} | 置信度{best_confidence} | 点击坐标:({tap_x}, {tap_y}) ===")
+            tap_screen(tap_x, tap_y)
+            return True
+        else:
+            logger.warning(f"=== 所有方法都未找到合适的目标汉字'{target_char}' ===")
+            return False
 
     def check_full_screen_area(target_char):
-        """在1165像素下方的区域中分段识别目标汉字"""
+        """在1165像素下方的区域中分段识别目标汉字 - 增强版本"""
         logger.info(f"在分段区域中查找目标汉字'{target_char}'")
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         screenshot_file = f"{timestamp}_full_screen_check_{target_char}.png"
@@ -220,9 +281,14 @@ def input_text(text):
             (1793, height)
         ]
         
+        best_global_result = None
+        best_global_confidence = 0
+        best_global_method = ""
+        best_global_segment = -1
+        
         # 依次检查每个区域
         for i, (y_start, y_end) in enumerate(segments):
-            logger.info(f"检查区域 {i+1}: {y_start}-{y_end}像素")
+            logger.info(f"=== 检查区域 {i+1}: {y_start}-{y_end}像素 ===")
             
             # 裁剪当前区域
             segment_area = img.crop((0, y_start, width, y_end))
@@ -232,44 +298,120 @@ def input_text(text):
             crop_path = os.path.join("screenshots", crop_filename)
             segment_area.save(crop_path)
             
-            # OCR识别当前区域
-            ocr_result = pytesseract.image_to_data(segment_area, lang='chi_sim', config='--psm 7', output_type=pytesseract.Output.DICT)
-            logger.info(f'区域{i+1} OCR结果: {ocr_result}')
+            # 准备多种预处理方法
+            processed_standard = preprocess_image_for_ocr(segment_area)
+            processed_large = preprocess_for_large_text(segment_area)
             
-            # 存储所有识别到的汉字及其位置
-            all_texts = []
-            for j, txt in enumerate(ocr_result['text']):
-                if txt.strip():
-                    # 只考虑汉字
-                    is_chinese_char = False
-                    for char in txt.strip():
-                        if '\u4e00' <= char <= '\u9fff':
-                            is_chinese_char = True
-                            break
-                    
-                    if not is_chinese_char:
-                        logger.info(f"跳过非汉字文本: '{txt.strip()}'")
-                        continue
-                    
-                    center_x = ocr_result['left'][j] + ocr_result['width'][j] // 2
-                    center_y = ocr_result['top'][j] + ocr_result['height'][j] // 2
-                    all_texts.append({
-                        'text': txt.strip(),
-                        'center_x': center_x,
-                        'center_y': center_y
-                    })
+            # 保存预处理后的图片
+            processed_standard_file = f"{timestamp}_segment_{i+1}_standard_{target_char}.png"
+            processed_large_file = f"{timestamp}_segment_{i+1}_large_{target_char}.png"
+            processed_standard.save(f"screenshots/{processed_standard_file}")
+            processed_large.save(f"screenshots/{processed_large_file}")
             
-            # 查找目标字符
-            for item in all_texts:
-                if item['text'] == target_char:
-                    tap_x = item['center_x']
-                    tap_y = y_start + item['center_y']  # 转换为全屏坐标
-                    logger.info(f"在区域{i+1}中找到目标汉字'{target_char}'，点击坐标: ({tap_x}, {tap_y})")
-                    tap_screen(tap_x, tap_y)
-                    return True
+            best_segment_result = None
+            best_segment_confidence = 0
+            best_segment_method = ""
+            
+            # 测试配置
+            test_configs = [
+                (segment_area, "原图", 6),
+                (processed_standard, "标准预处理", 6),
+                (processed_large, "大字体预处理", 6),
+                (segment_area, "原图", 7),
+                (processed_standard, "标准预处理", 7),
+                (processed_large, "大字体预处理", 7),
+                (segment_area, "原图", 8),
+                (processed_standard, "标准预处理", 8),
+                (processed_large, "大字体预处理", 8),
+                (segment_area, "原图", 11),
+                (processed_standard, "标准预处理", 11),
+                (processed_large, "大字体预处理", 11),
+                (segment_area, "原图", 13),
+                (processed_standard, "标准预处理", 13),
+                (processed_large, "大字体预处理", 13)
+            ]
+            
+            for test_img, method_name, psm_mode in test_configs:
+                try:
+                    custom_config = f'--psm {psm_mode}'
+                    ocr_result = pytesseract.image_to_data(test_img, lang='chi_sim', config=custom_config, output_type=pytesseract.Output.DICT)
+                    
+                    logger.info(f"  {method_name}(PSM{psm_mode}): 开始识别...")
+                    
+                    # 存储所有识别到的汉字及其位置
+                    all_texts = []
+                    valid_texts = []
+                    
+                    for j, txt in enumerate(ocr_result['text']):
+                        if txt.strip():
+                            confidence = int(ocr_result['conf'][j])
+                            
+                            # 只考虑汉字
+                            is_chinese_char = False
+                            for char in txt.strip():
+                                if '\u4e00' <= char <= '\u9fff':
+                                    is_chinese_char = True
+                                    break
+                            
+                            if not is_chinese_char:
+                                logger.info(f"    跳过非汉字文本: '{txt.strip()}'(置信度:{confidence})")
+                                continue
+                            
+                            valid_texts.append(f"'{txt.strip()}'({confidence})")
+                            
+                            if confidence > 30:  # 置信度阈值
+                                center_x = ocr_result['left'][j] + ocr_result['width'][j] // 2
+                                center_y = ocr_result['top'][j] + ocr_result['height'][j] // 2
+                                all_texts.append({
+                                    'text': txt.strip(),
+                                    'center_x': center_x,
+                                    'center_y': center_y,
+                                    'confidence': confidence
+                                })
+                    
+                    logger.info(f"    识别到的有效汉字: {', '.join(valid_texts[:5])}{'...' if len(valid_texts) > 5 else ''}")
+                    
+                    # 查找目标字符
+                    for item in all_texts:
+                        if item['text'] == target_char:
+                            logger.info(f"    找到目标字符'{target_char}' | 置信度:{item['confidence']} | 位置:({item['center_x']},{item['center_y']})")
+                            
+                            if item['confidence'] > best_segment_confidence:
+                                best_segment_result = item
+                                best_segment_confidence = item['confidence']
+                                best_segment_method = f"{method_name}(PSM{psm_mode})"
+                                logger.info(f"    ✓ 更新区域最佳候选: 置信度{best_segment_confidence}")
+                            else:
+                                logger.info(f"    ✗ 置信度{item['confidence']}低于当前区域最佳{best_segment_confidence}")
+                
+                except Exception as e:
+                    logger.warning(f"  {method_name}(PSM{psm_mode})识别失败: {e}")
+            
+            # 更新全局最佳结果
+            if best_segment_result and best_segment_confidence > best_global_confidence:
+                best_global_result = best_segment_result
+                best_global_confidence = best_segment_confidence
+                best_global_method = best_segment_method
+                best_global_segment = i + 1
+                logger.info(f"  ✓ 更新全局最佳候选: 区域{best_global_segment} | 置信度{best_global_confidence} | 方法:{best_global_method}")
+            elif best_segment_result:
+                logger.info(f"  ✗ 区域{i+1}最佳置信度{best_segment_confidence}低于全局最佳{best_global_confidence}")
+            else:
+                logger.info(f"  ✗ 区域{i+1}未找到目标字符")
+            
+            logger.info(f"=== 区域{i+1}识别完成 ===")
         
-        logger.warning(f"在所有分段区域中均未找到目标汉字'{target_char}'")
-        return False
+        # 使用全局最佳结果
+        if best_global_result:
+            segment_y_start = segments[best_global_segment - 1][0]
+            tap_x = best_global_result['center_x']
+            tap_y = segment_y_start + best_global_result['center_y']  # 转换为全屏坐标
+            logger.info(f"=== 最终选择: 区域{best_global_segment} | 方法{best_global_method} | 置信度{best_global_confidence} | 点击坐标:({tap_x}, {tap_y}) ===")
+            tap_screen(tap_x, tap_y)
+            return True
+        else:
+            logger.warning(f"=== 在所有分段区域中均未找到目标汉字'{target_char}' ===")
+            return False
 
     # 记录是否有任何字符输入失败
     any_char_failed = False
