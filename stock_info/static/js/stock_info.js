@@ -112,6 +112,7 @@ function displayStockInfo(data) {
                 <td>${item.稀释每股收益 !== null ? item.稀释每股收益.toFixed(2) + '元' : '-'}</td>
                 <td>${item.归属母公司净利润 !== null ? (item.归属母公司净利润 / 100000000).toFixed(2) + '亿' : '-'}</td>
                 <td>${item.实收资本 !== null ? (item.实收资本 / 100000000).toFixed(2) + '亿' : '-'}</td>
+                <td>${item.研发投入 !== null ? (item.研发投入 / 100000000).toFixed(2) + '亿' : '-'}</td>
             `;
             financialData.appendChild(row);
         });
@@ -121,7 +122,7 @@ function displayStockInfo(data) {
     } else {
         // 无数据时显示提示
         const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="7" class="text-center">暂无财务数据</td>';  // 修改colspan为7
+        row.innerHTML = '<td colspan="8" class="text-center">暂无财务数据</td>';  // 修改colspan为8
         financialData.appendChild(row);
     }
     

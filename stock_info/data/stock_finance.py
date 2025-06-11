@@ -143,13 +143,14 @@ def _fetch_stock_financial_data(stock_code):
             debt_df['实收资本'] = None
             debt_df = debt_df[['报告期', '负债率', '实收资本']]
         
-        # 处理利润表数据，计算净利率、毛利率和提取稀释每股收益
+        # 处理利润表数据，计算净利率、毛利率和提取稀释每股收益、研发投入
         # 检查必要的列是否存在
         required_columns = ['报告期', '*净利润', '*营业总收入']
         
-        # 检查是否存在稀释每股收益列和归属于母公司所有者的净利润列
+        # 检查是否存在稀释每股收益列、归属于母公司所有者的净利润列和研发费用列
         has_diluted_eps = '（二）稀释每股收益' in benefit_df.columns
         has_parent_net_profit = '归属于母公司所有者的净利润' in benefit_df.columns
+        has_rd_expense = '研发费用' in benefit_df.columns
         
         if not all(col in benefit_df.columns for col in required_columns):
             print(f"利润表缺少必要的列: {[col for col in required_columns if col not in benefit_df.columns]}")
@@ -169,12 +170,14 @@ def _fetch_stock_financial_data(stock_code):
         else:
             # 检查是否有营业成本列
             if '其中：营业成本' in benefit_df.columns:
-                # 选择需要的列，如果有稀释每股收益列和归属于母公司所有者的净利润列，也一并选择
+                # 选择需要的列，如果有稀释每股收益列、归属于母公司所有者的净利润列和研发费用列，也一并选择
                 cols_to_select = ['报告期', '*净利润', '*营业总收入', '其中：营业成本']
                 if has_diluted_eps:
                     cols_to_select.append('（二）稀释每股收益')
                 if has_parent_net_profit:
                     cols_to_select.append('归属于母公司所有者的净利润')
+                if has_rd_expense:
+                    cols_to_select.append('研发费用')
                 
                 benefit_df = benefit_df[cols_to_select]
                 
@@ -207,14 +210,34 @@ def _fetch_stock_financial_data(stock_code):
                     )
                 else:
                     benefit_df['归属母公司净利润'] = None
+                
+                # 处理研发投入
+                if has_rd_expense:
+                    benefit_df['研发投入'] = benefit_df.apply(
+                        lambda x: convert_to_float(x['研发费用']), 
+                        axis=1
+                    )
+                else:
+                    benefit_df['研发投入'] = None
+                
+                # 处理研发投入
+                if has_rd_expense:
+                    benefit_df['研发投入'] = benefit_df.apply(
+                        lambda x: convert_to_float(x['研发费用']), 
+                        axis=1
+                    )
+                else:
+                    benefit_df['研发投入'] = None
             else:
                 print("缺少'其中：营业成本'列，无法计算毛利率")
-                # 选择需要的列，如果有稀释每股收益列和归属于母公司所有者的净利润列，也一并选择
+                # 选择需要的列，如果有稀释每股收益列、归属于母公司所有者的净利润列和研发费用列，也一并选择
                 cols_to_select = ['报告期', '*净利润', '*营业总收入']
                 if has_diluted_eps:
                     cols_to_select.append('（二）稀释每股收益')
                 if has_parent_net_profit:
                     cols_to_select.append('归属于母公司所有者的净利润')
+                if has_rd_expense:
+                    cols_to_select.append('研发费用')
                 
                 benefit_df = benefit_df[cols_to_select]
                 
@@ -244,7 +267,7 @@ def _fetch_stock_financial_data(stock_code):
                     benefit_df['归属母公司净利润'] = None
         
         # 选择需要的列
-        benefit_df = benefit_df[['报告期', '净利率', '毛利率', '稀释每股收益', '归属母公司净利润']]
+        benefit_df = benefit_df[['报告期', '净利率', '毛利率', '稀释每股收益', '归属母公司净利润', '研发投入']]
         
         # 合并数据
         try:
@@ -271,7 +294,8 @@ def _fetch_stock_financial_data(stock_code):
                 '毛利率': round(row['毛利率'], 2) if not pd.isna(row['毛利率']) else None,
                 '稀释每股收益': round(row['稀释每股收益'], 4) if not pd.isna(row['稀释每股收益']) else None,
                 '归属母公司净利润': round(row['归属母公司净利润'], 2) if not pd.isna(row['归属母公司净利润']) else None,
-                '实收资本': round(row['实收资本'], 2) if not pd.isna(row['实收资本']) else None
+                '实收资本': round(row['实收资本'], 2) if not pd.isna(row['实收资本']) else None,
+                '研发投入': round(row['研发投入'], 2) if not pd.isna(row['研发投入']) else None
             })
         
         # 获取股票名称

@@ -28,6 +28,6 @@
 
 .table-equal-width th,
 .table-equal-width td {
-    width: 16.66%; /* 100% / 6列 = 16.66% */
+    width: 12.5%; /* 100% / 8列 = 12.5% */
     text-align: center;
 }
