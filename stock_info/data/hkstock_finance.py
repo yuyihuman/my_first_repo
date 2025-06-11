@@ -122,7 +122,8 @@ def get_hkstock_finance(stock_code):
                 "毛利率": gross_profit_margin,
                 "稀释每股收益": eps,
                 "归属母公司净利润": net_profit,
-                "实收资本": equity
+                "实收资本": equity,
+                "研发投入": None  # 港股暂无研发投入数据
             })
         
         # 构建结果
