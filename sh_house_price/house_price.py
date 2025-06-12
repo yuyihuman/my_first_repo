@@ -389,7 +389,53 @@ def generate_plots(community_name):
         axes[0].set_ylabel('价格')
         axes[0].legend(loc='upper left')
     
-        # 绘制年度成交量柱状图
+        # 绘制月度成交量柱状图（改进版）- 现在是第二张图
+        monthly_transactions = filtered_df.groupby(filtered_df['date'].dt.to_period('M')).size()
+        
+        # 将月度数据按年份分组
+        monthly_df = pd.DataFrame({
+            'date': monthly_transactions.index.to_timestamp(),
+            'count': monthly_transactions.values
+        })
+        monthly_df['year'] = monthly_df['date'].dt.year
+        
+        # 设置柱子宽度
+        width = 20  # 以天为单位的宽度
+        
+        # 定义两种交替的颜色
+        colors = ['#4CAF50', '#2196F3']  # 绿色和蓝色
+        
+        # 获取所有年份并排序
+        years = sorted(monthly_df['year'].unique())
+        
+        # 为每个年份绘制柱状图，使用交替的颜色
+        for i, year in enumerate(years):
+            year_data = monthly_df[monthly_df['year'] == year]
+            color = colors[i % len(colors)]  # 交替使用两种颜色
+            
+            # 绘制该年份的柱状图
+            bars2 = axes[1].bar(year_data['date'], year_data['count'], 
+                               width=width, color=color, alpha=0.7, 
+                               align='center', label=f'{year}年')
+        
+        axes[1].set_title(f'月度成交量 (面积: {area_min}-{area_max})')
+        axes[1].set_xlabel('年份')
+        axes[1].set_ylabel('成交量')
+        axes[1].legend(loc='upper left')
+        
+        # 设置横坐标只显示年份
+        unique_years = sorted(set(monthly_df['year']))
+        axes[1].set_xticks([pd.Timestamp(year=year, month=1, day=1) for year in unique_years])
+        axes[1].set_xticklabels(unique_years, rotation=45)
+        
+        # 调整x轴范围，确保所有柱子都能显示
+        if len(monthly_df) > 0:
+            date_min = min(monthly_df['date'])
+            date_max = max(monthly_df['date'])
+            # 在两端各增加一个月的空间
+            axes[1].set_xlim(date_min - pd.Timedelta(days=30), date_max + pd.Timedelta(days=30))
+    
+        # 绘制年度成交量柱状图 - 现在是第三张图
         yearly_transactions = filtered_df.groupby(filtered_df['date'].dt.year).size()
         
         # 获取当前年份
@@ -444,39 +490,39 @@ def generate_plots(community_name):
                         predicted_additional = max(0, predicted_total - actual_sales)  # 确保预测增量为正
                         
                         # 绘制实际销量和预测销量
-                        bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+                        bars = axes[2].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
                         
                         # 在当前年份的柱子上叠加预测部分
                         if predicted_additional > 0:
-                            axes[1].bar([current_year], [predicted_additional], bottom=[actual_sales], 
+                            axes[2].bar([current_year], [predicted_additional], bottom=[actual_sales], 
                                        color='lightblue', alpha=0.7, label='预测销量')
                             
                             # 在柱子顶部添加预测总量标签
                             total_height = actual_sales + predicted_additional
-                            axes[1].annotate(f'预测: {int(total_height)}',
+                            axes[2].annotate(f'预测: {int(total_height)}',
                                            xy=(current_year, total_height),
                                            xytext=(0, 5),
                                            textcoords="offset points",
                                            ha='center', va='bottom')
                     else:
-                        bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+                        bars = axes[2].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
                 else:
-                    bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+                    bars = axes[2].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
             else:
-                bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+                bars = axes[2].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
         else:
-            bars = axes[1].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
+            bars = axes[2].bar(yearly_transactions.index, yearly_transactions.values, color='orange')
         
-        axes[1].set_title(f'年度成交量 (面积: {area_min}-{area_max})')
-        axes[1].set_xlabel('年份')
-        axes[1].set_ylabel('成交量')
-        axes[1].set_xticks(yearly_transactions.index)
-        axes[1].set_xticklabels(yearly_transactions.index, rotation=45)
+        axes[2].set_title(f'年度成交量 (面积: {area_min}-{area_max})')
+        axes[2].set_xlabel('年份')
+        axes[2].set_ylabel('成交量')
+        axes[2].set_xticks(yearly_transactions.index)
+        axes[2].set_xticklabels(yearly_transactions.index, rotation=45)
         
         # 为每个柱子添加数值标签
         for bar in bars:
             height = bar.get_height()
-            axes[1].annotate('{}'.format(int(height)),
+            axes[2].annotate('{}'.format(int(height)),
                              xy=(bar.get_x() + bar.get_width() / 2, height),
                              xytext=(0, 3),
                              textcoords="offset points",
@@ -484,53 +530,7 @@ def generate_plots(community_name):
         
         # 添加图例
         if current_year in yearly_transactions.index:
-            axes[1].legend(loc='upper left')
-    
-        # 绘制月度成交量柱状图（改进版）
-        monthly_transactions = filtered_df.groupby(filtered_df['date'].dt.to_period('M')).size()
-        
-        # 将月度数据按年份分组
-        monthly_df = pd.DataFrame({
-            'date': monthly_transactions.index.to_timestamp(),
-            'count': monthly_transactions.values
-        })
-        monthly_df['year'] = monthly_df['date'].dt.year
-        
-        # 设置柱子宽度
-        width = 20  # 以天为单位的宽度
-        
-        # 定义两种交替的颜色
-        colors = ['#4CAF50', '#2196F3']  # 绿色和蓝色
-        
-        # 获取所有年份并排序
-        years = sorted(monthly_df['year'].unique())
-        
-        # 为每个年份绘制柱状图，使用交替的颜色
-        for i, year in enumerate(years):
-            year_data = monthly_df[monthly_df['year'] == year]
-            color = colors[i % len(colors)]  # 交替使用两种颜色
-            
-            # 绘制该年份的柱状图
-            bars2 = axes[2].bar(year_data['date'], year_data['count'], 
-                               width=width, color=color, alpha=0.7, 
-                               align='center', label=f'{year}年')
-        
-        axes[2].set_title(f'月度成交量 (面积: {area_min}-{area_max})')
-        axes[2].set_xlabel('年份')
-        axes[2].set_ylabel('成交量')
-        axes[2].legend(loc='upper left')
-        
-        # 设置横坐标只显示年份
-        unique_years = sorted(set(monthly_df['year']))
-        axes[2].set_xticks([pd.Timestamp(year=year, month=1, day=1) for year in unique_years])
-        axes[2].set_xticklabels(unique_years, rotation=45)
-        
-        # 调整x轴范围，确保所有柱子都能显示
-        if len(monthly_df) > 0:
-            date_min = min(monthly_df['date'])
-            date_max = max(monthly_df['date'])
-            # 在两端各增加一个月的空间
-            axes[2].set_xlim(date_min - pd.Timedelta(days=30), date_max + pd.Timedelta(days=30))
+            axes[2].legend(loc='upper left')
         
         # 保存图像
         image_path = f'images/temp/plot_{area_min}_{area_max}.png'
