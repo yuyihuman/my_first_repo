@@ -5,6 +5,7 @@ import datetime
 import time
 import random
 import argparse
+import pandas as pd
 
 def log(msg):
     now = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
@@ -16,12 +17,45 @@ def get_yesterday_date():
     yesterday = today - datetime.timedelta(days=1)
     return yesterday.strftime("%Y-%m-%d")
 
+def get_latest_data_date_for_stock(stock_code):
+    """获取指定股票的最新数据日期"""
+    data_dir = "data"
+    stock_file = os.path.join(data_dir, f"{stock_code}_eastmoney_table.csv")
+    
+    if not os.path.exists(stock_file):
+        return None
+    
+    try:
+        df = pd.read_csv(stock_file, encoding='utf-8-sig')
+        if not df.empty and '日期' in df.columns:
+            # 获取第一行的日期（最新日期）
+            latest_date = pd.to_datetime(df['日期'].iloc[0]).date()
+            return latest_date
+    except Exception as e:
+        log(f"读取文件 {stock_file} 时出错: {e}")
+        return None
+    
+    return None
+
+def needs_update(stock_code, target_date):
+    """判断指定股票是否需要更新到目标日期"""
+    latest_date = get_latest_data_date_for_stock(stock_code)
+    
+    if latest_date is None:
+        return True  # 文件不存在，需要获取数据
+    
+    target_date_obj = datetime.datetime.strptime(target_date, "%Y-%m-%d").date()
+    
+    return latest_date < target_date_obj
+
 def main():
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="批量提取东方财富网港股通持股数据")
     parser.add_argument("--limit", type=int, default=None, help="限制处理的股票数量，默认处理全部")
     parser.add_argument("--retry", type=int, default=3, help="失败时的重试次数，默认为3次")
     parser.add_argument("--delay", type=float, default=2, help="请求之间的延迟时间(秒)，默认为2秒")
+    parser.add_argument("--incremental", action="store_true", help="启用增量更新模式，只更新需要更新的股票")
+    parser.add_argument("--date", default=None, help="指定更新的日期，格式为YYYY-MM-DD，默认为昨天")
     args = parser.parse_args()
     
     # 设置数据目录
@@ -47,9 +81,32 @@ def main():
         stocks_df = stocks_df.head(args.limit)
         log(f"根据参数限制，将只处理前 {args.limit} 只股票")
     
-    # 获取昨天的日期
-    yesterday = get_yesterday_date()
-    log(f"使用日期: {yesterday}")
+    # 获取目标日期
+    target_date = args.date if args.date else get_yesterday_date()
+    log(f"使用日期: {target_date}")
+    
+    # 如果启用增量更新模式，筛选需要更新的股票
+    if args.incremental:
+        log("启用增量更新模式")
+        stocks_to_process = []
+        for index, row in stocks_df.iterrows():
+            stock_code = row['代码'].zfill(5)
+            stock_name = row['名称']
+            
+            if needs_update(stock_code, target_date):
+                stocks_to_process.append((index, row))
+            else:
+                log(f"股票 {stock_code} {stock_name} 数据已是最新，跳过")
+        
+        if not stocks_to_process:
+            log("所有股票数据都已是最新，无需更新")
+            return
+        
+        log(f"需要更新 {len(stocks_to_process)} 只股票的数据")
+        # 重新构建DataFrame
+        stocks_df = pd.DataFrame([row for index, row in stocks_to_process])
+    else:
+        log("使用全量更新模式")
     
     # 为每个股票运行脚本
     success_count = 0
@@ -63,7 +120,7 @@ def main():
         stock_code = stock_code.zfill(5)
         
         # 构建URL
-        url = f"https://data.eastmoney.com/hsgt/StockHdDetail/{stock_code}/{yesterday}.html"
+        url = f"https://data.eastmoney.com/hsgt/StockHdDetail/{stock_code}/{target_date}.html"
         
         log(f"\n处理第 {index+1}/{len(stocks_df)} 只股票: {stock_code} {stock_name}")
         log(f"URL: {url}")
@@ -79,6 +136,11 @@ def main():
             try:
                 # 运行extract_eastmoney_table.py脚本
                 cmd = ["python", "extract_eastmoney_table.py", url]
+                
+                # 如果是增量更新模式，添加增量参数
+                if args.incremental:
+                    cmd.append("--incremental")
+                    
                 log(f"执行命令: {' '.join(cmd)}")
                 
                 # 执行命令
