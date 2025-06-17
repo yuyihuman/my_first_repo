@@ -107,7 +107,7 @@ class InstitutionalHoldingsData:
         return sample_data
     
     def _load_real_data(self):
-        """加载真实数据 - 按最新报告期筛选机构持股前10名"""
+        """加载真实数据 - 按最新报告期筛选机构持股数据（全部机构前30名，其他类别前10名）"""
         try:
             data_files = self._get_data_files()
             if not data_files:
@@ -137,6 +137,9 @@ class InstitutionalHoldingsData:
                 'qfii': [],
                 'social-security': []
             }
+            
+            # 用于汇总每个股票的总持股比例
+            stock_totals = {}
             
             # 处理每一行数据
             for _, row in latest_df.iterrows():
@@ -170,8 +173,16 @@ class InstitutionalHoldingsData:
                         'report_date': int(latest_report_date)
                     }
                     
-                    # 添加到all类别
-                    all_data['all'].append(stock_data)
+                    # 为"全部机构"汇总每个股票的总持股比例
+                    stock_key = (stock_code, stock_name)
+                    if stock_key not in stock_totals:
+                        stock_totals[stock_key] = {
+                            'stock_code': stock_code,
+                            'stock_name': stock_name,
+                            'holding_ratio': 0,
+                            'report_date': int(latest_report_date)
+                        }
+                    stock_totals[stock_key]['holding_ratio'] += holding_ratio
                     
                     # 根据机构类型分类
                     if '基金' in institution_type or 'fund' in institution_type.lower():
@@ -187,7 +198,10 @@ class InstitutionalHoldingsData:
                     logger.warning(f"处理数据行时出错: {e}")
                     continue
             
-            # 对每个类别的数据进行去重、排序并取前10
+            # 将汇总后的股票总持股比例添加到"全部机构"类别
+            all_data['all'] = list(stock_totals.values())
+            
+            # 对每个类别的数据进行去重、排序并取前N名
             for category in all_data:
                 # 去重：如果同一股票有多条记录，保留持股比例最高的
                 unique_stocks = {}
@@ -199,8 +213,11 @@ class InstitutionalHoldingsData:
                 # 转换回列表并按持股比例排序
                 all_data[category] = list(unique_stocks.values())
                 all_data[category].sort(key=lambda x: x['holding_ratio'], reverse=True)
-                all_data[category] = all_data[category][:10]
-                logger.info(f"类别 {category} 最新报告期({latest_report_date})前10名包含 {len(all_data[category])} 条记录")
+                
+                # 全部机构显示前30名，其他类别显示前10名
+                top_count = 30 if category == 'all' else 10
+                all_data[category] = all_data[category][:top_count]
+                logger.info(f"类别 {category} 最新报告期({latest_report_date})前{top_count}名包含 {len(all_data[category])} 条记录")
             
             logger.info(f"真实数据加载完成，包含类别: {list(all_data.keys())}")
             return all_data
