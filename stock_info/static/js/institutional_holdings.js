@@ -128,139 +128,217 @@ function displayStockDetail(data) {
         </div>
     `;
     
-    // 按报告期展示
-    if (data.by_report_date && Object.keys(data.by_report_date).length > 0) {
-        html += `
-            <div class="row mb-4">
-                <div class="col-12">
-                    <h5>按报告期分析</h5>
-                    <div class="accordion" id="reportDateAccordion">
-        `;
-        
-        Object.keys(data.by_report_date).forEach((reportDate, index) => {
-            const institutions = data.by_report_date[reportDate];
-            const isFirst = index === 0;
-            
-            html += `
-                <div class="accordion-item">
-                    <h2 class="accordion-header" id="heading${index}">
-                        <button class="accordion-button ${isFirst ? '' : 'collapsed'}" type="button" 
-                                data-bs-toggle="collapse" data-bs-target="#collapse${index}" 
-                                aria-expanded="${isFirst}" aria-controls="collapse${index}">
-                            ${reportDate} (${institutions.length}个机构)
-                        </button>
-                    </h2>
-                    <div id="collapse${index}" class="accordion-collapse collapse ${isFirst ? 'show' : ''}" 
-                         aria-labelledby="heading${index}" data-bs-parent="#reportDateAccordion">
-                        <div class="accordion-body">
-                            <div class="table-responsive">
-                                <table class="table table-sm table-striped">
-                                    <thead>
-                                        <tr>
-                                            <th>机构类型</th>
-                                            <th>持股比例(%)</th>
-                                            <th>持有机构数</th>
-                                            <th>持股市值</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-            `;
-            
-            institutions.forEach(inst => {
-                html += `
-                    <tr>
-                        <td>${inst.institution_type}</td>
-                        <td>${inst.holding_ratio.toFixed(2)}%</td>
-                        <td>${inst.holding_count || '-'}</td>
-                        <td>${inst.market_value ? (inst.market_value / 10000).toFixed(2) + '万' : '-'}</td>
-                    </tr>
-                `;
-            });
-            
-            html += `
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        html += `
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    
-    // 按机构类型展示
-    if (data.by_institution_type && Object.keys(data.by_institution_type).length > 0) {
-        html += `
-            <div class="row">
-                <div class="col-12">
-                    <h5>按机构类型分析</h5>
-                    <div class="row">
-        `;
-        
-        Object.keys(data.by_institution_type).forEach(instType => {
-            const periods = data.by_institution_type[instType];
-            
-            html += `
-                <div class="col-md-6 mb-3">
-                    <div class="card">
-                        <div class="card-header">
-                            <h6 class="mb-0">${instType}</h6>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-sm">
-                                    <thead>
-                                        <tr>
-                                            <th>报告期</th>
-                                            <th>持股比例(%)</th>
-                                            <th>机构数量</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-            `;
-            
-            periods.forEach(period => {
-                html += `
-                    <tr>
-                        <td>${period.report_date}</td>
-                        <td>${period.holding_ratio}%</td>
-                        <td>${period.institution_count}</td>
-                    </tr>
-                `;
-            });
-            
-            html += `
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        html += `
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    
-    if (!data.by_report_date || Object.keys(data.by_report_date).length === 0) {
+    // 检查是否有数据
+    if (!data.by_institution_type || Object.keys(data.by_institution_type).length === 0) {
         html += `
             <div class="alert alert-info" role="alert">
                 该股票暂无机构持股数据记录
             </div>
         `;
+        document.getElementById('stockDetailContent').innerHTML = html;
+        return;
     }
     
+    // 创建图表容器
+    html += `
+        <div class="row">
+            <div class="col-12">
+                <h5>机构持股比例变化趋势</h5>
+                <div class="chart-container mb-4" style="height: 400px;">
+                    <canvas id="stockDetailChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-12">
+                <h5>各机构类型持股分布</h5>
+                <div class="chart-container" style="height: 300px;">
+                    <canvas id="stockDetailPieChart"></canvas>
+                </div>
+            </div>
+        </div>
+    `;
+    
     document.getElementById('stockDetailContent').innerHTML = html;
+    
+    // 创建趋势图表
+    createStockDetailTrendChart(data.by_institution_type);
+    
+    // 创建饼图
+    createStockDetailPieChart(data.by_institution_type);
+}
+
+// 创建个股详情趋势图表
+function createStockDetailTrendChart(institutionData) {
+    const ctx = document.getElementById('stockDetailChart');
+    if (!ctx) return;
+    
+    // 销毁已存在的图表
+    if (window.stockDetailChart && typeof window.stockDetailChart.destroy === 'function') {
+        window.stockDetailChart.destroy();
+    }
+    
+    // 准备数据
+    const datasets = [];
+    const colors = {
+        '基金': '#FF6384',
+        '保险': '#36A2EB', 
+        'QFII': '#FFCE56',
+        '社保': '#4BC0C0',
+        '券商': '#9966FF',
+        '信托': '#FF9F40',
+        '其他': '#C9CBCF'
+    };
+    
+    let allDates = new Set();
+    
+    // 收集所有日期
+    Object.values(institutionData).forEach(periods => {
+        periods.forEach(period => {
+            allDates.add(period.report_date);
+        });
+    });
+    
+    const sortedDates = Array.from(allDates).sort();
+    
+    // 为每个机构类型创建数据集
+    Object.keys(institutionData).forEach(instType => {
+        const periods = institutionData[instType];
+        const data = sortedDates.map(date => {
+            const period = periods.find(p => p.report_date === date);
+            return period ? parseFloat(period.holding_ratio) : null;
+        });
+        
+        datasets.push({
+            label: instType,
+            data: data,
+            borderColor: colors[instType] || '#' + Math.floor(Math.random()*16777215).toString(16),
+            backgroundColor: (colors[instType] || '#' + Math.floor(Math.random()*16777215).toString(16)) + '20',
+            fill: false,
+            tension: 0.1,
+            spanGaps: true
+        });
+    });
+    
+    window.stockDetailChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: sortedDates,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: '各机构类型持股比例变化趋势'
+                },
+                legend: {
+                    display: true,
+                    position: 'top'
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: '持股比例(%)'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: '报告期'
+                    }
+                }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            }
+        }
+    });
+}
+
+// 创建个股详情饼图
+function createStockDetailPieChart(institutionData) {
+    const ctx = document.getElementById('stockDetailPieChart');
+    if (!ctx) return;
+    
+    // 销毁已存在的图表
+    if (window.stockDetailPieChart && typeof window.stockDetailPieChart.destroy === 'function') {
+        window.stockDetailPieChart.destroy();
+    }
+    
+    // 找到全局最新报告期（数字格式比较）
+    let globalLatestDate = 0;
+    Object.values(institutionData).forEach(periods => {
+        periods.forEach(period => {
+            const currentDate = parseInt(period.report_date);
+            if (currentDate > globalLatestDate) {
+                globalLatestDate = currentDate;
+            }
+        });
+    });
+    
+    // 只显示最新期有数据的机构类型
+    const latestData = {};
+    if (globalLatestDate > 0) {
+        Object.keys(institutionData).forEach(instType => {
+            const periods = institutionData[instType];
+            const latestPeriod = periods.find(period => {
+                return parseInt(period.report_date) === globalLatestDate;
+            });
+            
+            if (latestPeriod) {
+                latestData[instType] = parseFloat(latestPeriod.holding_ratio);
+            }
+        });
+    }
+    
+    const labels = Object.keys(latestData);
+    const data = Object.values(latestData);
+    const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#C9CBCF'];
+    
+    window.stockDetailPieChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: colors.slice(0, labels.length),
+                borderWidth: 2,
+                borderColor: '#fff'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: '最新期各机构类型持股分布'
+                },
+                legend: {
+                    display: true,
+                    position: 'right'
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label}: ${value}% (占比${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
 
 // 页面加载完成后初始化
