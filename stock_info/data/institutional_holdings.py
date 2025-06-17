@@ -116,7 +116,7 @@ class InstitutionalHoldingsData:
             
             # 读取合并的CSV文件
             file_path = data_files[0]
-            df = pd.read_csv(file_path, encoding='utf-8')
+            df = pd.read_csv(file_path, encoding='utf-8', dtype={'股票代码': str, 'stock_code': str})
             logger.info(f"成功读取合并文件 {file_path}，包含 {len(df)} 行数据")
             
             # 打印列名以便调试
@@ -146,7 +146,7 @@ class InstitutionalHoldingsData:
                     stock_name = str(row.get('股票名称', row.get('股票简称', row.get('stock_name', ''))))
                     
                     # 获取机构类型
-                    institution_type = str(row.get('机构类型', row.get('institution_type', '')))
+                    institution_type = str(row.get('institution_type', row.get('机构类型', '')))
                     
                     # 优先使用占流通股比例，如果没有则使用占总股本比例
                     holding_ratio = 0
@@ -167,7 +167,7 @@ class InstitutionalHoldingsData:
                         'stock_code': stock_code,
                         'stock_name': stock_name,
                         'holding_ratio': holding_ratio,
-                        'report_date': latest_report_date
+                        'report_date': int(latest_report_date)
                     }
                     
                     # 添加到all类别
@@ -281,7 +281,7 @@ class InstitutionalHoldingsData:
             
             # 读取合并的CSV文件
             file_path = data_files[0]
-            df = pd.read_csv(file_path, encoding='utf-8')
+            df = pd.read_csv(file_path, encoding='utf-8', dtype={'股票代码': str, 'stock_code': str})
             
             # 筛选指定股票的数据
             stock_df = df[
@@ -309,7 +309,7 @@ class InstitutionalHoldingsData:
                 
                 institutions = []
                 for _, row in report_df.iterrows():
-                    institution_type = str(row.get('机构类型', row.get('institution_type', '')))
+                    institution_type = str(row.get('institution_type', row.get('机构类型', '')))
                     
                     # 获取持股比例
                     holding_ratio = 0
@@ -326,21 +326,27 @@ class InstitutionalHoldingsData:
                         institutions.append({
                             'institution_type': institution_type,
                             'holding_ratio': holding_ratio,
-                            'holding_count': row.get('持有基金家数', row.get('holding_count', 0)),
-                            'market_value': row.get('持股市值', row.get('market_value', 0))
+                            'holding_count': int(row.get('持有基金家数', row.get('holding_count', 0))),
+                            'market_value': float(row.get('持股市值', row.get('market_value', 0)))
                         })
                 
                 # 按持股比例排序
                 institutions.sort(key=lambda x: x['holding_ratio'], reverse=True)
-                detail_data['by_report_date'][report_date] = institutions
+                detail_data['by_report_date'][str(report_date)] = institutions
             
             # 按机构类型分组
             institution_types = ['基金', '保险', 'QFII', '社保']
             for inst_type in institution_types:
-                type_df = stock_df[
-                    stock_df['机构类型'].str.contains(inst_type, na=False) |
-                    stock_df.get('institution_type', pd.Series()).str.contains(inst_type, case=False, na=False)
-                ]
+                # 安全检查列是否存在
+                condition1 = pd.Series([False] * len(stock_df))
+                condition2 = pd.Series([False] * len(stock_df))
+                
+                if 'institution_type' in stock_df.columns:
+                    condition1 = stock_df['institution_type'].str.contains(inst_type, case=False, na=False)
+                if '机构类型' in stock_df.columns:
+                    condition2 = stock_df['机构类型'].str.contains(inst_type, na=False)
+                
+                type_df = stock_df[condition1 | condition2]
                 
                 if not type_df.empty:
                     periods = []
@@ -357,9 +363,9 @@ class InstitutionalHoldingsData:
                         
                         if total_ratio > 0:
                             periods.append({
-                                'report_date': report_date,
+                                'report_date': int(report_date),
                                 'holding_ratio': round(total_ratio, 2),
-                                'institution_count': len(period_df)
+                                'institution_count': int(len(period_df))
                             })
                     
                     detail_data['by_institution_type'][inst_type] = periods
@@ -414,7 +420,7 @@ class InstitutionalHoldingsData:
             
             # 读取合并的CSV文件
             file_path = data_files[0]
-            df = pd.read_csv(file_path, encoding='utf-8')
+            df = pd.read_csv(file_path, encoding='utf-8', dtype={'股票代码': str, 'stock_code': str})
             
             # 筛选指定股票的数据
             stock_df = df[
@@ -439,10 +445,16 @@ class InstitutionalHoldingsData:
                 
                 if category in category_mapping:
                     inst_type = category_mapping[category]
-                    stock_df = stock_df[
-                        stock_df['机构类型'].str.contains(inst_type, na=False) |
-                        stock_df.get('institution_type', pd.Series()).str.contains(inst_type, case=False, na=False)
-                    ]
+                    # 安全检查列是否存在
+                    condition1 = pd.Series([False] * len(stock_df))
+                    condition2 = pd.Series([False] * len(stock_df))
+                    
+                    if 'institution_type' in stock_df.columns:
+                        condition1 = stock_df['institution_type'].str.contains(inst_type, case=False, na=False)
+                    if '机构类型' in stock_df.columns:
+                        condition2 = stock_df['机构类型'].str.contains(inst_type, na=False)
+                    
+                    stock_df = stock_df[condition1 | condition2]
             
             # 按报告期聚合数据
             for report_date in sorted(stock_df['report_date'].unique()):
@@ -458,7 +470,7 @@ class InstitutionalHoldingsData:
                 
                 if total_ratio > 0:
                     trend_data.append({
-                        'date': report_date,
+                        'date': str(report_date),
                         'holding_ratio': round(total_ratio, 2),
                         'change_ratio': 0  # 变化比例需要计算
                     })
