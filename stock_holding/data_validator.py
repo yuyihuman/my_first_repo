@@ -33,8 +33,8 @@ class DataValidator:
             'stock_code': {
                 'required': True,
                 'type': str,
-                'pattern': r'^[0-9A-Za-z*]{1,10}$',  # 支持数字、字母、*号，1-10位
-                'description': '股票代码应为1-10位的数字、字母或*号组合'
+                'pattern': r'^[0-9]{6}$',  # 严格要求6位数字
+                'description': '股票代码应为6位数字'
             },
             'stock_name': {
                 'required': True,

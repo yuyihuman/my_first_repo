@@ -439,6 +439,9 @@ class InstitutionalHoldingsAnalyzer:
             try:
                 data = pd.read_csv(filepath, encoding='utf-8-sig')
                 if not data.empty:
+                    # 确保股票代码格式统一为6位数字字符串
+                    if '股票代码' in data.columns:
+                        data['股票代码'] = data['股票代码'].astype(str).str.zfill(6)
                     all_data.append(data)
                     self.logger.debug(f"加载文件: {filename}, 记录数: {len(data)}")
             except Exception as e:
@@ -447,6 +450,14 @@ class InstitutionalHoldingsAnalyzer:
         if all_data:
             merged_data = pd.concat(all_data, ignore_index=True)
             self.logger.info(f"数据合并完成，总记录数: {len(merged_data)}")
+            
+            # 确保股票代码格式统一为6位数字字符串
+            if '股票代码' in merged_data.columns:
+                self.logger.info("开始格式化股票代码为6位数字格式")
+                original_codes = merged_data['股票代码'].nunique()
+                merged_data['股票代码'] = merged_data['股票代码'].astype(str).str.zfill(6)
+                formatted_codes = merged_data['股票代码'].nunique()
+                self.logger.info(f"股票代码格式化完成: {original_codes} -> {formatted_codes} 只股票")
             
             # 如果需要计算持股比例，获取股本信息
             if calculate_holding_ratio and '股票代码' in merged_data.columns:
