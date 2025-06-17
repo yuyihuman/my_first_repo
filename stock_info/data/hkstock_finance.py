@@ -36,6 +36,14 @@ def get_hkstock_finance(stock_code):
         # 获取利润表数据
         income_statement_df = ak.stock_financial_hk_report_em(stock=stock_code, symbol="利润表", indicator="年度")
         
+        # 获取现金流量表数据
+        cash_flow_df = ak.stock_financial_hk_report_em(stock=stock_code, symbol="现金流量表", indicator="年度")
+        
+        # 保留原始数据用于完整展示
+        balance_sheet_original = balance_sheet_df.copy()
+        income_statement_original = income_statement_df.copy()
+        cash_flow_original = cash_flow_df.copy()
+        
         # 获取股票名称
         stock_name = "未知"
         if not balance_sheet_df.empty and 'SECURITY_NAME_ABBR' in balance_sheet_df.columns:
@@ -126,12 +134,57 @@ def get_hkstock_finance(stock_code):
                 "研发投入": None  # 港股暂无研发投入数据
             })
         
+        # 处理完整的财务报表数据（获取所有报告期的数据）
+        # 获取所有报告期的交集
+        balance_periods = set(balance_sheet_original['REPORT_DATE'].unique())
+        income_periods = set(income_statement_original['REPORT_DATE'].unique())
+        cash_periods = set(cash_flow_original['REPORT_DATE'].unique())
+        common_periods = balance_periods & income_periods & cash_periods
+        common_periods = sorted(list(common_periods), reverse=True)  # 获取所有财务周期
+        
+        # 构建完整的财务报表数据
+        full_financial_data = []
+        for period in common_periods:
+            period_data = {'报告期': period}
+            
+            # 添加资产负债表数据
+            balance_data = balance_sheet_original[balance_sheet_original['REPORT_DATE'] == period]
+            for _, row in balance_data.iterrows():
+                period_data[f'资产负债表_{row["STD_ITEM_NAME"]}'] = row['AMOUNT']
+            
+            # 添加利润表数据
+            income_data = income_statement_original[income_statement_original['REPORT_DATE'] == period]
+            for _, row in income_data.iterrows():
+                period_data[f'利润表_{row["STD_ITEM_NAME"]}'] = row['AMOUNT']
+            
+            # 添加现金流量表数据
+            cash_data = cash_flow_original[cash_flow_original['REPORT_DATE'] == period]
+            for _, row in cash_data.iterrows():
+                period_data[f'现金流量表_{row["STD_ITEM_NAME"]}'] = row['AMOUNT']
+            
+            full_financial_data.append(period_data)
+        
         # 构建结果
         result = {
             "code": stock_code,
             "name": stock_name,
-            "financial_data": financial_data
+            "financial_data": financial_data,  # 保留原有的简化数据用于图表展示
+            "full_financial_data": full_financial_data  # 新增完整的财务报表数据
         }
+        
+        # 处理NaN值，将其转换为None以确保JSON序列化正常
+        def clean_nan_values(obj):
+            if isinstance(obj, dict):
+                return {k: clean_nan_values(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan_values(item) for item in obj]
+            elif isinstance(obj, float) and (obj != obj):  # 检查NaN
+                return None
+            else:
+                return obj
+        
+        # 清理结果中的NaN值
+        result = clean_nan_values(result)
         
         # 缓存结果
         with open(cache_file, 'w', encoding='utf-8') as f:

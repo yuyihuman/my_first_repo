@@ -113,37 +113,48 @@ def _fetch_stock_financial_data(stock_code):
         # 获取利润表数据
         benefit_df = ak.stock_financial_benefit_ths(symbol=stock_code, indicator="按年度")  # 改为按年度
         
+        # 获取现金流量表数据
+        cash_df = ak.stock_financial_cash_ths(symbol=stock_code, indicator="按年度")
+        
         # 确保报告期列是字符串类型
         debt_df['报告期'] = debt_df['报告期'].astype(str)
         benefit_df['报告期'] = benefit_df['报告期'].astype(str)
+        cash_df['报告期'] = cash_df['报告期'].astype(str)
+
         
-        # 处理资产负债表数据，计算负债率，并提取实收资本
+        # 保留原始的资产负债表数据用于完整展示
+        debt_df_original = debt_df.copy()
+        
+        # 处理资产负债表数据，计算负债率，并提取实收资本（用于概览展示）
         # 检查是否存在实收资本列
         has_registered_capital = '实收资本（或股本）' in debt_df.columns
         
         if has_registered_capital:
-            debt_df = debt_df[['报告期', '*资产合计', '*负债合计', '实收资本（或股本）']]
-            debt_df['负债率'] = debt_df.apply(
+            debt_df_summary = debt_df[['报告期', '*资产合计', '*负债合计', '实收资本（或股本）']].copy()
+            debt_df_summary['负债率'] = debt_df_summary.apply(
                 lambda x: convert_to_float(x['*负债合计']) / convert_to_float(x['*资产合计']) * 100 
                 if convert_to_float(x['*资产合计']) != 0 else 0, 
                 axis=1
             )
-            debt_df['实收资本'] = debt_df.apply(
+            debt_df_summary['实收资本'] = debt_df_summary.apply(
                 lambda x: convert_to_float(x['实收资本（或股本）']), 
                 axis=1
             )
-            debt_df = debt_df[['报告期', '负债率', '实收资本']]
+            debt_df_summary = debt_df_summary[['报告期', '负债率', '实收资本']]
         else:
-            debt_df = debt_df[['报告期', '*资产合计', '*负债合计']]
-            debt_df['负债率'] = debt_df.apply(
+            debt_df_summary = debt_df[['报告期', '*资产合计', '*负债合计']].copy()
+            debt_df_summary['负债率'] = debt_df_summary.apply(
                 lambda x: convert_to_float(x['*负债合计']) / convert_to_float(x['*资产合计']) * 100 
                 if convert_to_float(x['*资产合计']) != 0 else 0, 
                 axis=1
             )
-            debt_df['实收资本'] = None
-            debt_df = debt_df[['报告期', '负债率', '实收资本']]
+            debt_df_summary['实收资本'] = None
+            debt_df_summary = debt_df_summary[['报告期', '负债率', '实收资本']]
         
-        # 处理利润表数据，计算净利率、毛利率和提取稀释每股收益、研发投入
+        # 保留原始的利润表数据用于完整展示
+        benefit_df_original = benefit_df.copy()
+        
+        # 处理利润表数据，计算净利率、毛利率和提取稀释每股收益、研发投入（用于概览展示）
         # 检查必要的列是否存在
         required_columns = ['报告期', '*净利润', '*营业总收入']
         
@@ -155,18 +166,18 @@ def _fetch_stock_financial_data(stock_code):
         if not all(col in benefit_df.columns for col in required_columns):
             print(f"利润表缺少必要的列: {[col for col in required_columns if col not in benefit_df.columns]}")
             # 只计算存在的列
-            benefit_df = benefit_df[['报告期', '*净利润', '*营业总收入']]
-            benefit_df['净利率'] = benefit_df.apply(
+            benefit_df_summary = benefit_df[['报告期', '*净利润', '*营业总收入']].copy()
+            benefit_df_summary['净利率'] = benefit_df_summary.apply(
                 lambda x: convert_to_float(x['*净利润']) / convert_to_float(x['*营业总收入']) * 100 
                 if convert_to_float(x['*营业总收入']) != 0 else 0, 
                 axis=1
             )
             # 由于缺少营业成本，无法计算毛利率
-            benefit_df['毛利率'] = None
+            benefit_df_summary['毛利率'] = None
             # 添加稀释每股收益列，但值为None
-            benefit_df['稀释每股收益'] = None
+            benefit_df_summary['稀释每股收益'] = None
             # 添加归属于母公司所有者的净利润列，但值为None
-            benefit_df['归属母公司净利润'] = None
+            benefit_df_summary['归属母公司净利润'] = None
         else:
             # 检查是否有营业成本列
             if '其中：营业成本' in benefit_df.columns:
@@ -179,14 +190,14 @@ def _fetch_stock_financial_data(stock_code):
                 if has_rd_expense:
                     cols_to_select.append('研发费用')
                 
-                benefit_df = benefit_df[cols_to_select]
+                benefit_df_summary = benefit_df[cols_to_select].copy()
                 
-                benefit_df['净利率'] = benefit_df.apply(
+                benefit_df_summary['净利率'] = benefit_df_summary.apply(
                     lambda x: convert_to_float(x['*净利润']) / convert_to_float(x['*营业总收入']) * 100 
                     if convert_to_float(x['*营业总收入']) != 0 else 0, 
                     axis=1
                 )
-                benefit_df['毛利率'] = benefit_df.apply(
+                benefit_df_summary['毛利率'] = benefit_df_summary.apply(
                     lambda x: ((convert_to_float(x['*营业总收入']) - convert_to_float(x['其中：营业成本'])) 
                             / convert_to_float(x['*营业总收入'])) * 100 
                     if convert_to_float(x['*营业总收入']) != 0 else 0, 
@@ -195,39 +206,30 @@ def _fetch_stock_financial_data(stock_code):
                 
                 # 处理稀释每股收益
                 if has_diluted_eps:
-                    benefit_df['稀释每股收益'] = benefit_df.apply(
+                    benefit_df_summary['稀释每股收益'] = benefit_df_summary.apply(
                         lambda x: convert_to_float(x['（二）稀释每股收益']), 
                         axis=1
                     )
                 else:
-                    benefit_df['稀释每股收益'] = None
+                    benefit_df_summary['稀释每股收益'] = None
                 
                 # 处理归属于母公司所有者的净利润
                 if has_parent_net_profit:
-                    benefit_df['归属母公司净利润'] = benefit_df.apply(
+                    benefit_df_summary['归属母公司净利润'] = benefit_df_summary.apply(
                         lambda x: convert_to_float(x['归属于母公司所有者的净利润']), 
                         axis=1
                     )
                 else:
-                    benefit_df['归属母公司净利润'] = None
+                    benefit_df_summary['归属母公司净利润'] = None
                 
                 # 处理研发投入
                 if has_rd_expense:
-                    benefit_df['研发投入'] = benefit_df.apply(
+                    benefit_df_summary['研发投入'] = benefit_df_summary.apply(
                         lambda x: convert_to_float(x['研发费用']), 
                         axis=1
                     )
                 else:
-                    benefit_df['研发投入'] = None
-                
-                # 处理研发投入
-                if has_rd_expense:
-                    benefit_df['研发投入'] = benefit_df.apply(
-                        lambda x: convert_to_float(x['研发费用']), 
-                        axis=1
-                    )
-                else:
-                    benefit_df['研发投入'] = None
+                    benefit_df_summary['研发投入'] = None
             else:
                 print("缺少'其中：营业成本'列，无法计算毛利率")
                 # 选择需要的列，如果有稀释每股收益列、归属于母公司所有者的净利润列和研发费用列，也一并选择
@@ -239,46 +241,55 @@ def _fetch_stock_financial_data(stock_code):
                 if has_rd_expense:
                     cols_to_select.append('研发费用')
                 
-                benefit_df = benefit_df[cols_to_select]
+                benefit_df_summary = benefit_df[cols_to_select].copy()
                 
-                benefit_df['净利率'] = benefit_df.apply(
+                benefit_df_summary['净利率'] = benefit_df_summary.apply(
                     lambda x: convert_to_float(x['*净利润']) / convert_to_float(x['*营业总收入']) * 100 
                     if convert_to_float(x['*营业总收入']) != 0 else 0, 
                     axis=1
                 )
-                benefit_df['毛利率'] = None
+                benefit_df_summary['毛利率'] = None
                 
                 # 处理稀释每股收益
                 if has_diluted_eps:
-                    benefit_df['稀释每股收益'] = benefit_df.apply(
+                    benefit_df_summary['稀释每股收益'] = benefit_df_summary.apply(
                         lambda x: convert_to_float(x['（二）稀释每股收益']), 
                         axis=1
                     )
                 else:
-                    benefit_df['稀释每股收益'] = None
+                    benefit_df_summary['稀释每股收益'] = None
                 
                 # 处理归属于母公司所有者的净利润
                 if has_parent_net_profit:
-                    benefit_df['归属母公司净利润'] = benefit_df.apply(
+                    benefit_df_summary['归属母公司净利润'] = benefit_df_summary.apply(
                         lambda x: convert_to_float(x['归属于母公司所有者的净利润']), 
                         axis=1
                     )
                 else:
-                    benefit_df['归属母公司净利润'] = None
+                    benefit_df_summary['归属母公司净利润'] = None
+                
+                # 处理研发投入
+                if has_rd_expense:
+                    benefit_df_summary['研发投入'] = benefit_df_summary.apply(
+                        lambda x: convert_to_float(x['研发费用']), 
+                        axis=1
+                    )
+                else:
+                    benefit_df_summary['研发投入'] = None
         
         # 选择需要的列
-        benefit_df = benefit_df[['报告期', '净利率', '毛利率', '稀释每股收益', '归属母公司净利润', '研发投入']]
+        benefit_df_summary = benefit_df_summary[['报告期', '净利率', '毛利率', '稀释每股收益', '归属母公司净利润', '研发投入']]
         
         # 合并数据
         try:
-            merged_df = pd.merge(debt_df, benefit_df, on='报告期', how='outer')
+            merged_df = pd.merge(debt_df_summary, benefit_df_summary, on='报告期', how='outer')
         except Exception as e:
             print(f"合并数据出错: {e}")
             # 尝试使用concat方法合并
             print("尝试使用concat方法合并数据...")
-            debt_df.set_index('报告期', inplace=True)
-            benefit_df.set_index('报告期', inplace=True)
-            merged_df = pd.concat([debt_df, benefit_df], axis=1)
+            debt_df_summary.set_index('报告期', inplace=True)
+            benefit_df_summary.set_index('报告期', inplace=True)
+            merged_df = pd.concat([debt_df_summary, benefit_df_summary], axis=1)
             merged_df.reset_index(inplace=True)
         
         # 按报告期排序并获取最近10个年度的数据
@@ -301,16 +312,69 @@ def _fetch_stock_financial_data(stock_code):
         # 获取股票名称
         stock_name = _get_stock_name(stock_code)
         
-        return {
+        # 处理完整的财务报表数据（获取所有报告期的数据）
+        # 获取所有报告期的交集
+        common_periods = set(debt_df_original['报告期']) & set(benefit_df_original['报告期']) & set(cash_df['报告期'])
+        common_periods = sorted(list(common_periods), reverse=True)  # 获取所有财务周期
+        
+        # 构建完整的财务报表数据
+        full_financial_data = []
+        for period in common_periods:
+            # 资产负债表数据（使用原始数据）
+            debt_row = debt_df_original[debt_df_original['报告期'] == period]
+            # 利润表数据（使用原始数据）
+            benefit_row = benefit_df_original[benefit_df_original['报告期'] == period]
+            # 现金流量表数据
+            cash_row = cash_df[cash_df['报告期'] == period]
+            
+            period_data = {'报告期': period}
+            
+            # 添加资产负债表数据
+            if not debt_row.empty:
+                for col in debt_row.columns:
+                    if col != '报告期':
+                        period_data[f'资产负债表_{col}'] = debt_row.iloc[0][col]
+            
+            # 添加利润表数据
+            if not benefit_row.empty:
+                for col in benefit_row.columns:
+                    if col != '报告期':
+                        period_data[f'利润表_{col}'] = benefit_row.iloc[0][col]
+            
+            # 添加现金流量表数据
+            if not cash_row.empty:
+                for col in cash_row.columns:
+                    if col != '报告期':
+                        period_data[f'现金流量表_{col}'] = cash_row.iloc[0][col]
+            
+            full_financial_data.append(period_data)
+        
+        # 处理NaN值，将其转换为None以确保JSON序列化正常
+        def clean_nan_values(obj):
+            if isinstance(obj, dict):
+                return {k: clean_nan_values(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan_values(item) for item in obj]
+            elif isinstance(obj, float) and (obj != obj):  # 检查NaN
+                return None
+            else:
+                return obj
+        
+        result_data = {
             'code': stock_code,
             'name': stock_name,
-            'financial_data': result
+            'financial_data': result,  # 保留原有的简化数据用于图表展示
+            'full_financial_data': full_financial_data  # 新增完整的财务报表数据
         }
+        
+        # 清理结果中的NaN值
+        return clean_nan_values(result_data)
     except Exception as e:
         print(f"获取股票{stock_code}财务数据出错: {e}")
         # 返回空数据
         return {
             'code': stock_code,
             'name': "获取失败",
-            'financial_data': []
+            'financial_data': [],
+            'full_financial_data': []
         }

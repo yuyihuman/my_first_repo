@@ -1,38 +1,6 @@
-/* 个股信息页面专用样式 */
-.stock-search-container {
-    margin-bottom: 2rem;
-}
+/* 港股信息页面样式 */
 
-.stock-info-card {
-    margin-bottom: 1.5rem;
-}
-
-.stock-chart-container {
-    height: 400px;
-    margin-bottom: 2rem;
-}
-
-.financial-data-table {
-    font-size: 0.9rem;
-}
-
-.financial-data-table th {
-    background-color: #f8f9fa;
-}
-
-/* 股票信息页面样式 */
-.table-equal-width {
-    table-layout: fixed;
-}
-
-.table-equal-width th,
-.table-equal-width td {
-    width: 12.5%; /* 8列，每列12.5% */
-    text-align: center;
-    vertical-align: middle;
-}
-
-/* 完整财务报表样式 */
+/* 完整财务数据表格样式 */
 .full-financial-table {
     width: 100%;
     border-collapse: collapse;

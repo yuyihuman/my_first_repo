@@ -1,0 +1,633 @@
+// 机构持股页面JavaScript
+
+// 全局变量
+let currentCategory = 'all';
+let holdingsData = {};
+let stockDetailModal = null;
+let charts = {};
+let loadingStates = {};
+let debounceTimers = {};
+let performanceMetrics = {
+    loadStartTime: null,
+    requestCount: 0,
+    cacheHits: 0
+};
+
+// 性能监控
+function showPerformanceIndicator(message) {
+    const indicator = document.getElementById('performanceIndicator');
+    const textElement = document.getElementById('performanceText');
+    if (indicator && textElement) {
+        textElement.textContent = message;
+        indicator.style.display = 'block';
+    }
+}
+
+function hidePerformanceIndicator() {
+    const indicator = document.getElementById('performanceIndicator');
+    if (indicator) {
+        indicator.style.display = 'none';
+    }
+}
+
+function updatePerformanceMetrics(isFromCache = false) {
+    performanceMetrics.requestCount++;
+    if (isFromCache) {
+        performanceMetrics.cacheHits++;
+    }
+    
+    const cacheHitRate = (performanceMetrics.cacheHits / performanceMetrics.requestCount * 100).toFixed(1);
+    console.log(`性能统计 - 请求总数: ${performanceMetrics.requestCount}, 缓存命中率: ${cacheHitRate}%`);
+}
+
+// 获取类别显示名称
+function getCategoryDisplayName(category) {
+    const categoryNames = {
+        'all': '全部机构',
+        'fund': '基金',
+        'insurance': '保险',
+        'qfii': 'QFII',
+        'social-security': '社保'
+    };
+    return categoryNames[category] || category;
+}
+
+// 个股查询功能
+function queryStockDetail() {
+    const stockCode = document.getElementById('stockCodeInput').value.trim();
+    
+    if (!stockCode) {
+        alert('请输入股票代码');
+        return;
+    }
+    
+    // 显示模态框
+    if (!stockDetailModal) {
+        stockDetailModal = new bootstrap.Modal(document.getElementById('stockDetailModal'));
+    }
+    stockDetailModal.show();
+    
+    // 重置模态框内容
+    document.getElementById('stockDetailModalLabel').textContent = `${stockCode} 持股详情`;
+    document.getElementById('stockDetailContent').innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+            <p class="mt-2">正在加载股票详细信息...</p>
+        </div>
+    `;
+    
+    // 获取股票详细持股信息
+    fetch(`/api/stock_holdings_detail/${stockCode}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                displayStockDetail(data.data);
+            } else {
+                document.getElementById('stockDetailContent').innerHTML = `
+                    <div class="alert alert-warning" role="alert">
+                        <h4 class="alert-heading">未找到数据</h4>
+                        <p>未找到股票代码 ${stockCode} 的机构持股信息。</p>
+                        <hr>
+                        <p class="mb-0">请检查股票代码是否正确，或该股票可能没有机构持股数据。</p>
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('获取股票详细信息失败:', error);
+            document.getElementById('stockDetailContent').innerHTML = `
+                <div class="alert alert-danger" role="alert">
+                    <h4 class="alert-heading">加载失败</h4>
+                    <p>获取股票详细信息时发生错误。</p>
+                    <hr>
+                    <p class="mb-0">错误信息: ${error.message}</p>
+                </div>
+            `;
+        });
+}
+
+// 显示股票详细持股信息
+function displayStockDetail(data) {
+    if (!data || !data.stock_info) {
+        document.getElementById('stockDetailContent').innerHTML = `
+            <div class="alert alert-warning" role="alert">
+                数据格式错误或无有效数据
+            </div>
+        `;
+        return;
+    }
+    
+    const stockInfo = data.stock_info;
+    let html = `
+        <div class="row mb-4">
+            <div class="col-12">
+                <h4>${stockInfo.stock_name} (${stockInfo.stock_code})</h4>
+            </div>
+        </div>
+    `;
+    
+    // 按报告期展示
+    if (data.by_report_date && Object.keys(data.by_report_date).length > 0) {
+        html += `
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h5>按报告期分析</h5>
+                    <div class="accordion" id="reportDateAccordion">
+        `;
+        
+        Object.keys(data.by_report_date).forEach((reportDate, index) => {
+            const institutions = data.by_report_date[reportDate];
+            const isFirst = index === 0;
+            
+            html += `
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="heading${index}">
+                        <button class="accordion-button ${isFirst ? '' : 'collapsed'}" type="button" 
+                                data-bs-toggle="collapse" data-bs-target="#collapse${index}" 
+                                aria-expanded="${isFirst}" aria-controls="collapse${index}">
+                            ${reportDate} (${institutions.length}个机构)
+                        </button>
+                    </h2>
+                    <div id="collapse${index}" class="accordion-collapse collapse ${isFirst ? 'show' : ''}" 
+                         aria-labelledby="heading${index}" data-bs-parent="#reportDateAccordion">
+                        <div class="accordion-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>机构类型</th>
+                                            <th>持股比例(%)</th>
+                                            <th>持有机构数</th>
+                                            <th>持股市值</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+            `;
+            
+            institutions.forEach(inst => {
+                html += `
+                    <tr>
+                        <td>${inst.institution_type}</td>
+                        <td>${inst.holding_ratio.toFixed(2)}%</td>
+                        <td>${inst.holding_count || '-'}</td>
+                        <td>${inst.market_value ? (inst.market_value / 10000).toFixed(2) + '万' : '-'}</td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // 按机构类型展示
+    if (data.by_institution_type && Object.keys(data.by_institution_type).length > 0) {
+        html += `
+            <div class="row">
+                <div class="col-12">
+                    <h5>按机构类型分析</h5>
+                    <div class="row">
+        `;
+        
+        Object.keys(data.by_institution_type).forEach(instType => {
+            const periods = data.by_institution_type[instType];
+            
+            html += `
+                <div class="col-md-6 mb-3">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0">${instType}</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>报告期</th>
+                                            <th>持股比例(%)</th>
+                                            <th>机构数量</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+            `;
+            
+            periods.forEach(period => {
+                html += `
+                    <tr>
+                        <td>${period.report_date}</td>
+                        <td>${period.holding_ratio}%</td>
+                        <td>${period.institution_count}</td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    if (!data.by_report_date || Object.keys(data.by_report_date).length === 0) {
+        html += `
+            <div class="alert alert-info" role="alert">
+                该股票暂无机构持股数据记录
+            </div>
+        `;
+    }
+    
+    document.getElementById('stockDetailContent').innerHTML = html;
+}
+
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', function() {
+    // 初始化标签页切换事件
+    initTabEvents();
+    
+    // 预加载所有类别数据
+    preloadAllData();
+    
+    // 加载默认数据
+    loadCategoryData('all');
+    
+    // 绑定回车键查询
+    const stockCodeInput = document.getElementById('stockCodeInput');
+    if (stockCodeInput) {
+        stockCodeInput.addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                queryStockDetail();
+            }
+        });
+    }
+});
+
+// 预加载所有类别数据
+function preloadAllData() {
+    const categories = ['all', 'fund', 'insurance', 'qfii', 'social-security'];
+    
+    // 延迟预加载，避免阻塞主要内容
+    setTimeout(() => {
+        categories.forEach((category, index) => {
+            if (category !== 'all') {
+                // 错开请求时间，避免并发过多
+                setTimeout(() => {
+                    loadCategoryData(category, true); // true表示静默加载
+                }, index * 200);
+            }
+        });
+    }, 1000);
+}
+
+// 初始化标签页事件
+function initTabEvents() {
+    const tabButtons = document.querySelectorAll('[data-bs-toggle="tab"]');
+    tabButtons.forEach(button => {
+        button.addEventListener('shown.bs.tab', function(event) {
+            const category = event.target.getAttribute('data-bs-target').substring(1);
+            currentCategory = category;
+            
+            // 如果数据已经存在，直接显示；否则加载数据
+            if (holdingsData[category]) {
+                displayHoldingsTable(category, holdingsData[category]);
+                hideLoading(category);
+            } else {
+                loadCategoryData(category);
+            }
+        });
+    });
+}
+
+// 加载指定类别的数据
+function loadCategoryData(category, silent = false) {
+    // 检查是否已有数据
+    if (holdingsData[category]) {
+        if (!silent) {
+            displayHoldingsTable(category, holdingsData[category]);
+        }
+        updatePerformanceMetrics(true); // 缓存命中
+        return;
+    }
+    
+    // 防止重复请求
+    if (loadingStates[category]) {
+        return;
+    }
+    
+    loadingStates[category] = true;
+    performanceMetrics.loadStartTime = Date.now();
+    
+    // 非静默模式显示加载状态
+    if (!silent) {
+        showLoading(category);
+        showPerformanceIndicator(`正在加载${getCategoryDisplayName(category)}数据...`);
+    }
+    
+    // 发送API请求
+    fetch(`/api/institutional_holdings/${category}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.status === 'success') {
+                holdingsData[category] = data.data;
+                updatePerformanceMetrics(false); // 网络请求
+                
+                const loadTime = Date.now() - performanceMetrics.loadStartTime;
+                console.log(`${getCategoryDisplayName(category)}数据加载完成，耗时: ${loadTime}ms`);
+                
+                // 如果不是静默加载，或者是当前激活的标签页，则显示数据
+                if (!silent) {
+                    displayHoldingsTable(category, data.data);
+                } else if (category === currentCategory) {
+                    displayHoldingsTable(category, data.data);
+                }
+                
+                if (!silent) {
+                    hideLoading(category);
+                    hidePerformanceIndicator();
+                }
+            } else {
+                console.error(`获取${category}数据失败:`, data.message);
+                if (!silent) {
+                    showError(category, data.message);
+                    hidePerformanceIndicator();
+                }
+            }
+        })
+        .catch(error => {
+            console.error('请求出错:', error);
+            if (!silent) {
+                showError(category, '数据加载失败，请稍后重试');
+                hidePerformanceIndicator();
+            }
+        })
+        .finally(() => {
+            loadingStates[category] = false;
+        });
+}
+
+// 显示加载状态
+function showLoading(category) {
+    const loadingElement = document.getElementById(`loading-${category}`);
+    const tableElement = document.getElementById(`table-${category}`);
+    
+    if (loadingElement) loadingElement.style.display = 'block';
+    if (tableElement) tableElement.style.display = 'none';
+}
+
+// 隐藏加载状态
+function hideLoading(category) {
+    const loadingElement = document.getElementById(`loading-${category}`);
+    const tableElement = document.getElementById(`table-${category}`);
+    
+    if (loadingElement) loadingElement.style.display = 'none';
+    if (tableElement) tableElement.style.display = 'block';
+}
+
+// 显示错误信息
+function showError(category, message) {
+    const loadingElement = document.getElementById(`loading-${category}`);
+    if (loadingElement) {
+        loadingElement.innerHTML = `<div class="alert alert-danger">${message}</div>`;
+    }
+}
+
+// 显示持股表格
+function displayHoldingsTable(category, data) {
+    const tbody = document.getElementById(`tbody-${category}`);
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    data.forEach((item, index) => {
+        const row = document.createElement('tr');
+        row.className = 'stock-row';
+        row.setAttribute('data-stock-code', item.stock_code);
+        row.setAttribute('data-stock-name', item.stock_name);
+        
+        row.innerHTML = `
+            <td>${index + 1}</td>
+            <td>${item.stock_code}</td>
+            <td>${item.stock_name}</td>
+            <td>${item.holding_ratio.toFixed(2)}</td>
+        `;
+        
+        // 添加点击事件
+        row.addEventListener('click', function() {
+            selectStock(category, item.stock_code, item.stock_name, this);
+        });
+        
+        tbody.appendChild(row);
+    });
+}
+
+// 选择股票（带防抖优化）
+function selectStock(category, stockCode, stockName, rowElement) {
+    // 移除其他行的选中状态
+    const allRows = document.querySelectorAll(`#tbody-${category} .stock-row`);
+    allRows.forEach(row => row.classList.remove('selected-stock'));
+    
+    // 添加当前行的选中状态
+    rowElement.classList.add('selected-stock');
+    
+    // 清除之前的防抖定时器
+    const debounceKey = `${category}_${stockCode}`;
+    if (debounceTimers[debounceKey]) {
+        clearTimeout(debounceTimers[debounceKey]);
+    }
+    
+    // 设置防抖，避免快速点击时重复请求
+    debounceTimers[debounceKey] = setTimeout(() => {
+        loadStockHoldingsChart(category, stockCode, stockName);
+        delete debounceTimers[debounceKey];
+    }, 300);
+}
+
+// 加载股票持股变化图表
+function loadStockHoldingsChart(category, stockCode, stockName) {
+    // 隐藏占位符，显示加载状态
+    const placeholder = document.getElementById(`chart-placeholder-${category}`);
+    const canvas = document.getElementById(`chart-${category}`);
+    
+    if (placeholder) {
+        placeholder.innerHTML = '加载图表数据中...';
+        placeholder.style.display = 'flex';
+    }
+    if (canvas) canvas.style.display = 'none';
+    
+    // 发送API请求获取股票的持股变化数据
+    fetch(`/api/institutional_holdings/${category}/${stockCode}/trend`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                displayHoldingsChart(category, stockCode, stockName, data.data);
+            } else {
+                console.error(`获取${stockCode}持股变化数据失败:`, data.message);
+                if (placeholder) {
+                    placeholder.innerHTML = '暂无图表数据';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('请求出错:', error);
+            if (placeholder) {
+                placeholder.innerHTML = '图表加载失败';
+            }
+        });
+}
+
+// 显示持股变化图表（优化版）
+function displayHoldingsChart(category, stockCode, stockName, data) {
+    const placeholder = document.getElementById(`chart-placeholder-${category}`);
+    const canvas = document.getElementById(`chart-${category}`);
+    
+    if (!canvas || !data || data.length === 0) {
+        if (placeholder) {
+            placeholder.innerHTML = '暂无图表数据';
+            placeholder.style.display = 'flex';
+        }
+        return;
+    }
+    
+    // 隐藏占位符，显示图表
+    if (placeholder) placeholder.style.display = 'none';
+    canvas.style.display = 'block';
+    
+    // 销毁之前的图表
+    if (charts[category]) {
+        charts[category].destroy();
+    }
+    
+    // 准备图表数据
+    const labels = data.map(item => {
+        const date = new Date(item.date);
+        return date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'short' });
+    });
+    const values = data.map(item => item.holding_ratio);
+    const changes = data.map(item => item.change_ratio || 0);
+    
+    // 计算颜色渐变
+    const maxValue = Math.max(...values);
+    const minValue = Math.min(...values);
+    const colors = values.map(value => {
+        const ratio = (value - minValue) / (maxValue - minValue);
+        const red = Math.floor(255 * (1 - ratio));
+        const green = Math.floor(255 * ratio);
+        return `rgba(${red}, ${green}, 100, 0.6)`;
+    });
+    
+    // 创建新图表
+    const ctx = canvas.getContext('2d');
+    charts[category] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: `${stockName} (${stockCode}) 持股比例`,
+                data: values,
+                borderColor: 'rgb(54, 162, 235)',
+                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                pointBackgroundColor: colors,
+                pointBorderColor: 'rgb(54, 162, 235)',
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                tension: 0.3,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+                duration: 1000,
+                easing: 'easeInOutQuart'
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: `${stockName} (${stockCode}) 持股变化趋势`,
+                    font: {
+                        size: 16,
+                        weight: 'bold'
+                    }
+                },
+                legend: {
+                    display: true,
+                    position: 'top'
+                },
+                tooltip: {
+                    callbacks: {
+                        afterLabel: function(context) {
+                            const index = context.dataIndex;
+                            const change = changes[index];
+                            return change !== 0 ? `变化: ${change > 0 ? '+' : ''}${change.toFixed(2)}%` : '';
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    title: {
+                        display: true,
+                        text: '持股比例 (%)'
+                    },
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.1)'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: '时间'
+                    },
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.1)'
+                    }
+                }
+            }
+        }
+    });
+}
+
+// 工具函数：格式化数字
+function formatNumber(num, decimals = 2) {
+    return parseFloat(num).toFixed(decimals);
+}
+
+// 工具函数：格式化日期
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('zh-CN');
+}

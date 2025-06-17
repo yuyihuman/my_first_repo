@@ -6,7 +6,8 @@ from data import (
     get_stock_financial_data,
     get_hkstock_data,
     get_hkstock_finance,
-    fetch_macro_china_money_supply
+    fetch_macro_china_money_supply,
+    institutional_holdings_data
 )
 import os
 import logging
@@ -250,6 +251,66 @@ def serve_southbound_holdings_image(image_name):
             return send_from_directory(image_dir, file)
     
     return "图片未找到", 404
+
+# 机构持股页面路由
+@app.route('/institutional_holdings')
+def institutional_holdings():
+    return render_template('institutional_holdings.html')
+
+# API路由 - 机构持股数据
+@app.route('/api/institutional_holdings/<category>')
+def api_institutional_holdings(category):
+    """获取机构持股数据API"""
+    try:
+        data = institutional_holdings_data.get_top_holdings(category)
+        return jsonify({
+            'status': 'success',
+            'data': data,
+            'category': category
+        })
+    except Exception as e:
+        app.logger.error(f"获取机构持股数据出错: {e}")
+        return jsonify({
+            'status': 'error', 
+            'message': str(e)
+        }), 500
+
+# API路由 - 机构持股趋势数据
+@app.route('/api/institutional_holdings/<category>/<stock_code>/trend')
+def api_institutional_holdings_trend(category, stock_code):
+    """获取机构持股趋势数据API"""
+    try:
+        data = institutional_holdings_data.get_stock_trend(category, stock_code)
+        return jsonify({
+            'status': 'success',
+            'data': data,
+            'category': category,
+            'stock_code': stock_code
+        })
+    except Exception as e:
+        app.logger.error(f"获取机构持股趋势数据出错: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# API路由 - 个股详细持股信息
+@app.route('/api/stock_holdings_detail/<stock_code>')
+def api_stock_holdings_detail(stock_code):
+    """获取个股详细持股信息API - 展示各个报告期和不同机构的持股情况"""
+    try:
+        data = institutional_holdings_data.get_stock_holdings_detail(stock_code)
+        return jsonify({
+            'status': 'success',
+            'data': data,
+            'stock_code': stock_code
+        })
+    except Exception as e:
+        app.logger.error(f"获取个股详细持股信息出错: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 if __name__ == '__main__':
     # 生产环境中关闭调试模式

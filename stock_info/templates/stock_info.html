@@ -82,11 +82,11 @@
             </div>
             
             <!-- 财务数据表格 -->
-            <div class="row">
+            <div class="row mb-4">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-body">
-                            <h5 class="card-title">财务数据</h5>
+                            <h5 class="card-title">财务数据概览</h5>
                             <div class="table-responsive">
                                 <table class="table table-striped table-equal-width">
                                     <thead>
@@ -103,6 +103,36 @@
                                     </thead>
                                     <tbody id="financialData">
                                         <!-- 财务数据将通过JavaScript动态填充 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 完整财务报表数据 -->
+            <div class="row" id="fullFinancialSection">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">完整财务报表数据（所有财务周期）</h5>
+                            
+                            <!-- 报表切换按钮 -->
+                            <div class="btn-group mb-3" role="group">
+                                <button type="button" class="btn btn-outline-primary active" id="balanceBtn" onclick="showFinancialTable('balance')">资产负债表</button>
+                                <button type="button" class="btn btn-outline-primary" id="incomeBtn" onclick="showFinancialTable('income')">利润表</button>
+                                <button type="button" class="btn btn-outline-primary" id="cashflowBtn" onclick="showFinancialTable('cashflow')">现金流量表</button>
+                            </div>
+                            
+                            <!-- 完整财务数据表格 -->
+                            <div class="table-container">
+                                <table class="table table-striped full-financial-table" id="fullFinancialTable">
+                                    <thead id="fullFinancialHeader">
+                                        <!-- 表头将通过JavaScript动态生成 -->
+                                    </thead>
+                                    <tbody id="fullFinancialData">
+                                        <!-- 完整财务数据将通过JavaScript动态填充 -->
                                     </tbody>
                                 </table>
                             </div>

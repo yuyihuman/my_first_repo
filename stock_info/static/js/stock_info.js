@@ -6,7 +6,11 @@ const loadingDiv = document.getElementById('loadingDiv');
 const errorDiv = document.getElementById('errorDiv');
 const stockTitle = document.getElementById('stockTitle');
 const financialData = document.getElementById('financialData');
+const fullFinancialHeader = document.getElementById('fullFinancialHeader');
+const fullFinancialData = document.getElementById('fullFinancialData');
 let financialChart = null;
+let currentFullData = null;
+let currentTableType = 'balance';
 
 // 初始化页面
 document.addEventListener('DOMContentLoaded', function() {
@@ -126,6 +130,17 @@ function displayStockInfo(data) {
         financialData.appendChild(row);
     }
     
+    // 处理完整财务数据
+    currentFullData = stockData.full_financial_data;
+    if (currentFullData && currentFullData.length > 0) {
+        // 默认显示资产负债表
+        showFinancialTable('balance');
+    } else {
+        // 无完整数据时显示提示
+        fullFinancialHeader.innerHTML = '<th class="text-center">暂无完整财务数据</th>';
+        fullFinancialData.innerHTML = '';
+    }
+    
     // 显示股票信息区域
     stockInfoDiv.classList.remove('d-none');
 }
@@ -208,4 +223,90 @@ function createChart(data) {
             }
         }
     });
+}
+
+// 显示指定类型的财务报表
+function showFinancialTable(tableType) {
+    if (!currentFullData || currentFullData.length === 0) {
+        return;
+    }
+    
+    currentTableType = tableType;
+    
+    // 更新按钮状态
+    document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
+    
+    let activeBtn;
+    let prefix;
+    let tableName;
+    
+    switch(tableType) {
+        case 'balance':
+            activeBtn = document.getElementById('balanceBtn');
+            prefix = '资产负债表_';
+            tableName = '资产负债表';
+            break;
+        case 'income':
+            activeBtn = document.getElementById('incomeBtn');
+            prefix = '利润表_';
+            tableName = '利润表';
+            break;
+        case 'cashflow':
+            activeBtn = document.getElementById('cashflowBtn');
+            prefix = '现金流量表_';
+            tableName = '现金流量表';
+            break;
+        default:
+            return;
+    }
+    
+    activeBtn.classList.add('active');
+    
+    // 获取该类型报表的所有字段
+    const allFields = new Set();
+    currentFullData.forEach(period => {
+        Object.keys(period).forEach(key => {
+            if (key.startsWith(prefix)) {
+                allFields.add(key.replace(prefix, ''));
+            }
+        });
+    });
+    
+    const fields = Array.from(allFields).sort();
+    
+    // 生成表头
+    let headerHtml = '<tr><th class="sticky-left">报告期</th>';
+    fields.forEach(field => {
+        headerHtml += `<th>${field}</th>`;
+    });
+    headerHtml += '</tr>';
+    fullFinancialHeader.innerHTML = headerHtml;
+    
+    // 生成表格数据
+    let bodyHtml = '';
+    currentFullData.forEach(period => {
+        bodyHtml += `<tr><td class="sticky-left">${period.报告期}</td>`;
+        fields.forEach(field => {
+            const value = period[prefix + field];
+            let displayValue = '-';
+            if (value !== null && value !== undefined) {
+                if (typeof value === 'number') {
+                    // 格式化数值
+                    if (Math.abs(value) >= 100000000) {
+                        displayValue = (value / 100000000).toFixed(2) + '亿';
+                    } else if (Math.abs(value) >= 10000) {
+                        displayValue = (value / 10000).toFixed(2) + '万';
+                    } else {
+                        displayValue = value.toFixed(2);
+                    }
+                } else {
+                    displayValue = value;
+                }
+            }
+            bodyHtml += `<td>${displayValue}</td>`;
+        });
+        bodyHtml += '</tr>';
+    });
+    
+    fullFinancialData.innerHTML = bodyHtml;
 }
