@@ -182,13 +182,16 @@ function createStockDetailTrendChart(institutionData) {
     const datasets = [];
     const colors = {
         '基金': '#FF6384',
-        '保险': '#36A2EB', 
+        '保险': '#36A2EB',
         'QFII': '#FFCE56',
         '社保': '#4BC0C0',
         '券商': '#9966FF',
         '信托': '#FF9F40',
         '其他': '#C9CBCF'
     };
+    
+    // 定义所有可能的机构类型（与后端返回的格式一致）
+    const allInstitutionTypes = ['基金', '保险', 'QFII', '社保'];
     
     let allDates = new Set();
     
@@ -201,12 +204,12 @@ function createStockDetailTrendChart(institutionData) {
     
     const sortedDates = Array.from(allDates).sort();
     
-    // 为每个机构类型创建数据集
-    Object.keys(institutionData).forEach(instType => {
-        const periods = institutionData[instType];
+    // 为所有机构类型创建数据集，包括没有数据的类型
+    allInstitutionTypes.forEach(instType => {
+        const periods = institutionData[instType] || [];
         const data = sortedDates.map(date => {
             const period = periods.find(p => p.report_date === date);
-            return period ? parseFloat(period.holding_ratio) : null;
+            return period ? parseFloat(period.holding_ratio) : 0; // 改为0而不是null
         });
         
         datasets.push({
@@ -216,9 +219,30 @@ function createStockDetailTrendChart(institutionData) {
             backgroundColor: (colors[instType] || '#' + Math.floor(Math.random()*16777215).toString(16)) + '20',
             fill: false,
             tension: 0.1,
-            spanGaps: true
+            spanGaps: false // 改为false，因为现在用0填充而不是null
         });
     });
+    
+    // 添加实际存在但不在预定义列表中的机构类型
+    Object.keys(institutionData).forEach(instType => {
+        if (!allInstitutionTypes.includes(instType)) {
+            const periods = institutionData[instType];
+            const data = sortedDates.map(date => {
+                const period = periods.find(p => p.report_date === date);
+                return period ? parseFloat(period.holding_ratio) : 0;
+            });
+            
+            datasets.push({
+                 label: instType,
+                 data: data,
+                 borderColor: colors[instType] || '#' + Math.floor(Math.random()*16777215).toString(16),
+                 backgroundColor: (colors[instType] || '#' + Math.floor(Math.random()*16777215).toString(16)) + '20',
+                 fill: false,
+                 tension: 0.1,
+                 spanGaps: false
+             });
+         }
+     });
     
     window.stockDetailChart = new Chart(ctx, {
         type: 'line',
@@ -526,7 +550,7 @@ function displayHoldingsTable(category, data) {
     });
 }
 
-// 选择股票（带防抖优化）
+// 选择股票（直接调用个股查询功能）
 function selectStock(category, stockCode, stockName, rowElement) {
     // 移除其他行的选中状态
     const allRows = document.querySelectorAll(`#tbody-${category} .stock-row`);
@@ -535,17 +559,14 @@ function selectStock(category, stockCode, stockName, rowElement) {
     // 添加当前行的选中状态
     rowElement.classList.add('selected-stock');
     
-    // 清除之前的防抖定时器
-    const debounceKey = `${category}_${stockCode}`;
-    if (debounceTimers[debounceKey]) {
-        clearTimeout(debounceTimers[debounceKey]);
+    // 设置股票代码到输入框并直接调用查询功能
+    const stockCodeInput = document.getElementById('stockCodeInput');
+    if (stockCodeInput) {
+        stockCodeInput.value = stockCode;
     }
     
-    // 设置防抖，避免快速点击时重复请求
-    debounceTimers[debounceKey] = setTimeout(() => {
-        loadStockHoldingsChart(category, stockCode, stockName);
-        delete debounceTimers[debounceKey];
-    }, 300);
+    // 直接调用个股详情查询功能
+    queryStockDetail();
 }
 
 // 加载股票持股变化图表
