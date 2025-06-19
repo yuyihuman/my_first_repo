@@ -398,6 +398,13 @@ def generate_plots(community_name):
             'count': monthly_transactions.values
         })
         monthly_df['year'] = monthly_df['date'].dt.year
+        monthly_df['month'] = monthly_df['date'].dt.month
+        
+        # 获取数据截至年月日（使用数据的最新日期而不是当前系统日期）
+        data_latest_date = latest_date  # 使用之前计算的最新数据日期
+        current_year = data_latest_date.year
+        current_month = data_latest_date.month
+        current_day = data_latest_date.day
         
         # 设置柱子宽度
         width = 20  # 以天为单位的宽度
@@ -417,6 +424,32 @@ def generate_plots(community_name):
             bars2 = axes[1].bar(year_data['date'], year_data['count'], 
                                width=width, color=color, alpha=0.7, 
                                align='center', label=f'{year}年')
+        
+        # 为当前月份添加预测柱子
+        current_month_data = monthly_df[(monthly_df['year'] == current_year) & (monthly_df['month'] == current_month)]
+        if not current_month_data.empty:
+            # 获取当前月份的实际成交量
+            actual_count = current_month_data['count'].iloc[0]
+            current_month_date = current_month_data['date'].iloc[0]
+            
+            # 计算当前月份的总天数
+            import calendar
+            days_in_month = calendar.monthrange(current_year, current_month)[1]
+            
+            # 基于天数比例预测全月成交量
+            if current_day < days_in_month:
+                predicted_total = actual_count * days_in_month / current_day
+                predicted_additional = predicted_total - actual_count
+                
+                # 找到当前年份对应的颜色
+                year_index = years.index(current_year) if current_year in years else 0
+                color = colors[year_index % len(colors)]
+                
+                # 绘制预测部分（在实际柱子上方）
+                axes[1].bar(current_month_date, predicted_additional, 
+                           width=width, color='orange', alpha=0.8, 
+                           align='center', bottom=actual_count, 
+                           label=f'{current_year}年预测')
         
         axes[1].set_title(f'月度成交量 (面积: {area_min}-{area_max})')
         axes[1].set_xlabel('年份')
