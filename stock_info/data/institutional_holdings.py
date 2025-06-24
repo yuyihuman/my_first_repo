@@ -226,53 +226,193 @@ class InstitutionalHoldingsData:
             logger.error(f"加载真实数据失败: {e}")
             return self._load_sample_data()
     
-    def get_top_holdings(self, category='all'):
-        """获取指定类别的前10持股数据（带缓存优化）"""
+    def _load_real_data_by_report_date(self, target_report_date):
+        """按指定报告期加载真实数据"""
         try:
+            data_files = self._get_data_files()
+            if not data_files:
+                logger.warning("没有找到数据文件，使用示例数据")
+                return self._load_sample_data()
+            
+            # 读取合并的CSV文件
+            file_path = data_files[0]
+            df = pd.read_csv(file_path, encoding='utf-8', dtype={'股票代码': str, 'stock_code': str})
+            logger.info(f"成功读取合并文件 {file_path}，包含 {len(df)} 行数据")
+            
+            # 如果没有指定报告期，使用最新报告期
+            if target_report_date is None:
+                target_report_date = df['report_date'].max()
+            
+            logger.info(f"目标报告期: {target_report_date}")
+            
+            # 筛选指定报告期的数据
+            target_df = df[df['report_date'] == target_report_date].copy()
+            logger.info(f"目标报告期数据包含 {len(target_df)} 行")
+            
+            if len(target_df) == 0:
+                logger.warning(f"报告期 {target_report_date} 没有数据")
+                return self._load_sample_data()
+            
+            all_data = {
+                'all': [],
+                'fund': [],
+                'insurance': [],
+                'qfii': [],
+                'social-security': []
+            }
+            
+            # 用于汇总每个股票的总持股比例
+            stock_totals = {}
+            
+            # 处理每一行数据
+            for _, row in target_df.iterrows():
+                try:
+                    # 获取基本信息
+                    stock_code = str(row.get('股票代码', row.get('stock_code', '')))
+                    stock_name = str(row.get('股票名称', row.get('股票简称', row.get('stock_name', ''))))
+                    
+                    # 获取机构类型
+                    institution_type = str(row.get('institution_type', row.get('机构类型', '')))
+                    
+                    # 优先使用占流通股比例，如果没有则使用占总股本比例
+                    holding_ratio = 0
+                    if '占流通股比例' in row and pd.notna(row['占流通股比例']):
+                        holding_ratio = float(row['占流通股比例'])
+                    elif '占总股本比例' in row and pd.notna(row['占总股本比例']):
+                        holding_ratio = float(row['占总股本比例'])
+                    elif '持股比例' in row and pd.notna(row['持股比例']):
+                        holding_ratio = float(row['持股比例'])
+                    elif 'holding_ratio' in row and pd.notna(row['holding_ratio']):
+                        holding_ratio = float(row['holding_ratio'])
+                    
+                    # 只处理有效数据
+                    if not stock_code or not stock_name or holding_ratio <= 0:
+                        continue
+                    
+                    stock_data = {
+                        'stock_code': stock_code,
+                        'stock_name': stock_name,
+                        'holding_ratio': holding_ratio,
+                        'report_date': int(target_report_date)
+                    }
+                    
+                    # 为"全部机构"汇总每个股票的总持股比例
+                    stock_key = (stock_code, stock_name)
+                    if stock_key not in stock_totals:
+                        stock_totals[stock_key] = {
+                            'stock_code': stock_code,
+                            'stock_name': stock_name,
+                            'holding_ratio': 0,
+                            'report_date': int(target_report_date)
+                        }
+                    stock_totals[stock_key]['holding_ratio'] += holding_ratio
+                    
+                    # 根据机构类型分类
+                    if '基金' in institution_type or 'fund' in institution_type.lower():
+                        all_data['fund'].append(stock_data)
+                    elif '保险' in institution_type or 'insurance' in institution_type.lower():
+                        all_data['insurance'].append(stock_data)
+                    elif 'qfii' in institution_type.lower() or 'QFII' in institution_type:
+                        all_data['qfii'].append(stock_data)
+                    elif '社保' in institution_type or 'social' in institution_type.lower():
+                        all_data['social-security'].append(stock_data)
+                        
+                except Exception as e:
+                    logger.warning(f"处理数据行时出错: {e}")
+                    continue
+            
+            # 将汇总后的股票总持股比例添加到"全部机构"类别
+            all_data['all'] = list(stock_totals.values())
+            
+            # 对每个类别的数据进行去重、排序并取前N名
+            for category in all_data:
+                # 去重：如果同一股票有多条记录，保留持股比例最高的
+                unique_stocks = {}
+                for stock in all_data[category]:
+                    stock_key = (stock['stock_code'], stock['stock_name'])
+                    if stock_key not in unique_stocks or stock['holding_ratio'] > unique_stocks[stock_key]['holding_ratio']:
+                        unique_stocks[stock_key] = stock
+                
+                # 转换回列表并按持股比例排序
+                all_data[category] = list(unique_stocks.values())
+                all_data[category].sort(key=lambda x: x['holding_ratio'], reverse=True)
+                
+                # 全部机构显示前30名，其他类别显示前10名
+                top_count = 30 if category == 'all' else 10
+                all_data[category] = all_data[category][:top_count]
+                logger.info(f"类别 {category} 报告期({target_report_date})前{top_count}名包含 {len(all_data[category])} 条记录")
+            
+            logger.info(f"按报告期({target_report_date})数据加载完成，包含类别: {list(all_data.keys())}")
+            return all_data
+            
+        except Exception as e:
+            logger.error(f"按报告期加载数据失败: {e}")
+            return self._load_sample_data()
+    
+    def get_available_report_dates(self):
+        """获取可用的报告期列表（最近5期）"""
+        try:
+            data_files = self._get_data_files()
+            if not data_files:
+                # 返回示例报告期
+                return [20240930, 20240630, 20240331, 20231231, 20230930]
+            
+            # 读取合并的CSV文件
+            file_path = data_files[0]
+            df = pd.read_csv(file_path, encoding='utf-8')
+            
+            # 获取所有报告期并排序（降序）
+            report_dates = sorted(df['report_date'].unique(), reverse=True)
+            
+            # 返回最近5期，转换为Python原生int类型以支持JSON序列化
+            return [int(date) for date in report_dates[:5]]
+            
+        except Exception as e:
+            logger.error(f"获取报告期列表失败: {e}")
+            return [20240930, 20240630, 20240331, 20231231, 20230930]
+    
+    def get_top_holdings(self, category='all', limit=10, report_date=None):
+        """获取指定类别的前N名持股数据"""
+        try:
+            # 生成缓存键
+            cache_key = f"top_holdings_{category}_{limit}_{report_date or 'latest'}"
+            
             # 检查内存缓存
-            cache_key = f"holdings_{category}"
-            if (cache_key in self._memory_cache and 
-                self._last_update and 
-                time.time() - self._last_update < self._cache_duration):
-                logger.info(f"返回内存缓存数据 - 类别: {category}")
+            if cache_key in self._memory_cache:
+                logger.info(f"从内存缓存获取数据: {cache_key}")
                 return self._memory_cache[cache_key]
             
             # 检查文件缓存
-            cached_data = read_cache(self.cache_file)
-            if (cached_data and not is_cache_expired(cached_data.get('timestamp', 0), hours=1)):
-                all_cached_data = cached_data.get('data', {})
-                if category in all_cached_data:
-                    # 更新内存缓存
-                    self._memory_cache[cache_key] = all_cached_data[category]
-                    self._last_update = time.time()
-                    logger.info(f"返回文件缓存数据 - 类别: {category}")
-                    return all_cached_data[category]
+            cache_file = os.path.join(self.cache_dir, f"{cache_key}.json")
+            if os.path.exists(cache_file):
+                cache_time = os.path.getmtime(cache_file)
+                if time.time() - cache_time < self._cache_duration:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    self._memory_cache[cache_key] = data
+                    logger.info(f"从文件缓存获取数据: {cache_key}")
+                    return data
             
-            # 加载新数据
-            logger.info(f"加载新数据 - 类别: {category}")
-            real_data = self._load_real_data()
+            # 加载数据
+            if report_date:
+                all_data = self._load_real_data_by_report_date(report_date)
+            else:
+                all_data = self._load_real_data()
             
-            if real_data:
-                # 保存到文件缓存
-                save_cache(self.cache_file, real_data)
-                # 更新内存缓存
-                for cat, data in real_data.items():
-                    self._memory_cache[f"holdings_{cat}"] = data
-                self._last_update = time.time()
-                
-                if category in real_data:
-                    logger.info(f"返回新加载的真实数据 - 类别: {category}")
-                    return real_data[category]
+            # 获取指定类别的数据
+            if category not in all_data:
+                logger.warning(f"未找到类别 {category} 的数据")
+                return []
             
-            # 如果真实数据不可用，返回示例数据
-            logger.info(f"返回示例数据 - 类别: {category}")
-            sample_data = self._load_sample_data()
-            result = sample_data.get(category, [])
+            result = all_data[category][:limit]
             
-            # 缓存示例数据
+            # 保存到缓存
             self._memory_cache[cache_key] = result
-            self._last_update = time.time()
+            os.makedirs(self.cache_dir, exist_ok=True)
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
             
+            logger.info(f"获取 {category} 类别前 {limit} 名数据成功，共 {len(result)} 条记录")
             return result
             
         except Exception as e:

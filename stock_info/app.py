@@ -258,20 +258,48 @@ def institutional_holdings():
     return render_template('institutional_holdings.html')
 
 # API路由 - 机构持股数据
+@app.route('/api/institutional_holdings/report_dates')
+def get_available_report_dates():
+    """获取可用报告期列表API"""
+    try:
+        dates = institutional_holdings_data.get_available_report_dates()
+        return jsonify({
+            'status': 'success',
+            'data': dates
+        })
+    except Exception as e:
+        logger.error(f"获取可用报告期失败: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
 @app.route('/api/institutional_holdings/<category>')
-def api_institutional_holdings(category):
+def get_institutional_holdings_data(category):
     """获取机构持股数据API"""
     try:
-        data = institutional_holdings_data.get_top_holdings(category)
+        # 获取报告期参数
+        report_date = request.args.get('report_date')
+        if report_date:
+            try:
+                report_date = int(report_date)
+            except ValueError:
+                return jsonify({
+                    'status': 'error',
+                    'message': '报告期格式错误，应为整数格式如20240930'
+                }), 400
+        
+        data = institutional_holdings_data.get_top_holdings(category, report_date=report_date)
         return jsonify({
             'status': 'success',
             'data': data,
-            'category': category
+            'category': category,
+            'report_date': report_date
         })
     except Exception as e:
-        app.logger.error(f"获取机构持股数据出错: {e}")
+        logger.error(f"获取机构持股数据失败: {e}")
         return jsonify({
-            'status': 'error', 
+            'status': 'error',
             'message': str(e)
         }), 500
 

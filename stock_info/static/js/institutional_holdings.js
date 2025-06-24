@@ -2,18 +2,43 @@
 
 // 全局变量
 let currentCategory = 'all';
+let currentReportDate = null;
+let availableReportDates = [];
 let holdingsData = {};
 let stockDetailModal = null;
 let charts = {};
 let loadingStates = {};
 let debounceTimers = {};
-let performanceMetrics = {
-    loadStartTime: null,
-    requestCount: 0,
-    cacheHits: 0
+let dataCache = {};
+let performanceData = {
+    loadTimes: [],
+    errorCount: 0,
+    lastUpdate: null
 };
 
 // 性能监控
+function trackPerformance(category, startTime, success) {
+    const loadTime = Date.now() - startTime;
+    performanceData.loadTimes.push({
+        category: category,
+        time: loadTime,
+        timestamp: new Date().toISOString()
+    });
+    
+    if (!success) {
+        performanceData.errorCount++;
+    }
+    
+    performanceData.lastUpdate = new Date().toISOString();
+    
+    // 保持最近50次记录
+    if (performanceData.loadTimes.length > 50) {
+        performanceData.loadTimes = performanceData.loadTimes.slice(-50);
+    }
+    
+    console.log(`[性能] ${category} 加载耗时: ${loadTime}ms, 成功: ${success}`);
+}
+
 function showPerformanceIndicator(message) {
     const indicator = document.getElementById('performanceIndicator');
     const textElement = document.getElementById('performanceText');
@@ -50,6 +75,91 @@ function getCategoryDisplayName(category) {
         'social-security': '社保'
     };
     return categoryNames[category] || category;
+}
+
+// 格式化报告期显示
+function formatReportDate(dateStr) {
+    const str = dateStr.toString();
+    if (str.length === 8) {
+        const year = str.substring(0, 4);
+        const month = str.substring(4, 6);
+        const day = str.substring(6, 8);
+        
+        // 根据月日判断季度
+        if (month === '03' && day === '31') {
+            return `${year}Q1`;
+        } else if (month === '06' && day === '30') {
+            return `${year}Q2`;
+        } else if (month === '09' && day === '30') {
+            return `${year}Q3`;
+        } else if (month === '12' && day === '31') {
+            return `${year}Q4`;
+        }
+    }
+    return dateStr;
+}
+
+// 加载可用报告期
+async function loadAvailableReportDates() {
+    try {
+        const response = await fetch('/api/institutional_holdings/report_dates');
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            availableReportDates = result.data;
+            currentReportDate = availableReportDates[0]; // 默认选择最新报告期
+            console.log('可用报告期:', availableReportDates);
+            return true;
+        } else {
+            console.error('获取报告期失败:', result.message);
+            return false;
+        }
+    } catch (error) {
+        console.error('加载报告期出错:', error);
+        return false;
+    }
+}
+
+// 生成报告期标签
+function generateReportDateTabs(category) {
+    const tabsContainer = document.getElementById(`${category}-report-tabs`);
+    if (!tabsContainer || !availableReportDates.length) {
+        return;
+    }
+    
+    tabsContainer.innerHTML = '';
+    
+    availableReportDates.forEach((date, index) => {
+        const li = document.createElement('li');
+        li.className = 'nav-item';
+        li.role = 'presentation';
+        
+        const button = document.createElement('button');
+        button.className = `nav-link ${index === 0 ? 'active' : ''}`;
+        button.id = `${category}-${date}-tab`;
+        button.setAttribute('data-bs-toggle', 'pill');
+        button.setAttribute('data-bs-target', `#${category}-${date}`);
+        button.type = 'button';
+        button.role = 'tab';
+        button.textContent = formatReportDate(date);
+        
+        // 添加点击事件
+        button.addEventListener('click', () => {
+            currentReportDate = date;
+            
+            // 立即清理错误状态
+            const errorElement = document.getElementById(`${category}-error`);
+            if (errorElement) {
+                errorElement.style.display = 'none';
+                errorElement.textContent = '';
+            }
+            
+            loadCategoryData(category, date);
+        });
+        
+        li.appendChild(button);
+        tabsContainer.appendChild(li);
+    });
 }
 
 // 个股查询功能
@@ -367,14 +477,11 @@ function createStockDetailPieChart(institutionData) {
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
-    // 初始化标签页切换事件
-    initTabEvents();
+    // 初始化页面
+    initPage();
     
     // 预加载所有类别数据
     preloadAllData();
-    
-    // 加载默认数据
-    loadCategoryData('all');
     
     // 绑定回车键查询
     const stockCodeInput = document.getElementById('stockCodeInput');
@@ -397,7 +504,7 @@ function preloadAllData() {
             if (category !== 'all') {
                 // 错开请求时间，避免并发过多
                 setTimeout(() => {
-                    loadCategoryData(category, true); // true表示静默加载
+                    loadCategoryData(category, null, true); // 第三个参数true表示静默加载
                 }, index * 200);
             }
         });
@@ -407,28 +514,87 @@ function preloadAllData() {
 // 初始化标签页事件
 function initTabEvents() {
     const tabButtons = document.querySelectorAll('[data-bs-toggle="tab"]');
+    
     tabButtons.forEach(button => {
-        button.addEventListener('shown.bs.tab', function(event) {
-            const category = event.target.getAttribute('data-bs-target').substring(1);
+        button.addEventListener('shown.bs.tab', function (event) {
+            const targetId = event.target.getAttribute('data-bs-target');
+            const category = targetId.replace('#', '');
+            
+            console.log(`切换到标签页: ${category}`);
             currentCategory = category;
             
-            // 如果数据已经存在，直接显示；否则加载数据
-            if (holdingsData[category]) {
-                displayHoldingsTable(category, holdingsData[category]);
-                hideLoading(category);
-            } else {
-                loadCategoryData(category);
+            // 立即清理错误状态
+            const errorElement = document.getElementById(`${category}-error`);
+            if (errorElement) {
+                errorElement.style.display = 'none';
+                errorElement.textContent = '';
             }
+            
+            // 生成报告期标签
+            generateReportDateTabs(category);
+            
+            // 加载对应类别的数据
+            loadCategoryData(category);
         });
     });
 }
 
+// 初始化页面
+async function initPage() {
+    try {
+        // 首先加载可用报告期
+        const success = await loadAvailableReportDates();
+        if (!success) {
+            console.error('无法加载报告期，使用默认设置');
+        }
+        
+        // 初始化标签页事件
+        initTabEvents();
+        
+        // 为默认类别生成报告期标签
+        generateReportDateTabs('all');
+        
+        // 默认加载第一个标签页的数据
+        loadCategoryData('all');
+        
+    } catch (error) {
+        console.error('页面初始化失败:', error);
+    }
+}
+
 // 加载指定类别的数据
-function loadCategoryData(category, silent = false) {
+function loadCategoryData(category, reportDate = null, silent = false) {
+    const actualReportDate = reportDate || currentReportDate;
+    
+    // 立即清理UI状态，防止显示之前的错误信息
+    if (!silent) {
+        const errorElement = document.getElementById(`${category}-error`);
+        if (errorElement) {
+            errorElement.style.display = 'none';
+        }
+    }
+    
+    // 如果没有可用的报告期，先加载报告期
+    if (!actualReportDate && availableReportDates.length === 0) {
+        console.log('报告期未加载，先加载报告期数据');
+        loadAvailableReportDates().then(success => {
+            if (success) {
+                loadCategoryData(category, reportDate, silent);
+            } else {
+                if (!silent) {
+                    showError(category, '无法获取报告期信息');
+                }
+            }
+        });
+        return;
+    }
+    
+    const cacheKey = `${category}_${actualReportDate || 'latest'}`;
+    
     // 检查是否已有数据
-    if (holdingsData[category]) {
+    if (holdingsData[cacheKey]) {
         if (!silent) {
-            displayHoldingsTable(category, holdingsData[category]);
+            displayHoldingsTable(category, holdingsData[cacheKey]);
         }
         updatePerformanceMetrics(true); // 缓存命中
         return;
@@ -440,16 +606,27 @@ function loadCategoryData(category, silent = false) {
     }
     
     loadingStates[category] = true;
-    performanceMetrics.loadStartTime = Date.now();
+    const startTime = Date.now();
     
     // 非静默模式显示加载状态
     if (!silent) {
         showLoading(category);
         showPerformanceIndicator(`正在加载${getCategoryDisplayName(category)}数据...`);
+        // 再次确保错误信息被隐藏
+        const errorElement = document.getElementById(`${category}-error`);
+        if (errorElement) {
+            errorElement.style.display = 'none';
+        }
+    }
+    
+    // 构建API URL
+    let apiUrl = `/api/institutional_holdings/${category}`;
+    if (actualReportDate && actualReportDate !== 'null' && actualReportDate !== null) {
+        apiUrl += `?report_date=${actualReportDate}`;
     }
     
     // 发送API请求
-    fetch(`/api/institutional_holdings/${category}`)
+    fetch(apiUrl)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
@@ -458,37 +635,59 @@ function loadCategoryData(category, silent = false) {
         })
         .then(data => {
             if (data.status === 'success') {
-                holdingsData[category] = data.data;
+                holdingsData[cacheKey] = data.data;
                 updatePerformanceMetrics(false); // 网络请求
                 
-                const loadTime = Date.now() - performanceMetrics.loadStartTime;
-                console.log(`${getCategoryDisplayName(category)}数据加载完成，耗时: ${loadTime}ms`);
+                trackPerformance(category, startTime, true);
+                console.log(`${getCategoryDisplayName(category)}数据加载完成 (${actualReportDate})`);
                 
-                // 如果不是静默加载，或者是当前激活的标签页，则显示数据
+                // 如果不是静默加载，则显示数据
                 if (!silent) {
                     displayHoldingsTable(category, data.data);
-                } else if (category === currentCategory) {
-                    displayHoldingsTable(category, data.data);
+                    hideLoading(category);
                 }
                 
+                // 隐藏性能指示器
                 if (!silent) {
-                    hideLoading(category);
                     hidePerformanceIndicator();
                 }
             } else {
-                console.error(`获取${category}数据失败:`, data.message);
-                if (!silent) {
-                    showError(category, data.message);
+                const errorMsg = data.message || '数据加载失败';
+                console.error(`加载${getCategoryDisplayName(category)}数据失败:`, errorMsg);
+                
+                // 检查该类别是否已有成功加载的数据
+                const hasSuccessfulData = Object.keys(holdingsData).some(key => 
+                    key.startsWith(`${category}_`) && holdingsData[key] && holdingsData[key].length > 0
+                );
+                
+                if (!silent && !hasSuccessfulData) {
+                    showError(category, `加载${getCategoryDisplayName(category)}数据失败: ${errorMsg}`);
+                    hidePerformanceIndicator();
+                } else if (!silent) {
+                    // 如果已有成功数据，只隐藏加载状态，不显示错误
+                    hideLoading(category);
                     hidePerformanceIndicator();
                 }
+                trackPerformance(category, startTime, false);
             }
         })
         .catch(error => {
             console.error('请求出错:', error);
-            if (!silent) {
+            
+            // 检查该类别是否已有成功加载的数据
+            const hasSuccessfulData = Object.keys(holdingsData).some(key => 
+                key.startsWith(`${category}_`) && holdingsData[key] && holdingsData[key].length > 0
+            );
+            
+            if (!silent && !hasSuccessfulData) {
                 showError(category, '数据加载失败，请稍后重试');
                 hidePerformanceIndicator();
+            } else if (!silent) {
+                // 如果已有成功数据，只隐藏加载状态，不显示错误
+                hideLoading(category);
+                hidePerformanceIndicator();
             }
+            trackPerformance(category, startTime, false);
         })
         .finally(() => {
             loadingStates[category] = false;
@@ -497,57 +696,96 @@ function loadCategoryData(category, silent = false) {
 
 // 显示加载状态
 function showLoading(category) {
-    const loadingElement = document.getElementById(`loading-${category}`);
-    const tableElement = document.getElementById(`table-${category}`);
+    const loadingElement = document.getElementById(`${category}-loading`);
+    const errorElement = document.getElementById(`${category}-error`);
     
-    if (loadingElement) loadingElement.style.display = 'block';
-    if (tableElement) tableElement.style.display = 'none';
+    // 强制隐藏错误信息
+    if (errorElement) {
+        errorElement.style.display = 'none';
+        errorElement.textContent = ''; // 清空错误文本
+    }
+    
+    // 显示加载状态
+    if (loadingElement) {
+        loadingElement.style.display = 'block';
+    }
 }
 
 // 隐藏加载状态
 function hideLoading(category) {
-    const loadingElement = document.getElementById(`loading-${category}`);
-    const tableElement = document.getElementById(`table-${category}`);
+    const loadingElement = document.getElementById(`${category}-loading`);
+    const errorElement = document.getElementById(`${category}-error`);
     
-    if (loadingElement) loadingElement.style.display = 'none';
-    if (tableElement) tableElement.style.display = 'block';
+    if (loadingElement) {
+        loadingElement.style.display = 'none';
+    }
+    if (errorElement) {
+        errorElement.style.display = 'none';
+    }
 }
 
 // 显示错误信息
 function showError(category, message) {
-    const loadingElement = document.getElementById(`loading-${category}`);
+    const errorElement = document.getElementById(`${category}-error`);
+    const loadingElement = document.getElementById(`${category}-loading`);
+    
+    if (errorElement) {
+        errorElement.textContent = message;
+        errorElement.style.display = 'block';
+    }
     if (loadingElement) {
-        loadingElement.innerHTML = `<div class="alert alert-danger">${message}</div>`;
+        loadingElement.style.display = 'none';
     }
 }
 
-// 显示持股表格
+// 显示持股数据表格
 function displayHoldingsTable(category, data) {
-    const tbody = document.getElementById(`tbody-${category}`);
-    if (!tbody) return;
+    const tableBody = document.getElementById(`${category}-table-body`);
+    const errorElement = document.getElementById(`${category}-error`);
     
-    tbody.innerHTML = '';
+    if (!tableBody) {
+        console.error(`找不到表格元素: ${category}-table-body`);
+        return;
+    }
     
-    data.forEach((item, index) => {
+    // 隐藏错误信息
+    if (errorElement) {
+        errorElement.style.display = 'none';
+    }
+    
+    // 清空现有数据
+    tableBody.innerHTML = '';
+    
+    if (!data || data.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">暂无数据</td></tr>';
+        return;
+    }
+    
+    // 填充数据
+    data.forEach((stock, index) => {
         const row = document.createElement('tr');
-        row.className = 'stock-row';
-        row.setAttribute('data-stock-code', item.stock_code);
-        row.setAttribute('data-stock-name', item.stock_name);
+        row.className = 'clickable-row';
+        row.setAttribute('data-stock-code', stock.stock_code);
+        row.setAttribute('data-stock-name', stock.stock_name);
         
         row.innerHTML = `
             <td>${index + 1}</td>
-            <td>${item.stock_code}</td>
-            <td>${item.stock_name}</td>
-            <td>${item.holding_ratio.toFixed(2)}</td>
+            <td>${stock.stock_code}</td>
+            <td>${stock.stock_name}</td>
+            <td>${stock.holding_ratio.toFixed(2)}%</td>
         `;
         
         // 添加点击事件
         row.addEventListener('click', function() {
-            selectStock(category, item.stock_code, item.stock_name, this);
+            const stockCode = this.getAttribute('data-stock-code');
+            const stockName = this.getAttribute('data-stock-name');
+            showStockDetail(stockCode, stockName);
         });
         
-        tbody.appendChild(row);
+        tableBody.appendChild(row);
     });
+    
+    console.log(`${getCategoryDisplayName(category)} 表格显示完成，共 ${data.length} 条记录`);
 }
 
 // 选择股票（直接调用个股查询功能）
