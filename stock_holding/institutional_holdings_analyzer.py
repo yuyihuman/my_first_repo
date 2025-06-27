@@ -312,15 +312,21 @@ class InstitutionalHoldingsAnalyzer:
                 data = ak.stock_report_fund_hold(symbol=symbol, date=date)
                 
                 if data is not None and not data.empty:
-                    # 数据验证和清洗
-                    if self.data_validator:
-                        data = self.data_validator.validate_holdings_data(data)
-                        # validate_holdings_data已经包含了clean_data的调用，不需要重复调用
+                    # 先进行列名映射和添加必需列
+                    if '股票代码' in data.columns:
+                        data['stock_code'] = data['股票代码']
+                    if '股票简称' in data.columns:
+                        data['stock_name'] = data['股票简称']
                     
-                    # 添加元数据
+                    # 添加元数据（必需列）
                     data['institution_type'] = symbol
                     data['report_date'] = date
                     data['fetch_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    # 数据验证和清洗（在添加必需列之后）
+                    if self.data_validator:
+                        data = self.data_validator.validate_holdings_data(data)
+                        # validate_holdings_data已经包含了clean_data的调用，不需要重复调用
                     
                     # 缓存数据
                     if self.cache_manager:
