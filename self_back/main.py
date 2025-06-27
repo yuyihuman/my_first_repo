@@ -301,6 +301,77 @@ def run_example_batch_trades():
     else:
         print(f"批量回测失败: {result['error']}")
 
+def run_example_qfii_strategy():
+    """
+    演示QFII选股策略
+    """
+    print("\n=== QFII选股策略演示 ===")
+    
+    # 创建回测引擎
+    engine = BacktestEngine()
+    
+    try:
+        # 使用QFII选股策略
+        print("正在执行QFII选股策略...")
+        qfii_stocks = engine.stock_selector.select_stocks(
+            strategy_name='qfii_stocks',
+            data_file_path="c:/Users/Ramsey/github/my_first_repo/stock_holding/institutional_holdings_data/processed_data/merged_holdings_data.csv"
+        )
+        
+        print(f"QFII选股结果: 共选出 {len(qfii_stocks)} 只股票")
+        
+        if qfii_stocks:
+            print("\n📈 前20只QFII持仓股票 (按出现次数和总股本排序):")
+            for i, stock in enumerate(qfii_stocks[:20], 1):
+                print(f"{i:2d}. {stock}")
+            
+            if len(qfii_stocks) > 20:
+                print(f"... 还有 {len(qfii_stocks) - 20} 只股票")
+            
+            # 显示选股策略的统计信息
+            print(f"\n📊 选股统计:")
+            print(f"   - 总选股数: {len(qfii_stocks)}")
+            print(f"   - 策略特点: 按QFII出现次数和总股本双重排序")
+            print(f"   - 数据来源: 机构持仓数据")
+            
+            # 如果有QFII股票，可以选择其中几只进行回测演示
+            if len(qfii_stocks) >= 5:
+                print("\n=== 对QFII股票进行回测演示 ===")
+                sample_stocks = qfii_stocks[:5]  # 取前5只股票进行回测
+                print(f"选择前5只股票进行回测: {sample_stocks}")
+                
+                trades = []
+                for stock in sample_stocks:
+                    trades.append({
+                        'stock_code': stock,
+                        'buy_date': '20230101',
+                        'sell_date': '20231231'
+                    })
+                
+                # 执行批量回测
+                result = engine.run_batch_backtest(trades)
+                
+                if result['success']:
+                    print(f"QFII股票回测完成:")
+                    print(f"- 总交易数: {result['summary']['total_trades']}")
+                    print(f"- 成功交易数: {result['summary']['successful_trades']}")
+                    print(f"- 平均收益率: {result['summary']['average_return']:.2%}")
+                else:
+                    print(f"QFII股票回测失败: {result['error']}")
+        else:
+            print("未找到任何QFII持仓股票，可能的原因:")
+            print("1. 数据文件不存在或路径错误")
+            print("2. 数据文件中没有QFII类型的机构持仓记录")
+            print("3. 股票代码格式不符合要求")
+            
+            # 显示可用的选股策略
+            available_strategies = engine.stock_selector.get_available_strategies()
+            print(f"\n当前可用的选股策略: {available_strategies}")
+        
+    except Exception as e:
+        print(f"QFII选股策略演示失败: {str(e)}")
+        print("详细错误信息请查看日志文件")
+
 def main():
     """
     主函数
@@ -316,6 +387,9 @@ def main():
         # 运行示例
         run_example_single_trade()
         run_example_batch_trades()
+        
+        # 演示QFII选股策略
+        run_example_qfii_strategy()
         
         print("\n=== 程序运行完成 ===")
         print("详细日志请查看 logs 目录")

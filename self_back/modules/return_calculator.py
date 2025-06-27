@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from utils.logger import setup_logger
 
 try:
-    import xtdata
+    from xtquant import xtdata
 except ImportError:
     xtdata = None
 

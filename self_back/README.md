@@ -9,6 +9,10 @@
 1. **选股模块** (`modules/stock_selector.py`)
    - 提供股票选择策略接口
    - 支持自定义选股策略注册
+   - **内置QFII选股策略** ⭐
+     - 基于机构持仓数据筛选曾经有QFII持仓的股票
+     - 支持自定义数据文件路径
+     - 自动验证股票代码格式
    - 预留多种选股算法接口
 
 2. **买入策略模块** (`modules/buy_strategy.py`)
@@ -136,7 +140,59 @@ if result['success']:
     print(f"平均收益率: {summary['average_return_percentage']:.2f}%")
 ```
 
-#### 3. 生成报告
+#### 3. QFII选股策略（增强版）
+
+增强版QFII选股策略基于机构持仓数据，采用智能排序算法选出最受QFII青睐的优质股票。
+
+**策略特点：**
+- 📊 **出现次数统计**：统计每只股票在QFII持仓记录中的出现次数
+- 🏆 **双重排序**：按出现次数降序排列，相同次数时按总股本降序排列
+- 🎯 **精选前100**：从所有QFII持仓股票中精选前100只
+- 📈 **质量优先**：优先选择最受QFII青睐且规模较大的股票
+- 🔍 **透明排序**：提供详细的排序统计信息
+
+```python
+# 使用增强版QFII选股策略
+qfii_stocks = engine.select_stocks(
+    strategy='qfii_stocks',
+    data_file_path='path/to/merged_holdings_data.csv'
+)
+
+print(f"QFII选股结果: 共选出 {len(qfii_stocks)} 只股票")
+print(f"前20只股票: {qfii_stocks[:20]}")
+
+# 策略会自动显示排序统计信息
+# 包括：总选股数、策略特点、数据来源等
+
+# 对QFII股票进行批量回测
+if qfii_stocks:
+    trades = []
+    for stock in qfii_stocks[:5]:  # 选择前5只股票
+        trades.append({
+            'stock_code': stock,
+            'buy_date': '20240101',
+            'sell_date': '20240301'
+        })
+    
+    result = engine.run_batch_backtest(trades)
+    if result['success']:
+        print(f"QFII股票平均收益率: {result['summary']['average_return_percentage']:.2f}%")
+```
+
+**排序逻辑：**
+1. 统计每只股票在QFII持仓记录中的出现次数
+2. 获取每只股票的总股本信息
+3. 按出现次数降序排列（出现次数越多，说明越受QFII青睐）
+4. 出现次数相同时，按总股本降序排列（优先选择大盘股）
+5. 最终选取前100只股票
+
+**预期效果：**
+- ✅ 选出最受QFII青睐的股票（出现次数多）
+- ✅ 在同等青睐度下，优先选择大盘股（总股本大）
+- ✅ 控制选股数量，提高选股质量
+- ✅ 提供透明的排序依据
+
+#### 4. 生成报告
 
 ```python
 # 生成详细报告并保存
