@@ -1,0 +1,7 @@
+requests>=2.25.1
+json5>=0.9.6
+typing-extensions>=4.0.0
+# GUI界面依赖 (tkinter是Python标准库，无需额外安装)
+# 如果需要更美观的界面，可以考虑添加以下可选依赖:
+# ttkthemes>=3.2.0  # 主题支持
+# pillow>=8.0.0     # 图像处理支持
