@@ -1,0 +1,66 @@
+{
+  "novel_config": {
+    "title": "我的小说标题",
+    "genre": "科幻/奇幻/言情/悬疑/历史等",
+    "target_length": "短篇/中篇/长篇",
+    "target_chapters": 20,
+    "writing_style": "第一人称/第三人称",
+    "tone": "轻松/严肃/幽默/悬疑等"
+  },
+  "main_idea": {
+    "core_concept": "在这里描述你的核心创意和故事概念",
+    "theme": "故事想要表达的主题思想",
+    "setting": {
+      "time_period": "故事发生的时代背景",
+      "location": "故事发生的地点",
+      "world_building": "世界观设定（如果是奇幻/科幻）"
+    }
+  },
+  "characters": {
+    "protagonist": {
+      "name": "主角姓名",
+      "age": "主角年龄",
+      "background": "主角背景故事",
+      "personality": "主角性格特点",
+      "goals": "主角的目标和动机",
+      "flaws": "主角的缺陷和弱点"
+    },
+    "supporting_characters": [
+      {
+        "name": "配角姓名",
+        "role": "在故事中的作用",
+        "relationship": "与主角的关系",
+        "description": "角色描述"
+      }
+    ],
+    "antagonist": {
+      "name": "反派姓名",
+      "motivation": "反派的动机",
+      "methods": "反派的手段",
+      "background": "反派背景"
+    }
+  },
+  "plot_elements": {
+    "inciting_incident": "引发故事的关键事件",
+    "main_conflict": "主要冲突",
+    "key_plot_points": [
+      "重要情节点1",
+      "重要情节点2",
+      "重要情节点3"
+    ],
+    "climax_idea": "高潮部分的构想",
+    "resolution_direction": "结局的大致方向"
+  },
+  "special_requirements": {
+    "must_include": [
+      "必须包含的元素或场景"
+    ],
+    "avoid": [
+      "需要避免的内容"
+    ],
+    "inspiration_sources": [
+      "灵感来源（书籍、电影、现实事件等）"
+    ]
+  },
+  "additional_notes": "其他想法、灵感片段或特殊要求"
+}

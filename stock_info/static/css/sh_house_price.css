@@ -1,0 +1,43 @@
+.image-container {
+    position: relative;
+    min-height: 300px;
+    /* 移除边框和背景 */
+    /* border: 1px solid #dee2e6; */
+    /* border-radius: 5px; */
+    /* padding: 20px; */
+    /* background-color: #f8f9fa; */
+    margin-bottom: 30px;
+    /* 移除overflow属性，使用页面的滚动条 */
+    overflow: visible;
+    /* 移除最大高度限制，让图片完全展示 */
+    /* max-height: 80vh; */
+}
+
+#houseImage {
+    margin: 0 auto;
+    /* 移除阴影效果 */
+    /* box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); */
+    max-width: 100%; /* 修改为100%，确保图片不会超出容器宽度 */
+    height: auto; /* 添加高度自动，保持图片比例 */
+    display: block; /* 使图片居中显示更加准确 */
+}
+
+#noImageSelected {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80%;
+}
+
+#loadingSpinner {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.form-select:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}

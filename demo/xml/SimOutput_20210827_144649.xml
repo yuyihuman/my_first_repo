@@ -1,0 +1,638 @@
+<IPG xmlns="https://www.ipg-automotive.com" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="https://www.ipg-automotive.com cm_report.xsd">
+    <Report FileIdent="CarMaker-TestSeries-XMLReport 1" FileCreator="CarMaker/HIL 10.0">
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_AEB_CCRs</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_1.1</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_1.2</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_1.3</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_1.4</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_1.5</Name>
+                    <Result>good</Result>
+                </Variation>
+            </VariationList>
+            <Description>Test the ACC function</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_AEB_CCRm</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_2.1</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_2.2</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_2.3</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_2.4</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_2.5</Name>
+                    <Result>good</Result>
+                </Variation>
+            </VariationList>
+            <Description>Test the ACC function</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_AEB_CCRb</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_3.1</Name>
+                    <Result>err</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>24.421</Time>
+                            <Status>err</Status>
+                            <Message>Simulation ended with errors</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_3.2</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_3.3</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_3.4</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_3.5</Name>
+                    <Result>good</Result>
+                </Variation>
+            </VariationList>
+            <Description>Test the ACC function</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_AHC_approach</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_4.1</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>34.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_AHC_DIST=151.721429m</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_4.2</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>34.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_AHC_DIST=152.388096m</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_4.3</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>34.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_AHC_DIST=151.454763m</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>Shows active lights in IPGMovie</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_AHC_oncoming</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_5.1</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>31.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_AHC_DIST=141.668276m</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_5.2</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>31.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_AHC_DIST=142.778589m</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_5.3</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>31.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_AHC_DIST=141.668276m</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>Shows active lights in IPGMovie</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_LKA_StraightRoad_Left_broken_line</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_6.1</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.314807</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.695387</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_6.2</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.324604</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.775787</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_6.3</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.330402</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.749887</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>LDW warning-audible(left)
+give a left turn torque between 100m and 150m
+setting&#65306;
+LaneAssistStsts=2
+LKSLaneAssiTyp=1
+LKSLeTrackingSts=1
+LaneAssistTactileOnOff=1
+output&#65306;
+LKSRiTrackingSts=3</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_LKA_StraightRoad_Left_single_line</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_7.1</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.319605</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.670587</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_7.2</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.326603</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.683587</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_7.3</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.324504</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.685687</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>LDW warning-audible(left)
+give a left turn torque between 100m and 150m
+setting&#65306;
+LaneAssistStsts=2
+LKSLaneAssiTyp=1
+LKSLeTrackingSts=1
+LaneAssistTactileOnOff=1
+output&#65306;
+LKSRiTrackingSts=3</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_LKA_StraightRoad_Right_broken_line</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_8.1</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.408257</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.771987</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_8.2</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.430038</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.790187</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_8.3</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.367186</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.743087</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>LDW warning-audible(left)
+give a left turn torque between 100m and 150m
+setting&#65306;
+LaneAssistStsts=2
+LKSLaneAssiTyp=1
+LKSLeTrackingSts=1
+LaneAssistTactileOnOff=1
+output&#65306;
+LKSRiTrackingSts=3</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_LKA_StraightRoad_Right_single_line</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_9.1</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.290811</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.719387</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_9.2</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.279613</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.730687</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_9.3</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.277913</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.732387</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>LDW warning-audible(left)
+give a left turn torque between 100m and 150m
+setting&#65306;
+LaneAssistStsts=2
+LKSLaneAssiTyp=1
+LKSLeTrackingSts=1
+LaneAssistTactileOnOff=1
+output&#65306;
+LKSRiTrackingSts=3</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_LKA_CurvedRoad</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_10.1</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.471823</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.757874</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_10.2</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.509457</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.729970</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_10.3</Name>
+                    <Result>good</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage1Warning_Dst2LaneMarking=0.487891</Message>
+                        </LogEntry>
+                        <LogEntry>
+                            <Time>21.1</Time>
+                            <Status>info</Status>
+                            <Message>[KPI] KPI_Stage2Warning_Dst2LaneMarking=-0.902088</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>LDW warning-audible(left)
+give a left turn torque between 100m and 150m
+setting&#65306;
+LaneAssistStsts=2
+LKSLaneAssiTyp=1
+LKSLeTrackingSts=1
+LaneAssistTactileOnOff=1
+output&#65306;
+LKSRiTrackingSts=3</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_LKS_StraightRoad_Left</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_11.1</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_11.2</Name>
+                    <Result>good</Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_11.3</Name>
+                    <Result>good</Result>
+                </Variation>
+            </VariationList>
+            <Description>LDW warning-audible(left)
+give a left turn torque between 100m and 150m
+setting&#65306;
+LaneAssistStsts=2
+LKSLaneAssiTyp=1
+LKSLeTrackingSts=1
+LaneAssistTactileOnOff=1
+output&#65306;
+LKSRiTrackingSts=3</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_LKS_StraightRoad_Right</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_12.1</Name>
+                    <Result>err</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>26.001</Time>
+                            <Status>err</Status>
+                            <Message>Simulation ended with errors</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_12.2</Name>
+                    <Result></Result>
+                </Variation>
+                <Variation>
+                    <Name>Variation_12.3</Name>
+                    <Result>err</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>26.001</Time>
+                            <Status>err</Status>
+                            <Message>Simulation ended with errors</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>LDW warning-audible(left)
+give a left turn torque between 100m and 150m
+setting&#65306;
+LaneAssistStsts=2
+LKSLaneAssiTyp=1
+LKSLeTrackingSts=1
+LaneAssistTactileOnOff=1
+output&#65306;
+LKSRiTrackingSts=3</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_LKS_CruvedRoad_Right</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_13.1</Name>
+                    <Result>err</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>32.001</Time>
+                            <Status>err</Status>
+                            <Message>Simulation ended with errors</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_13.2</Name>
+                    <Result>err</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>32.001</Time>
+                            <Status>err</Status>
+                            <Message>Simulation ended with errors</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_13.3</Name>
+                    <Result>err</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>32.001</Time>
+                            <Status>err</Status>
+                            <Message>Simulation ended with errors</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>LDW warning-audible(left)
+give a left turn torque between 100m and 150m
+setting&#65306;
+LaneAssistStsts=2
+LKSLaneAssiTyp=1
+LKSLeTrackingSts=1
+LaneAssistTactileOnOff=1
+output&#65306;
+LKSRiTrackingSts=3</Description>
+        </TestRun>
+        <TestRun>
+            <FilePath>Feature_Test/HIL_Feature_Test_LKS_CruvedRoad_Left</FilePath>
+            <VariationList>
+                <Variation>
+                    <Name>Variation_14.1</Name>
+                    <Result>err</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>32.001</Time>
+                            <Status>err</Status>
+                            <Message>Simulation ended with errors</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_14.2</Name>
+                    <Result>err</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>22.863</Time>
+                            <Status>err</Status>
+                            <Message>Simulation ended with errors</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+                <Variation>
+                    <Name>Variation_14.3</Name>
+                    <Result>err</Result>
+                    <TestLog>
+                        <LogEntry>
+                            <Time>21.058</Time>
+                            <Status>err</Status>
+                            <Message>Simulation ended with errors</Message>
+                        </LogEntry>
+                    </TestLog>
+                </Variation>
+            </VariationList>
+            <Description>LDW warning-audible(left)
+give a left turn torque between 100m and 150m
+setting&#65306;
+LaneAssistStsts=2
+LKSLaneAssiTyp=1
+LKSLeTrackingSts=1
+LaneAssistTactileOnOff=1
+output&#65306;
+LKSRiTrackingSts=3</Description>
+        </TestRun>
+    </Report>
+</IPG>
+

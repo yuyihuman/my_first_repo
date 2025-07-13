@@ -1,0 +1,23 @@
+/* 港股通页面专用样式 */
+.construction-icon {
+    margin: 2rem 0;
+    color: #ffc107;
+}
+
+.jumbotron {
+    background-color: #f8f9fa;
+    padding: 2rem;
+    border-radius: 0.3rem;
+}
+
+/* 表格等宽样式 */
+.table-equal-width {
+    table-layout: fixed;
+    width: 100%;
+}
+
+.table-equal-width th,
+.table-equal-width td {
+    width: 12.5%; /* 100% / 8列 = 12.5% */
+    text-align: center;
+}

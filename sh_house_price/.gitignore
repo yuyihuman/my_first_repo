@@ -1,0 +1,11 @@
+# 忽略日志文件夹
+logs/
+
+# 忽略截图文件夹
+screenshots/
+
+# 忽略 UI 转储文件夹（从代码中看到也有这个目录）
+ui_dumps/
+
+# 忽略整个images文件夹
+images/

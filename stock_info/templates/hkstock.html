@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>港股通南向 - 股票信息分析平台</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <!-- 添加Chart.js库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            margin: 20px 0;
+            height: 400px;
+        }
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+        .estimated-value {
+            border: 2px dashed #6c757d;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 20px;
+            margin-bottom: 25px;  /* 调整为25px，既不会离图片太远，也有足够间距 */
+            background-color: #f8f9fa;
+        }
+        /* 添加股票行的鼠标悬停样式 */
+        .stock-row {
+            cursor: pointer;
+        }
+        .stock-row:hover {
+            background-color: #f0f8ff !important;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">股票信息分析平台</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/stock_info">个股信息</a>
+                    </li>
+                    <!-- 添加港股个股信息标签 -->
+                    <li class="nav-item">
+                        <a class="nav-link" href="/hkstock_info">港股个股信息</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/lhb">龙虎榜</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/hkstock">港股通南向</a>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link" href="/macro_china">中国宏观数据</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/sh_house_price">上海房价</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/southbound_holdings">南向持股</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/institutional_holdings">机构持股</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5">
+        <div class="jumbotron">
+            <h1 class="display-4 text-center">港股通南向数据分析</h1>
+            <p class="lead text-center">南向资金流向分析</p>
+            <hr class="my-4">
+            
+            <div id="updateInfo" class="alert alert-info text-center">
+                正在加载数据，请稍候...
+            </div>
+            
+            <!-- 累计净买入额折线图 -->
+            <div class="chart-container">
+                <div id="cumulativeChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="cumulativeChart"></canvas>
+            </div>
+            
+            <!-- 月度净买入额柱状图 -->
+            <div class="chart-container">
+                <div id="monthlyChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="monthlyChart"></canvas>
+            </div>
+            
+            <!-- 新增：近30天资金流入流出图表 -->
+            <div class="chart-container">
+                <div id="dailyFlowChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="dailyFlowChart"></canvas>
+            </div>
+
+            <!-- 领涨股统计 -->
+            <div class="card mt-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">领涨股统计 (出现频率最高的20只股票)</h5>
+                </div>
+                <div class="card-body">
+                    <div id="leadingStocksLoading" class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">加载中...</p>
+                    </div>
+                    <div id="leadingStocksTable" class="table-responsive" style="display: none;">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>排名</th>
+                                    <th>股票名称</th>
+                                    <th>股票代码</th>
+                                    <th>领涨次数</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leadingStocksBody">
+                            </tbody>
+                        </table>
+                        <div class="alert alert-info mt-3">
+                            <i class="bi bi-info-circle"></i> 点击任意股票行可跳转至港股个股信息页面查看详细信息
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer mt-auto py-3 bg-light">
+        <div class="container text-center">
+            <span class="text-muted">© 2024 股票信息分析平台</span>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // 页面加载完成后立即获取数据
+            fetchHKStockData();
+        });
+        
+        function fetchHKStockData() {
+            fetch('/api/hkstock')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('网络响应不正常');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // 更新数据更新时间
+                    document.getElementById('updateInfo').innerHTML = 
+                        `数据更新时间: ${data.update_time}`;
+                    
+                    // 处理数据并绘制图表
+                    renderCumulativeChart(data.daily_data);
+                    renderMonthlyChart(data.daily_data);
+                    renderDailyFlowChart(data.daily_data);  // 新增：调用近30天图表函数
+                    renderLeadingStocks(data.top_leading_stocks);
+                })
+                .catch(error => {
+                    console.error('获取数据失败:', error);
+                    document.getElementById('updateInfo').innerHTML = 
+                        `<div class="alert alert-danger">获取数据失败: ${error.message}</div>`;
+                    
+                    // 隐藏加载动画
+                    document.getElementById('cumulativeChartLoading').style.display = 'none';
+                    document.getElementById('dailyFlowChartLoading').style.display = 'none';  // 新增
+                    document.getElementById('monthlyChartLoading').style.display = 'none';
+                    document.getElementById('leadingStocksLoading').style.display = 'none';
+                });
+        }
+        
+        function renderCumulativeChart(dailyData) {
+            // 隐藏加载动画
+            document.getElementById('cumulativeChartLoading').style.display = 'none';
+            
+            // 准备数据
+            const dates = dailyData.map(item => item['日期']);
+            const cumulativeValues = dailyData.map(item => item['历史累计净买额'] * 10000); // 转换为亿元
+            
+            // 准备恒生指数数据
+            const hsiValues = dailyData.map(item => item['恒生指数']);
+            
+            // 创建图表
+            const ctx = document.getElementById('cumulativeChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [
+                        {
+                            label: '历史累计净买入额(亿元)',
+                            data: cumulativeValues,
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',  // 添加：与南向面板相同的背景色
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            tension: 0.1,
+                            fill: true,  // 添加：启用填充效果
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '恒生指数',
+                            data: hsiValues,
+                            borderColor: 'rgb(255, 99, 132)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.1,
+                            fill: false,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '南向资金累计净买入额与恒生指数走势',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const datasetIndex = context.datasetIndex;
+                                    if (datasetIndex === 0) {
+                                        return `累计净买入额: ${context.raw.toFixed(2)}亿元`;
+                                    } else if (datasetIndex === 1) {
+                                        return `恒生指数: ${context.raw.toFixed(2)}`;
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '日期'
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 20
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '累计净买入额(亿元)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '恒生指数'
+                            },
+                            // 确保这个轴的网格线不显示，避免与左侧Y轴的网格线重叠
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 新增：绘制近30天资金流入流出图表
+        function renderDailyFlowChart(dailyData) {
+            // 隐藏加载动画
+            document.getElementById('dailyFlowChartLoading').style.display = 'none';
+            
+            // 获取近30天的数据
+            const recent30Days = dailyData.slice(-30);
+            
+            // 准备数据
+            const dates = recent30Days.map(item => item['日期']);
+            const dailyNetBuy = recent30Days.map(item => item['当日成交净买额']);
+            
+            // 创建图表
+            const ctx = document.getElementById('dailyFlowChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: dates,
+                    datasets: [
+                        {
+                            label: '当日净买入额(亿元)',
+                            data: dailyNetBuy,
+                            backgroundColor: dailyNetBuy.map(value => 
+                                value >= 0 ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)'
+                            ),
+                            borderColor: dailyNetBuy.map(value => 
+                                value >= 0 ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)'
+                            ),
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '近30天南向资金流入流出情况',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.raw;
+                                    const flowType = value >= 0 ? '流入' : '流出';
+                                    return `${flowType}: ${Math.abs(value).toFixed(2)}亿元`;
+                                }
+                            }
+                        },
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '日期'
+                            },
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 15
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '净买入额(亿元)'
+                            },
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.3)';
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderMonthlyChart(dailyData) {
+            // 隐藏加载动画
+            document.getElementById('monthlyChartLoading').style.display = 'none';
+            
+            // 按月份分组数据
+            const monthlyData = {};
+            const monthDays = {};
+            const currentDate = new Date();
+            const currentYear = currentDate.getFullYear();
+            const currentMonth = currentDate.getMonth() + 1;
+            
+            // 记录每个月的交易日
+            const tradingDaysPerMonth = {};
+            
+            // 新增：用于存储每月的指数平均值
+            const monthlyIndexData = {};
+            
+            dailyData.forEach(item => {
+                const date = new Date(item['日期']);
+                const year = date.getFullYear();
+                const month = date.getMonth() + 1;
+                const monthKey = `${year}-${month.toString().padStart(2, '0')}`;
+                
+                if (!monthlyData[monthKey]) {
+                    monthlyData[monthKey] = 0;
+                    monthDays[monthKey] = 0;
+                    tradingDaysPerMonth[monthKey] = new Set();
+                    // 新增：初始化月度指数数据
+                    monthlyIndexData[monthKey] = {
+                        indexSum: 0,
+                        days: 0
+                    };
+                }
+                
+                monthlyData[monthKey] += item['当日成交净买额'];
+                monthDays[monthKey]++;
+                tradingDaysPerMonth[monthKey].add(item['日期']);
+                
+                // 新增：累计指数数据
+                if (item['恒生指数'] !== null) {
+                    monthlyIndexData[monthKey].indexSum += item['恒生指数'];
+                    monthlyIndexData[monthKey].days += 1;
+                }
+            });
+            
+            // 准备图表数据
+            const months = Object.keys(monthlyData).sort();
+            const netBuyValues = months.map(month => monthlyData[month]);
+            
+            // 新增：计算每月平均指数
+            const avgIndexValues = months.map(month => 
+                monthlyIndexData[month].days > 0 ? 
+                monthlyIndexData[month].indexSum / monthlyIndexData[month].days : 
+                null
+            );
+            
+            // 检查最新月份是否是当前月份，如果是则计算预估值
+            const latestMonth = months[months.length - 1];
+            const [latestYear, latestMonthNum] = latestMonth.split('-').map(Number);
+            
+            let estimatedValue = null;
+            let actualValue = null;
+            let isEstimated = false;
+            let estimatedTradingDays = 0;
+            
+            if (latestYear === currentYear && latestMonthNum === currentMonth) {
+                // 保存当前实际值
+                actualValue = monthlyData[latestMonth];
+                
+                // 计算当月已过交易日的平均每日净买入额
+                const avgDailyBuy = actualValue / monthDays[latestMonth];
+                
+                // 估算当月总交易日数
+                // 查找历史同月的平均交易日数据
+                let totalTradingDaysCount = 0;
+                let monthsWithSameMonthNum = 0;
+                
+                for (const month of months) {
+                    const [year, monthNum] = month.split('-').map(Number);
+                    if (monthNum === latestMonthNum && year !== latestYear) {
+                        totalTradingDaysCount += tradingDaysPerMonth[month].size;
+                        monthsWithSameMonthNum++;
+                    }
+                }
+                
+                // 如果有历史同月数据，使用平均值；否则使用一个默认值（如21天）
+                let avgTradingDaysInMonth = 21; // 默认值
+                if (monthsWithSameMonthNum > 0) {
+                    avgTradingDaysInMonth = Math.round(totalTradingDaysCount / monthsWithSameMonthNum);
+                }
+                
+                estimatedTradingDays = avgTradingDaysInMonth;
+                
+                // 计算预估值
+                estimatedValue = avgDailyBuy * estimatedTradingDays;
+                isEstimated = true;
+            }
+            
+            // 创建图表数据集
+            const datasets = [{
+                label: '月度净买入额(亿元)',
+                data: netBuyValues,
+                backgroundColor: netBuyValues.map(value => 
+                    value >= 0 ? 'rgba(75, 192, 192, 0.6)' : 'rgba(255, 99, 132, 0.6)'
+                ),
+                borderColor: netBuyValues.map(value => 
+                    value >= 0 ? 'rgb(75, 192, 192)' : 'rgb(255, 99, 132)'
+                ),
+                borderWidth: 1
+            }];
+            
+            // 如果有预估值，添加预估值数据集
+            if (isEstimated) {
+                // 创建一个新数组，只有最后一个月有预估值，其他月份为null
+                const estimatedData = months.map((month, index) => {
+                    return (index === months.length - 1) ? estimatedValue : null;
+                });
+                
+                datasets.push({
+                    label: '月度预估值(亿元)',
+                    data: estimatedData,
+                    backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                    borderColor: 'rgb(255, 159, 64)',
+                    borderWidth: 1,
+                    borderDash: [5, 5]
+                });
+            }
+            
+            // 创建图表
+            const ctx = document.getElementById('monthlyChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: months,
+                    datasets: [
+                        {
+                            label: '月度净买入额(亿元)',
+                            data: netBuyValues,
+                            backgroundColor: netBuyValues.map(value => 
+                                value >= 0 ? 'rgba(75, 192, 192, 0.6)' : 'rgba(255, 99, 132, 0.6)'
+                            ),
+                            borderColor: netBuyValues.map(value => 
+                                value >= 0 ? 'rgb(75, 192, 192)' : 'rgb(255, 99, 132)'
+                            ),
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        },
+                        // 如果有预估值，添加预估值数据集
+                        ...(isEstimated ? [{
+                            label: '月度预估值(亿元)',
+                            data: months.map((month, index) => {
+                                return (index === months.length - 1) ? estimatedValue : null;
+                            }),
+                            backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                            borderColor: 'rgb(255, 159, 64)',
+                            borderWidth: 1,
+                            borderDash: [5, 5],
+                            yAxisID: 'y'
+                        }] : []),
+                        // 新增：添加恒生指数折线图
+                        {
+                            label: '恒生指数',
+                            data: avgIndexValues,
+                            type: 'line',
+                            fill: false,
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 2,
+                            pointRadius: 0,  // 修改：将点半径设为0，不显示数据点
+                            tension: 0.1,    // 添加：使线条更平滑
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '南向资金月度净买入额与恒生指数走势',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const datasetIndex = context.datasetIndex;
+                                    const value = context.raw;
+                                    
+                                    if (datasetIndex === 0) {
+                                        return `实际净买入额: ${value ? value.toFixed(2) : 0}亿元`;
+                                    } else if (datasetIndex === 1 && isEstimated) {
+                                        return `预估月底值: ${value ? value.toFixed(2) : 0}亿元`;
+                                    } else if (datasetIndex === (isEstimated ? 2 : 1)) {
+                                        return `恒生指数: ${value ? value.toFixed(2) : 0}`;
+                                    }
+                                    return '';
+                                },
+                                afterLabel: function(context) {
+                                    const monthKey = months[context.dataIndex];
+                                    const isLast = context.dataIndex === months.length - 1;
+                                    
+                                    if (isLast && isEstimated && context.datasetIndex === 0) {
+                                        return `已有${monthDays[monthKey]}个交易日数据`;
+                                    } else if (isLast && isEstimated && context.datasetIndex === 1) {
+                                        return `基于已有数据估算月底值`;
+                                    } else if (context.datasetIndex === 0) {
+                                        return `共${monthDays[monthKey]}个交易日`;
+                                    }
+                                    return '';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '净买入额(亿元)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '恒生指数'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // 如果有预估值，添加说明
+            // 如果有预估值，添加说明
+            if (isEstimated) {
+                const chartContainer = document.getElementById('monthlyChart').parentNode;
+                const estimatedNote = document.createElement('div');
+                estimatedNote.className = 'estimated-value';
+                estimatedNote.innerHTML = `
+                    <strong>注意：</strong> ${latestMonth}月当前实际值为${actualValue.toFixed(2)}亿元（${monthDays[latestMonth]}个交易日），
+                    预估月底值为${estimatedValue.toFixed(2)}亿元，
+                    基于当月平均每日净买入额(${(actualValue/monthDays[latestMonth]).toFixed(2)}亿元/天)
+                    乘以估计的当月总交易日数(${estimatedTradingDays}天)计算得出。实际值可能会有所不同。
+                `;
+                chartContainer.appendChild(estimatedNote);
+                
+                // 为第三张图表容器添加额外的顶部边距，确保不重叠
+                const dailyFlowChartContainer = document.getElementById('dailyFlowChart').parentNode;
+                dailyFlowChartContainer.style.marginTop = '100px';
+            }
+        }
+        
+        function renderLeadingStocks(topStocks) {
+            // 隐藏加载动画，显示表格
+            document.getElementById('leadingStocksLoading').style.display = 'none';
+            document.getElementById('leadingStocksTable').style.display = 'block';
+            
+            // 填充表格数据
+            const tableBody = document.getElementById('leadingStocksBody');
+            tableBody.innerHTML = '';
+            
+            topStocks.forEach((stock, index) => {
+                const row = document.createElement('tr');
+                // 添加stock-row类和点击事件
+                row.className = 'stock-row';
+                row.onclick = function() {
+                    // 跳转到港股个股信息页面并传递股票代码
+                    window.location.href = `/hkstock_info?code=${stock.code.replace(/\D/g, '')}`;
+                };
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${stock.name}</td>
+                    <td>${stock.code}</td>
+                    <td>${stock.count}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+    </script>
+</body>
+</html>

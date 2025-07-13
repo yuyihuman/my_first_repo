@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票信息分析平台</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">股票信息分析平台</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/stock_info">个股信息</a>
+                    </li>
+                    <!-- 将港股个股信息标签移到这里，紧挨着个股信息 -->
+                    <li class="nav-item">
+                        <a class="nav-link" href="/hkstock_info">港股个股信息</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/lhb">龙虎榜</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/hkstock">港股通南向</a>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link" href="/macro_china">中国宏观数据</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/sh_house_price">上海房价</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/southbound_holdings">南向持股</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/institutional_holdings">机构持股</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5">
+        <div class="jumbotron">
+            <h1 class="display-4">欢迎使用股票信息分析平台</h1>
+            <p class="lead">本平台提供个股信息查询和龙虎榜数据分析功能。</p>
+            <hr class="my-4">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">个股信息</h5>
+                            <p class="card-text">查询个股的基本信息、历史行情和财务数据。</p>
+                            <a href="/stock_info" class="btn btn-primary">进入</a>
+                        </div>
+                    </div>
+                </div>
+                <!-- 将港股个股信息卡片移到这里，紧挨着个股信息 -->
+                <div class="col-md-3">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">港股个股信息</h5>
+                            <p class="card-text">查询港股的基本信息和财务数据。</p>
+                            <a href="/hkstock_info" class="btn btn-primary">进入</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">龙虎榜</h5>
+                            <p class="card-text">查看最近一年龙虎榜出现次数前三十的股票。</p>
+                            <a href="/lhb" class="btn btn-primary">进入</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">港股通南向</h5>
+                            <p class="card-text">查看港股通南向资金流向和热门股票数据。</p>
+                            <a href="/hkstock" class="btn btn-primary">进入</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 添加中国宏观数据卡片 -->
+                <div class="col-md-3">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">中国宏观数据</h5>
+                            <p class="card-text">查看中国宏观经济数据分析图表。</p>
+                            <a href="/macro_china" class="btn btn-primary">进入</a>
+                        </div>
+                    </div>
+                </div>
+                <!-- 添加上海房价卡片 -->
+                <div class="col-md-3">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">上海房价</h5>
+                            <p class="card-text">查看上海房价数据分析图表。</p>
+                            <a href="/sh_house_price" class="btn btn-primary">进入</a>
+                        </div>
+                    </div>
+                </div>
+                <!-- 添加南向持股卡片 -->
+                <div class="col-md-3">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">南向持股</h5>
+                            <p class="card-text">查看南向持股数据分析图表。</p>
+                            <a href="/southbound_holdings" class="btn btn-primary">进入</a>
+                        </div>
+                    </div>
+                </div>
+                <!-- 添加机构持股卡片 -->
+                <div class="col-md-3">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">📊 机构持股</h5>
+                            <p class="card-text">查看机构持股数据分析，包括基金、保险、QFII等机构持股情况。</p>
+                            <a href="/institutional_holdings" class="btn btn-primary">进入</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer mt-auto py-3 bg-light">
+        <div class="container text-center">
+            <span class="text-muted">© 2024 股票信息分析平台</span>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

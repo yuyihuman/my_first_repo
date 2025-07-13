@@ -1,0 +1,46 @@
+/* 通用样式 */
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.footer {
+    margin-top: auto;
+}
+
+.construction-container {
+    padding: 50px;
+    border: 2px dashed #ccc;
+    border-radius: 10px;
+    margin: 50px auto;
+    max-width: 600px;
+}
+
+.jumbotron {
+    padding: 2rem;
+    background-color: #f8f9fa;
+    border-radius: 0.3rem;
+}
+
+.card {
+    transition: transform 0.3s;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+/* 导航栏样式 */
+.navbar-brand {
+    font-weight: bold;
+}
+
+.nav-link {
+    font-weight: 500;
+}
+
+.nav-link.active {
+    font-weight: 700;
+}

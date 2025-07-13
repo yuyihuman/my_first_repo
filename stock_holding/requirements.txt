@@ -1,0 +1,13 @@
+# Institutional Holdings Data Analyzer Dependencies
+# Install command: pip install -r requirements.txt
+
+# Core data processing
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Financial data interface
+akshare>=1.9.0
+
+# Additional tools
+openpyxl>=3.0.0  # Excel file support
+requests>=2.28.0  # HTTP requests

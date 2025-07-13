@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中国宏观经济数据 - 股票信息分析平台</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/common.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <!-- 添加Chart.js库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            margin: 20px 0;
+            height: 400px;
+        }
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+        .log-container {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px dashed #dee2e6;
+            padding-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">股票信息分析平台</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/stock_info">个股信息</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/hkstock_info">港股个股信息</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/lhb">龙虎榜</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/hkstock">港股通南向</a>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/macro_china">中国宏观数据</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/sh_house_price">上海房价</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/southbound_holdings">南向持股</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/institutional_holdings">机构持股</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5">
+        <div class="jumbotron">
+            <h1 class="display-4 text-center">中国宏观经济数据</h1>
+            <p class="lead text-center">货币供应量数据分析</p>
+            <hr class="my-4">
+            
+            <div id="updateInfo" class="alert alert-info text-center">
+                正在加载数据，请稍候...
+            </div>
+            
+            <!-- 货币供应量同比图表 -->
+            <div class="chart-container">
+                <div id="moneySupplyChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="moneySupplyChart"></canvas>
+            </div>
+            
+            <!-- 指数对比图表 -->
+            <div class="chart-container">
+                <div id="indexComparisonChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="indexComparisonChart"></canvas>
+            </div>
+            
+            <!-- 新增：环比增长率图表 -->
+            <div class="chart-container">
+                <div id="momRateChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="momRateChart"></canvas>
+            </div>
+            
+            <!-- 日志显示区域 -->
+            <!-- 日志显示区域 -->
+            <!-- <div class="mt-5">
+                <h3>API响应日志</h3>
+                <div class="log-container" id="apiLogContainer">
+                    <div class="log-entry">等待API响应...</div>
+                </div>
+            </div> -->
+        </div>
+    </div>
+
+    <footer class="footer mt-auto py-3 bg-light">
+        <div class="container text-center">
+            <span class="text-muted">© 2024 股票信息分析平台</span>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 全局变量
+        let moneySupplyChart = null;
+        let indexComparisonChart = null;
+        let momRateChart = null;
+        
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            // 获取货币供应量数据
+            fetchMoneySupplyData();
+        });
+        
+        // 获取货币供应量数据
+        function fetchMoneySupplyData(showLoading = false) {
+            // 显示图表加载状态
+            document.getElementById('moneySupplyChartLoading').style.display = 'flex';
+            document.getElementById('indexComparisonChartLoading').style.display = 'flex';
+            document.getElementById('momRateChartLoading').style.display = 'flex';
+            
+            // 发起API请求
+            fetch('/api/macro/money_supply')
+                .then(response => response.json())
+                .then(data => {
+                    // 记录API响应到日志区域
+                    logApiResponse(data);
+                    
+                    if (data.status === 'success') {
+                        // 更新最后更新时间
+                        document.getElementById('updateInfo').innerHTML = 
+                            `最后更新时间: ${data.last_update}`;
+                        
+                        // 处理数据并显示图表
+                        processAndDisplayData(data.data);
+                    } else {
+                        // 显示错误信息
+                        document.getElementById('updateInfo').innerHTML = 
+                            `<div class="alert alert-danger">获取数据失败: ${data.message}</div>`;
+                        
+                        // 隐藏加载状态
+                        document.getElementById('moneySupplyChartLoading').style.display = 'none';
+                        document.getElementById('indexComparisonChartLoading').style.display = 'none';
+                        document.getElementById('momRateChartLoading').style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('获取数据出错:', error);
+                    document.getElementById('updateInfo').innerHTML = 
+                        `<div class="alert alert-danger">获取数据出错: ${error.message}</div>`;
+                    
+                    // 记录错误到日志区域
+                    logApiResponse({status: 'error', message: error.message});
+                    
+                    // 隐藏加载状态
+                    document.getElementById('moneySupplyChartLoading').style.display = 'none';
+                    document.getElementById('indexComparisonChartLoading').style.display = 'none';
+                    document.getElementById('momRateChartLoading').style.display = 'none';
+                });
+        }
+        
+        // 处理数据并显示图表
+        function processAndDisplayData(data) {
+            // 反转数据以便按时间顺序显示（从早到晚）
+            const sortedData = [...data].reverse();
+            
+            // 提取数据并处理null值
+            const months = sortedData.map(item => item.月份);
+            const m2Growth = sortedData.map(item => {
+                // 修正字段名：使用正确的字段名
+                return item.货币和准货币_广义货币M2_同比 !== null ? 
+                    item.货币和准货币_广义货币M2_同比 : null;
+            });
+            // 添加M1增速数据
+            const m1Growth = sortedData.map(item => {
+                // 修正字段名：使用正确的字段名
+                return item.货币_狭义货币M1_同比 !== null ? 
+                    item.货币_狭义货币M1_同比 : null;
+            });
+            const secondHandHousingData = sortedData.map(item => {
+                // 修正字段名：使用正确的字段名
+                return item.上海二手住宅价格指数_同比 !== null ? 
+                    item.上海二手住宅价格指数_同比 : null;
+            });
+            
+            // 创建图表
+            createMoneySupplyChart(months, m2Growth, m1Growth, secondHandHousingData);
+            
+            // 创建指数对比图表
+            createIndexComparisonChart(sortedData);
+            
+            // 创建环比增长率图表
+            createMoMRateChart(sortedData);
+            
+            // 隐藏加载状态
+            document.getElementById('moneySupplyChartLoading').style.display = 'none';
+            document.getElementById('indexComparisonChartLoading').style.display = 'none';
+            document.getElementById('momRateChartLoading').style.display = 'none';
+        }
+        
+        // 创建货币供应量图表
+        function createMoneySupplyChart(months, m2Growth, m1Growth, secondHandHousingData) {
+            const ctx = document.getElementById('moneySupplyChart').getContext('2d');
+            
+            // 销毁旧图表（如果存在）
+            if (moneySupplyChart) {
+                moneySupplyChart.destroy();
+            }
+            
+            // 创建新图表
+            moneySupplyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: months,
+                    datasets: [
+                        {
+                            label: 'M2同比增长(%)',
+                            data: m2Growth,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            tension: 0.1,
+                            // 设置为true，允许跳过null值而不断线
+                            spanGaps: true
+                        },
+                        {
+                            label: 'M1同比增长(%)',
+                            data: m1Growth,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: '上海二手住宅价格指数同比(%)',
+                            data: secondHandHousingData,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            tension: 0.1,
+                            // 设置为true，允许跳过null值而不断线
+                            spanGaps: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'M2、M1与上海二手住宅价格指数同比变化(%)'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: '同比变化率(%)'
+                            },
+                            // 添加0轴线配置
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.8)'; // 0轴线加粗，颜色更深
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)'; // 其他网格线保持原样
+                                },
+                                lineWidth: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 2; // 0轴线加粗
+                                    }
+                                    return 1; // 其他网格线保持原样
+                                }
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 创建指数对比图表
+        function createIndexComparisonChart(data) {
+            // 筛选2011年1月之后的数据
+            const filteredData = data.filter(item => {
+                if (item['月份'].includes('.')) {
+                    const [year, month] = item['月份'].split('.');
+                    return parseInt(year) >= 2011;
+                } else if (item['月份'].includes('-')) {
+                    const [year, month] = item['月份'].split('-');
+                    return parseInt(year) >= 2011;
+                }
+                return false;
+            });
+            
+            const labels = filteredData.map(item => item['月份']);
+            const m2IndexData = filteredData.map(item => item['M2指数(2011.1=100)']);
+            const m1IndexData = filteredData.map(item => item['M1指数(2011.1=100)']);
+            const houseIndexData = filteredData.map(item => item['上海二手住宅价格指数(2011.1=100)']);
+            
+            const ctx = document.getElementById('indexComparisonChart').getContext('2d');
+            
+            // 销毁旧图表（如果存在）
+            if (indexComparisonChart) {
+                indexComparisonChart.destroy();
+            }
+            
+            // 创建新图表
+            indexComparisonChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'M2指数(2011.1=100)',
+                            data: m2IndexData,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: 'M1指数(2011.1=100)',
+                            data: m1IndexData,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: '上海二手住宅价格指数(2011.1=100)',
+                            data: houseIndexData,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'M2、M1和上海二手房价指数对比(2011.1=100)',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        legend: {
+                            position: 'top',
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: '指数值(2011.1=100)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 创建环比增长率图表
+        function createMoMRateChart(data) {
+            // 筛选2011年1月之后的数据
+            const filteredData = data.filter(item => {
+                if (item['月份'].includes('.')) {
+                    const [year, month] = item['月份'].split('.');
+                    return parseInt(year) >= 2011;
+                } else if (item['月份'].includes('-')) {
+                    const [year, month] = item['月份'].split('-');
+                    return parseInt(year) >= 2011;
+                }
+                return false;
+            });
+            
+            const labels = filteredData.map(item => item['月份']);
+            const m2MoMData = filteredData.map(item => item['M2总量环比(%)']);
+            const m1MoMData = filteredData.map(item => item['M1总量环比(%)']);
+            const houseMoMData = filteredData.map(item => item['上海二手住宅价格指数_环比']);
+            
+            const ctx = document.getElementById('momRateChart').getContext('2d');
+            
+            // 销毁旧图表（如果存在）
+            if (momRateChart) {
+                momRateChart.destroy();
+            }
+            
+            // 创建新图表
+            momRateChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'M2环比增长率(%)',
+                            data: m2MoMData,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 1,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: 'M1环比增长率(%)',
+                            data: m1MoMData,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 1,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: '上海二手住宅价格指数环比(%)',
+                            data: houseMoMData,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 1,
+                            tension: 0.1,
+                            spanGaps: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'M2、M1与上海二手住宅价格指数环比变化(%)',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '环比增长率(%)'
+                            },
+                            // 添加0轴线配置
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.8)'; // 0轴线加粗，颜色更深
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)'; // 其他网格线保持原样
+                                },
+                                lineWidth: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 2; // 0轴线加粗
+                                    }
+                                    return 1; // 其他网格线保持原样
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 记录API响应到日志
+        function logApiResponse(data) {
+            // 由于日志区域已被注释掉，此函数可以保留但不执行任何操作
+            return;
+            
+            // 以下代码不会执行
+            const logContainer = document.getElementById('apiLogContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            
+            const timestamp = new Date().toLocaleTimeString();
+            let logContent = `[${timestamp}] `;
+            
+            if (data.status === 'error') {
+                logContent += `错误: ${data.message}`;
+                logEntry.style.color = 'red';
+            } else {
+                logContent += `成功获取数据, 最后更新: ${data.last_update}`;
+                logContent += `, 数据条数: ${data.data ? data.data.length : 0}`;
+                logEntry.style.color = 'green';
+            }
+            
+            logEntry.textContent = logContent;
+            
+            // 添加到日志容器的顶部
+            logContainer.insertBefore(logEntry, logContainer.firstChild);
+            
+            // 限制日志条目数量
+            const maxLogEntries = 50;
+            while (logContainer.children.length > maxLogEntries) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+    </script>
+</body>
+</html>

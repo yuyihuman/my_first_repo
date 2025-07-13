@@ -1,0 +1,68 @@
+/* 港股信息页面样式 */
+
+/* 完整财务数据表格样式 */
+.full-financial-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.full-financial-table th,
+.full-financial-table td {
+    border: 1px solid #dee2e6;
+    padding: 8px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.full-financial-table th {
+    background-color: #f8f9fa;
+    font-weight: bold;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+/* 固定左侧报告期列 */
+.sticky-left {
+    position: sticky;
+    left: 0;
+    background-color: #f8f9fa;
+    z-index: 11;
+    font-weight: bold;
+}
+
+.full-financial-table tbody .sticky-left {
+    background-color: #ffffff;
+}
+
+/* 表格容器样式 */
+.table-container {
+    max-height: 600px;
+    overflow: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+}
+
+/* 按钮组样式 */
+.btn-group .btn {
+    margin-right: 5px;
+}
+
+.btn-group .btn.active {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+    color: white;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .full-financial-table {
+        font-size: 10px;
+    }
+    
+    .full-financial-table th,
+    .full-financial-table td {
+        padding: 4px;
+    }
+}

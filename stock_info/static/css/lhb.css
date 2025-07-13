@@ -1,0 +1,33 @@
+/* 龙虎榜页面专用样式 */
+.chart-container {
+    position: relative;
+    height: 400px;
+    width: 100%;
+    margin-bottom: 2rem;
+}
+
+.loading-container {
+    text-align: center;
+    padding: 2rem;
+}
+
+.lhb-data-card {
+    margin-bottom: 1.5rem;
+}
+
+.lhb-table {
+    font-size: 0.9rem;
+}
+
+.lhb-table th {
+    position: sticky;
+    top: 0;
+    background-color: #f8f9fa;
+}
+
+.lhb-filter-container {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background-color: #f8f9fa;
+    border-radius: 0.3rem;
+}
