@@ -85,9 +85,10 @@ class SellStrategy:
             raise
     
     def execute_strategy_with_data(self, strategy_name: str, stock_code: str, buy_info: Dict[str, Any],
-                                  start_date: str, end_date: str, batch_data: dict, data_manager=None, **kwargs) -> List[Dict[str, Any]]:
+                                  start_date: str, end_date: str, batch_data: dict = None, data_manager=None, 
+                                  multi_period_data: dict = None, **kwargs) -> List[Dict[str, Any]]:
         """
-        使用预先获取的批量数据执行卖出策略
+        使用批量数据执行卖出策略（支持多周期数据）
         
         Args:
             strategy_name (str): 策略名称
@@ -95,29 +96,37 @@ class SellStrategy:
             buy_info (Dict[str, Any]): 买入信息，包含买入日期、价格等
             start_date (str): 开始日期，格式为YYYYMMDD
             end_date (str): 结束日期，格式为YYYYMMDD
-            batch_data (dict): 批量数据
+            batch_data (dict): 批量数据（向后兼容，优先使用multi_period_data）
             data_manager: 数据管理器实例
+            multi_period_data (dict): 多周期数据
             **kwargs: 策略参数
         
         Returns:
             List[Dict[str, Any]]: 卖出信号列表
         """
-        self.logger.info(f"使用批量数据执行卖出策略: {strategy_name}, 股票: {stock_code}")
+        self.logger.info(f"使用数据执行卖出策略: {strategy_name}, 股票: {stock_code}")
         
         try:
             if strategy_name in self.strategies:
-                # 将批量数据和数据管理器传递给策略函数
-                kwargs['batch_data'] = batch_data
+                # 传递数据给策略函数
+                if multi_period_data:
+                    kwargs['multi_period_data'] = multi_period_data
+                    kwargs['batch_data'] = batch_data  # 保持向后兼容
+                    self.logger.debug(f"使用多周期数据，可用周期: {list(multi_period_data.get('data', {}).keys())}")
+                else:
+                    kwargs['batch_data'] = batch_data
+                    self.logger.debug("使用单周期批量数据")
+                
                 kwargs['data_manager'] = data_manager
                 
                 signals = self.strategies[strategy_name](stock_code, buy_info, start_date, end_date, **kwargs)
-                self.logger.info(f"批量数据卖出策略执行完成，生成 {len(signals)} 个卖出信号")
+                self.logger.info(f"卖出策略执行完成，生成 {len(signals)} 个卖出信号")
                 return signals
             else:
                 self.logger.error(f"未找到卖出策略: {strategy_name}")
                 raise ValueError(f"未找到卖出策略: {strategy_name}")
         except Exception as e:
-            self.logger.error(f"执行批量数据卖出策略时发生错误: {str(e)}", exc_info=True)
+            self.logger.error(f"执行卖出策略时发生错误: {str(e)}", exc_info=True)
             raise
     
     def _default_strategy(self, stock_code: str, buy_info: Dict[str, Any], 

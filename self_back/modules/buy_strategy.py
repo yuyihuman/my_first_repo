@@ -82,38 +82,47 @@ class BuyStrategy:
             raise
     
     def execute_strategy_with_data(self, strategy_name: str, stock_code: str, start_date: str, end_date: str, 
-                                  batch_data: dict, data_manager=None, **kwargs) -> List[Dict[str, Any]]:
+                                  batch_data: dict = None, data_manager=None, multi_period_data: dict = None, 
+                                  **kwargs) -> List[Dict[str, Any]]:
         """
-        使用预先获取的批量数据执行买入策略
+        使用批量数据执行买入策略（支持多周期数据）
         
         Args:
             strategy_name (str): 策略名称
             stock_code (str): 股票代码
             start_date (str): 开始日期，格式为YYYYMMDD
             end_date (str): 结束日期，格式为YYYYMMDD
-            batch_data (dict): 批量数据
+            batch_data (dict): 批量数据（向后兼容，优先使用multi_period_data）
             data_manager: 数据管理器实例
+            multi_period_data (dict): 多周期数据
             **kwargs: 策略参数
         
         Returns:
             List[Dict[str, Any]]: 买入信号列表
         """
-        self.logger.info(f"使用批量数据执行买入策略: {strategy_name}, 股票: {stock_code}")
+        self.logger.info(f"使用数据执行买入策略: {strategy_name}, 股票: {stock_code}")
         
         try:
             if strategy_name in self.strategies:
-                # 将批量数据和数据管理器传递给策略函数
-                kwargs['batch_data'] = batch_data
+                # 传递数据给策略函数
+                if multi_period_data:
+                    kwargs['multi_period_data'] = multi_period_data
+                    kwargs['batch_data'] = batch_data  # 保持向后兼容
+                    self.logger.debug(f"使用多周期数据，可用周期: {list(multi_period_data.get('data', {}).keys())}")
+                else:
+                    kwargs['batch_data'] = batch_data
+                    self.logger.debug("使用单周期批量数据")
+                
                 kwargs['data_manager'] = data_manager
                 
                 signals = self.strategies[strategy_name](stock_code, start_date, end_date, **kwargs)
-                self.logger.info(f"批量数据买入策略执行完成，生成 {len(signals)} 个买入信号")
+                self.logger.info(f"买入策略执行完成，生成 {len(signals)} 个买入信号")
                 return signals
             else:
                 self.logger.error(f"未找到买入策略: {strategy_name}")
                 raise ValueError(f"未找到买入策略: {strategy_name}")
         except Exception as e:
-            self.logger.error(f"执行批量数据买入策略时发生错误: {str(e)}", exc_info=True)
+            self.logger.error(f"执行买入策略时发生错误: {str(e)}", exc_info=True)
             raise
     
     def _default_strategy(self, stock_code: str, start_date: str, end_date: str, **kwargs) -> List[Dict[str, Any]]:
@@ -227,29 +236,54 @@ class BuyStrategy:
         from datetime import datetime, timedelta
         import pandas as pd
         
-        # 检查是否有批量数据
+        # 检查数据来源
+        multi_period_data = kwargs.get('multi_period_data')
         batch_data = kwargs.get('batch_data')
         data_manager = kwargs.get('data_manager')
         
-        if batch_data and data_manager:
+        # 优先使用多周期数据，回退到批量数据
+        if multi_period_data and data_manager:
+            # 使用多周期数据（默认使用1d数据进行分析）
+            self.logger.info(f"使用多周期数据进行策略分析: {stock_code}")
+            available_periods = list(multi_period_data.get('data', {}).keys())
+            self.logger.debug(f"可用周期: {available_periods}")
+            
+            # 优先使用1d数据，如果没有则使用第一个可用周期
+            period_to_use = '1d' if '1d' in available_periods else (available_periods[0] if available_periods else None)
+            
+            if period_to_use:
+                self.logger.debug(f"使用周期: {period_to_use}")
+                df = data_manager.get_stock_dataframe_from_multi_period(
+                    stock_code=stock_code,
+                    multi_period_data=multi_period_data,
+                    period=period_to_use,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+            else:
+                self.logger.warning(f"多周期数据中没有可用的数据周期")
+                df = None
+                
+        elif batch_data and data_manager:
             # 使用批量数据
             self.logger.info(f"使用批量数据进行策略分析: {stock_code}")
             self.logger.debug(f"批量数据键: {list(batch_data.keys()) if batch_data else 'None'}")
             
             df = data_manager.get_stock_dataframe(stock_code, batch_data, start_date, end_date)
-            
-            if df is None:
-                self.logger.warning(f"无法从批量数据中获取股票 {stock_code} 的数据 - DataFrame为None")
-                return signals
-            elif df.empty:
-                self.logger.warning(f"无法从批量数据中获取股票 {stock_code} 的数据 - DataFrame为空")
-                return signals
-            else:
-                self.logger.debug(f"成功从批量数据获取 {len(df)} 条数据，时间范围: {df.index[0]} 到 {df.index[-1]}")
-                self.logger.debug(f"数据列: {df.columns.tolist()}")
-                self.logger.debug(f"前5行数据:\n{df.head()}")
-                
         else:
+            df = None
+            
+        if df is None:
+            self.logger.warning(f"无法获取股票 {stock_code} 的数据 - DataFrame为None")
+        elif df.empty:
+            self.logger.warning(f"无法获取股票 {stock_code} 的数据 - DataFrame为空")
+        else:
+            self.logger.debug(f"成功获取 {len(df)} 条数据，时间范围: {df.index[0]} 到 {df.index[-1]}")
+            self.logger.debug(f"数据列: {df.columns.tolist()}")
+            self.logger.debug(f"前5行数据:\n{df.head()}")
+            
+        # 如果没有获取到数据，尝试传统方式
+        if df is None or df.empty:
             # 回退到原有的数据获取方式
             self.logger.info(f"使用传统方式获取数据: {stock_code}")
             try:

@@ -43,7 +43,8 @@ class DataManager:
         
         self.logger.info("数据管理器初始化完成")
     
-    def batch_download_data(self, stock_codes: List[str], start_date: str, end_date: str = None) -> Dict[str, bool]:
+    def batch_download_data(self, stock_codes: List[str], start_date: str, end_date: str = None, 
+                           period: str = '1d') -> Dict[str, bool]:
         """
         批量下载股票历史数据
         
@@ -51,11 +52,12 @@ class DataManager:
             stock_codes: 股票代码列表
             start_date: 开始日期，格式为YYYYMMDD
             end_date: 结束日期，格式为YYYYMMDD，默认为None（到当前日期）
+            period: 数据周期，支持'1d'（日线）和'1m'（分钟线），默认为'1d'
         
         Returns:
             Dict[str, bool]: 每只股票的下载结果
         """
-        self.logger.info(f"开始批量下载股票数据，股票数量: {len(stock_codes)}")
+        self.logger.info(f"开始批量下载股票数据，股票数量: {len(stock_codes)}，周期: {period}")
         self.logger.info(f"时间范围: {start_date} - {end_date or '当前'}")
         
         download_results = {}
@@ -64,17 +66,17 @@ class DataManager:
             # 批量下载历史数据
             for stock_code in stock_codes:
                 try:
-                    self.logger.debug(f"下载股票数据: {stock_code}")
+                    self.logger.debug(f"下载股票数据: {stock_code}, 周期: {period}")
                     xtdata.download_history_data(
                         stock_code, 
-                        period='1d', 
+                        period=period, 
                         start_time=start_date,
                         end_time=end_date
                     )
                     download_results[stock_code] = True
-                    self.logger.debug(f"股票 {stock_code} 数据下载完成")
+                    self.logger.debug(f"股票 {stock_code} {period}数据下载完成")
                 except Exception as e:
-                    self.logger.error(f"下载股票 {stock_code} 数据失败: {str(e)}")
+                    self.logger.error(f"下载股票 {stock_code} {period}数据失败: {str(e)}")
                     download_results[stock_code] = False
             
             success_count = sum(download_results.values())
@@ -87,7 +89,7 @@ class DataManager:
             return {code: False for code in stock_codes}
     
     def batch_get_data(self, stock_codes: List[str], start_date: str, end_date: str = None, 
-                      fields: List[str] = None) -> Dict[str, Any]:
+                      fields: List[str] = None, period: str = '1d') -> Dict[str, Any]:
         """
         批量获取股票数据
         
@@ -96,6 +98,7 @@ class DataManager:
             start_date: 开始日期，格式为YYYYMMDD
             end_date: 结束日期，格式为YYYYMMDD，默认为None（到当前日期）
             fields: 数据字段列表，默认为['open', 'high', 'low', 'close', 'volume']
+            period: 数据周期，支持'1d'（日线）和'1m'（分钟线），默认为'1d'
         
         Returns:
             Dict[str, Any]: 包含所有股票数据的字典
@@ -103,7 +106,7 @@ class DataManager:
         if fields is None:
             fields = ['open', 'high', 'low', 'close', 'volume']
         
-        self.logger.info(f"开始批量获取股票数据，股票数量: {len(stock_codes)}")
+        self.logger.info(f"开始批量获取股票数据，股票数量: {len(stock_codes)}，周期: {period}")
         self.logger.info(f"时间范围: {start_date} - {end_date or '当前'}")
         self.logger.debug(f"数据字段: {fields}")
         
@@ -112,7 +115,7 @@ class DataManager:
             data = xtdata.get_market_data(
                 field_list=fields,
                 stock_list=stock_codes,
-                period='1d',
+                period=period,
                 start_time=start_date,
                 end_time=end_date,
                 dividend_type='none',
@@ -120,29 +123,95 @@ class DataManager:
             )
             
             if data and all(field in data for field in fields):
-                self.logger.info(f"成功获取批量数据，字段数: {len(fields)}")
+                self.logger.info(f"成功获取批量{period}数据，字段数: {len(fields)}")
                 
-                # 缓存数据
-                cache_key = f"{'-'.join(stock_codes)}_{start_date}_{end_date}_{'-'.join(fields)}"
-                self.data_cache[cache_key] = data
+                # 缓存数据（包含周期信息）
+                cache_key = f"{'-'.join(stock_codes)}_{start_date}_{end_date}_{'-'.join(fields)}_{period}"
+                self.data_cache[cache_key] = {
+                    'data': data,
+                    'period': period,
+                    'fields': fields,
+                    'stock_codes': stock_codes,
+                    'start_date': start_date,
+                    'end_date': end_date
+                }
                 
                 return {
                     'success': True,
                     'data': data,
+                    'period': period,
                     'cache_key': cache_key
                 }
             else:
-                error_msg = "xtdata未返回有效数据"
+                error_msg = f"xtdata未返回有效{period}数据"
                 self.logger.error(error_msg)
                 return {'success': False, 'error': error_msg}
                 
         except Exception as e:
-            error_msg = f"批量获取数据失败: {str(e)}"
+            error_msg = f"批量获取{period}数据失败: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return {'success': False, 'error': error_msg}
+    
+    def batch_get_multi_period_data(self, stock_codes: List[str], start_date: str, end_date: str = None,
+                                   periods: List[str] = None, fields: List[str] = None) -> Dict[str, Any]:
+        """
+        批量获取多周期股票数据
+        
+        Args:
+            stock_codes: 股票代码列表
+            start_date: 开始日期，格式为YYYYMMDD
+            end_date: 结束日期，格式为YYYYMMDD，默认为None（到当前日期）
+            periods: 数据周期列表，默认为['1d', '1m']
+            fields: 数据字段列表，默认为['open', 'high', 'low', 'close', 'volume']
+        
+        Returns:
+            Dict[str, Any]: 包含多周期数据的字典
+        """
+        if periods is None:
+            periods = ['1d', '1m']
+        if fields is None:
+            fields = ['open', 'high', 'low', 'close', 'volume']
+        
+        self.logger.info(f"开始批量获取多周期股票数据，股票数量: {len(stock_codes)}，周期: {periods}")
+        
+        multi_period_data = {}
+        success_count = 0
+        
+        try:
+            for period in periods:
+                self.logger.info(f"获取{period}周期数据...")
+                result = self.batch_get_data(
+                    stock_codes=stock_codes,
+                    start_date=start_date,
+                    end_date=end_date,
+                    fields=fields,
+                    period=period
+                )
+                
+                if result['success']:
+                    multi_period_data[period] = result
+                    success_count += 1
+                    self.logger.info(f"{period}周期数据获取成功")
+                else:
+                    self.logger.error(f"{period}周期数据获取失败: {result.get('error', '未知错误')}")
+                    multi_period_data[period] = result
+            
+            return {
+                'success': success_count > 0,
+                'data': multi_period_data,
+                'success_periods': [p for p in periods if multi_period_data[p]['success']],
+                'failed_periods': [p for p in periods if not multi_period_data[p]['success']],
+                'total_periods': len(periods),
+                'success_count': success_count
+            }
+            
+        except Exception as e:
+            error_msg = f"批量获取多周期数据失败: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             return {'success': False, 'error': error_msg}
     
     def get_stock_dataframe(self, stock_code: str, data: Dict[str, Any] = None, 
-                           start_date: str = None, end_date: str = None) -> Optional[pd.DataFrame]:
+                           start_date: str = None, end_date: str = None, period: str = '1d') -> Optional[pd.DataFrame]:
         """
         从批量数据中提取单只股票的DataFrame
         
@@ -151,11 +220,12 @@ class DataManager:
             data: 批量数据字典，如果为None则尝试从缓存获取
             start_date: 开始日期，用于过滤数据
             end_date: 结束日期，用于过滤数据
+            period: 数据周期，默认为'1d'
         
         Returns:
             pd.DataFrame: 股票数据DataFrame，包含OHLCV数据
         """
-        self.logger.debug(f"提取股票DataFrame: {stock_code}, 时间范围: {start_date} - {end_date}")
+        self.logger.debug(f"提取股票DataFrame: {stock_code}, 时间范围: {start_date} - {end_date}, 周期: {period}")
         
         try:
             # 如果没有提供数据，尝试从缓存获取
@@ -235,6 +305,46 @@ class DataManager:
             
         except Exception as e:
             self.logger.error(f"提取股票DataFrame失败: {str(e)}", exc_info=True)
+            return None
+    
+    def get_stock_dataframe_from_multi_period(self, stock_code: str, multi_period_data: Dict[str, Any], 
+                                             period: str = '1d', start_date: str = None, 
+                                             end_date: str = None) -> Optional[pd.DataFrame]:
+        """
+        从多周期数据中提取特定周期的单只股票DataFrame
+        
+        Args:
+            stock_code: 股票代码
+            multi_period_data: 多周期数据字典
+            period: 要提取的数据周期，默认为'1d'
+            start_date: 开始日期，用于过滤数据
+            end_date: 结束日期，用于过滤数据
+        
+        Returns:
+            pd.DataFrame: 股票数据DataFrame，包含OHLCV数据
+        """
+        self.logger.debug(f"从多周期数据提取股票DataFrame: {stock_code}, 周期: {period}")
+        
+        try:
+            if period not in multi_period_data['data']:
+                self.logger.warning(f"多周期数据中不包含{period}周期数据")
+                return None
+            
+            period_data = multi_period_data['data'][period]
+            if not period_data['success']:
+                self.logger.warning(f"{period}周期数据获取失败: {period_data.get('error', '未知错误')}")
+                return None
+            
+            return self.get_stock_dataframe(
+                stock_code=stock_code,
+                data=period_data['data'],
+                start_date=start_date,
+                end_date=end_date,
+                period=period
+            )
+            
+        except Exception as e:
+            self.logger.error(f"从多周期数据提取DataFrame失败: {str(e)}", exc_info=True)
             return None
     
     def get_stock_price_series(self, stock_code: str, data: Dict[str, Any], 

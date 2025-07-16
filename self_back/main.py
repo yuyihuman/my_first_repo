@@ -202,28 +202,45 @@ class BacktestEngine:
             extended_start_dt = start_dt - timedelta(days=365)  # 提前1年获取数据
             extended_start_date = extended_start_dt.strftime('%Y%m%d')
             
-            # 批量下载数据
-            download_results = self.data_manager.batch_download_data(
+            # 批量下载多周期数据
+            periods = ['1d', '1m']  # 支持日线和分钟线数据
+            download_results = {}
+            
+            for period in periods:
+                self.logger.info(f"下载{period}周期数据...")
+                period_download_results = self.data_manager.batch_download_data(
+                    stock_codes=stocks,
+                    start_date=extended_start_date,
+                    end_date=end_date,
+                    period=period
+                )
+                download_results[period] = period_download_results
+            
+            # 批量获取多周期数据
+            multi_period_data_result = self.data_manager.batch_get_multi_period_data(
                 stock_codes=stocks,
                 start_date=extended_start_date,
-                end_date=end_date
+                end_date=end_date,
+                periods=periods
             )
             
-            # 批量获取数据
-            batch_data_result = self.data_manager.batch_get_data(
-                stock_codes=stocks,
-                start_date=extended_start_date,
-                end_date=end_date
-            )
-            
-            if not batch_data_result['success']:
-                error_msg = f"批量获取数据失败: {batch_data_result['error']}"
+            if not multi_period_data_result['success']:
+                error_msg = f"批量获取多周期数据失败: {multi_period_data_result.get('error', '未知错误')}"
                 self.logger.error(error_msg)
                 return {'success': False, 'error': error_msg}
             
-            batch_data = batch_data_result['data']
-            self.batch_data = batch_data  # 保存为实例属性
-            self.logger.info(f"批量数据获取完成，缓存键: {batch_data_result['cache_key']}")
+            # 保存多周期数据
+            self.multi_period_data = multi_period_data_result
+            # 为了向后兼容，保留原有的batch_data（使用1d数据）
+            if '1d' in multi_period_data_result['data'] and multi_period_data_result['data']['1d']['success']:
+                self.batch_data = multi_period_data_result['data']['1d']['data']
+            else:
+                self.logger.warning("1d数据获取失败，使用空数据")
+                self.batch_data = {}
+            
+            self.logger.info(f"多周期数据获取完成，成功周期: {multi_period_data_result['success_periods']}")
+            if multi_period_data_result['failed_periods']:
+                self.logger.warning(f"失败周期: {multi_period_data_result['failed_periods']}")
             
             # 步骤2：执行策略回测
             self.logger.info("步骤2：执行策略回测")
@@ -263,8 +280,9 @@ class BacktestEngine:
                                 stock_code=stock,
                                 start_date=extended_start_date,  # 使用扩展的开始日期
                                 end_date=current_date,
-                                batch_data=batch_data,
+                                batch_data=self.batch_data,
                                 data_manager=self.data_manager,
+                                multi_period_data=self.multi_period_data,
                                 **strategy_params
                             )
                             
@@ -293,8 +311,9 @@ class BacktestEngine:
                                 buy_info=state['buy_info'],
                                 start_date=current_date,
                                 end_date=current_date,
-                                batch_data=batch_data,
+                                batch_data=self.batch_data,
                                 data_manager=self.data_manager,
+                                multi_period_data=self.multi_period_data,
                                 **strategy_params
                             )
                             
