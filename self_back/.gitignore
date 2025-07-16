@@ -1,5 +1,6 @@
 # 日志文件和目录
 logs/
+charts/
 *.log
 
 # Python 缓存文件

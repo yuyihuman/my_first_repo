@@ -37,7 +37,7 @@ def setup_logger(name, log_file, level=logging.DEBUG):
     
     # 创建日志记录器
     logger = logging.getLogger(name)
-    logger.setLevel(level)
+    logger.setLevel(logging.DEBUG)
     
     # 避免重复添加处理器
     if logger.handlers:

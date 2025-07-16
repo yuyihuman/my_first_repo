@@ -34,16 +34,15 @@ class ReturnCalculator:
         
         # 检查xtdata是否可用
         if xtdata is None:
-            self.logger.warning("xtdata模块未安装，将使用模拟数据")
-            self.use_mock_data = True
+            self.logger.error("xtdata模块未安装，无法获取真实数据")
+            raise ImportError("xtdata模块未安装，项目只支持真实数据")
         else:
             self.logger.info("xtdata模块已加载")
-            self.use_mock_data = False
         
         self.logger.debug("收益率计算器初始化完成")
     
     def calculate_return(self, stock_code: str, buy_date: str, sell_date: str, 
-                        dividend_type: str = 'none') -> Dict[str, Any]:
+                        dividend_type: str = 'none', batch_data: dict = None, data_manager=None) -> Dict[str, Any]:
         """
         计算股票收益率
         
@@ -52,6 +51,8 @@ class ReturnCalculator:
             buy_date (str): 买入日期，格式为'YYYYMMDD'
             sell_date (str): 卖出日期，格式为'YYYYMMDD'
             dividend_type (str): 除权方式，默认为'none'
+            batch_data (dict): 批量数据（可选）
+            data_manager: 数据管理器（可选）
         
         Returns:
             Dict[str, Any]: 包含收益率计算结果的字典
@@ -67,12 +68,22 @@ class ReturnCalculator:
                 return {'success': False, 'error': error_msg}
             
             # 获取股票数据
-            data_result = self._get_stock_data(stock_code, buy_date, sell_date, dividend_type)
-            if not data_result['success']:
-                self.logger.error(f"获取股票数据失败: {data_result['error']}")
-                return data_result
-            
-            stock_data = data_result['data']
+            if batch_data and data_manager:
+                # 使用批量数据
+                self.logger.info(f"使用批量数据计算收益率: {stock_code}")
+                stock_data = data_manager.get_stock_price_series(stock_code, batch_data, 'close')
+                if stock_data is None:
+                    error_msg = f"无法从批量数据中获取股票 {stock_code} 的价格数据"
+                    self.logger.error(error_msg)
+                    return {'success': False, 'error': error_msg}
+            else:
+                # 使用传统方式获取数据
+                data_result = self._get_stock_data(stock_code, buy_date, sell_date, dividend_type)
+                if not data_result['success']:
+                    self.logger.error(f"获取股票数据失败: {data_result['error']}")
+                    return data_result
+                
+                stock_data = data_result['data']
             
             # 获取买入和卖出价格
             price_result = self._get_buy_sell_prices(stock_data, buy_date, sell_date)
@@ -80,10 +91,22 @@ class ReturnCalculator:
                 self.logger.error(f"获取买卖价格失败: {price_result['error']}")
                 return price_result
             
+            # 在第89行之前添加价格验证
             buy_price = price_result['buy_price']
             sell_price = price_result['sell_price']
             actual_buy_date = price_result['actual_buy_date']
             actual_sell_date = price_result['actual_sell_date']
+            
+            # 验证价格有效性
+            if buy_price <= 0:
+                error_msg = f"买入价格无效: {buy_price}，股票: {stock_code}，日期: {actual_buy_date}"
+                self.logger.error(error_msg)
+                return {'success': False, 'error': error_msg}
+            
+            if sell_price <= 0:
+                error_msg = f"卖出价格无效: {sell_price}，股票: {stock_code}，日期: {actual_sell_date}"
+                self.logger.error(error_msg)
+                return {'success': False, 'error': error_msg}
             
             # 计算收益率
             return_rate = (sell_price - buy_price) / buy_price
@@ -180,14 +203,9 @@ class ReturnCalculator:
         self.logger.info(f"获取股票数据: {stock_code}, {start_date} - {end_date}")
         
         try:
-            if self.use_mock_data:
-                # 使用模拟数据
-                self.logger.warning("使用模拟数据")
-                return self._get_mock_data(stock_code, start_date, end_date)
-            else:
-                # 使用xtdata获取真实数据
-                self.logger.info("使用xtdata获取真实数据")
-                return self._get_real_data(stock_code, start_date, end_date, dividend_type)
+            # 使用xtdata获取真实数据
+            self.logger.info("使用xtdata获取真实数据")
+            return self._get_real_data(stock_code, start_date, end_date, dividend_type)
                 
         except Exception as e:
             error_msg = f"获取股票数据失败: {str(e)}"
@@ -255,64 +273,7 @@ class ReturnCalculator:
             self.logger.error(error_msg, exc_info=True)
             return {'success': False, 'error': error_msg}
     
-    def _get_mock_data(self, stock_code: str, start_date: str, end_date: str) -> Dict[str, Any]:
-        """
-        生成模拟股票数据
-        
-        Args:
-            stock_code (str): 股票代码
-            start_date (str): 开始日期
-            end_date (str): 结束日期
-        
-        Returns:
-            Dict[str, Any]: 包含模拟数据的结果字典
-        """
-        self.logger.warning(f"生成模拟数据: {stock_code}")
-        
-        try:
-            # 生成日期范围
-            start_dt = datetime.strptime(start_date, '%Y%m%d')
-            end_dt = datetime.strptime(end_date, '%Y%m%d')
-            
-            # 生成交易日（简单模拟，排除周末）
-            dates = []
-            current_dt = start_dt
-            while current_dt <= end_dt:
-                if current_dt.weekday() < 5:  # 周一到周五
-                    dates.append(current_dt)
-                current_dt += timedelta(days=1)
-            
-            if not dates:
-                error_msg = "日期范围内无交易日"
-                self.logger.error(error_msg)
-                return {'success': False, 'error': error_msg}
-            
-            # 生成模拟价格数据（随机游走）
-            np.random.seed(42)  # 固定随机种子，便于测试
-            initial_price = 10.0
-            returns = np.random.normal(0.001, 0.02, len(dates))  # 日收益率
-            prices = [initial_price]
-            
-            for ret in returns[1:]:
-                prices.append(prices[-1] * (1 + ret))
-            
-            # 创建pandas Series
-            date_strs = [dt.strftime('%Y%m%d') for dt in dates]
-            stock_series = pd.Series(prices, index=date_strs)
-            
-            self.logger.info(f"生成模拟数据 {len(stock_series)} 条")
-            self.logger.debug(f"模拟数据范围: {stock_series.iloc[0]:.2f} - {stock_series.iloc[-1]:.2f}")
-            
-            return {
-                'success': True,
-                'data': stock_series,
-                'data_source': 'mock'
-            }
-            
-        except Exception as e:
-            error_msg = f"生成模拟数据失败: {str(e)}"
-            self.logger.error(error_msg, exc_info=True)
-            return {'success': False, 'error': error_msg}
+
     
     def _get_buy_sell_prices(self, stock_data: pd.Series, buy_date: str, sell_date: str) -> Dict[str, Any]:
         """
@@ -400,12 +361,14 @@ class ReturnCalculator:
         self.logger.warning(f"未找到 {operation} 操作的合适日期")
         return None, None
     
-    def calculate_batch_returns(self, trades: list) -> Dict[str, Any]:
+    def calculate_batch_returns(self, trades: list, batch_data: dict = None, data_manager=None) -> Dict[str, Any]:
         """
         批量计算多笔交易的收益率
         
         Args:
             trades (list): 交易列表，每个元素包含股票代码、买入日期、卖出日期
+            batch_data (dict): 批量数据（可选）
+            data_manager: 数据管理器（可选）
         
         Returns:
             Dict[str, Any]: 批量计算结果
@@ -424,7 +387,9 @@ class ReturnCalculator:
                     stock_code=trade['stock_code'],
                     buy_date=trade['buy_date'],
                     sell_date=trade['sell_date'],
-                    dividend_type=trade.get('dividend_type', 'none')
+                    dividend_type=trade.get('dividend_type', 'none'),
+                    batch_data=batch_data,
+                    data_manager=data_manager
                 )
                 
                 results.append(result)

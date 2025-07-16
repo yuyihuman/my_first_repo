@@ -32,7 +32,7 @@
    - 自动处理除权除息
    - 提供年化收益率计算
    - 智能日期匹配（自动找到最近交易日）
-   - 模拟数据支持（当 xtdata 不可用时）
+   - 真实数据支持（需要安装 xtdata）
 
 5. **报告生成模块** (`modules/report_generator.py`)
    - 多种报告格式：简单、详细、摘要
@@ -75,7 +75,7 @@ pip install -r requirements.txt
 # pip install xtquant
 ```
 
-如果没有安装 xtquant，程序会自动使用模拟数据进行演示。
+如果没有安装 xtquant，程序将无法运行，因为项目只支持真实数据。
 
 ## 快速开始
 
@@ -240,7 +240,7 @@ self_back/
    - 使用 `xtdata.get_market_data()` 获取1日周期股票数据
    - 支持除权除息处理
    - 自动下载历史数据
-   - 模拟数据备用方案
+   - 真实数据获取
 
 2. **智能日期处理**
    - 自动查找最近的交易日
@@ -352,7 +352,7 @@ report_generator.register_report_type('my_report', my_custom_report)
 
 ## 注意事项
 
-1. **数据源**：程序优先使用 xtdata 获取真实数据，如果不可用会使用模拟数据
+1. **数据源**：程序使用 xtdata 获取真实数据，必须安装 xtquant 才能运行
 2. **日期格式**：所有日期必须使用 'YYYYMMDD' 格式
 3. **股票代码**：必须包含市场后缀，如 '.SZ'（深圳）或 '.SH'（上海）
 4. **交易日**：程序会自动处理非交易日，查找最近的交易日
@@ -370,7 +370,7 @@ report_generator.register_report_type('my_report', my_custom_report)
 - ✅ 支持单笔和批量交易回测
 - ✅ 完整的日志系统
 - ✅ 多种报告格式
-- ✅ 模拟数据备用方案
+- ✅ 真实数据获取机制
 - 🔄 其他模块接口预留（待实现）
 
 ### 计划功能
