@@ -35,6 +35,8 @@ class BuyStrategy:
         self.register_strategy("ma_crossover", self._ma_crossover_strategy)
         # 注册连续三天上涨策略
         self.register_strategy("three_days_up", self._three_days_up_strategy)
+        # 注册10分钟快速上涨策略
+        self.register_strategy("rapid_rise_10min", self._rapid_rise_10min_strategy)
         
         self.logger.debug("买入策略初始化完成")
     
@@ -397,4 +399,207 @@ class BuyStrategy:
             raise
         
         self.logger.debug(f"连续三天上涨策略生成 {len(signals)} 个信号: {signals}")
+        return signals
+    
+    def _rapid_rise_10min_strategy(self, stock_code: str, start_date: str, end_date: str, **kwargs) -> List[Dict[str, Any]]:
+        """
+        10分钟快速上涨买入策略：当股价在10分钟内上涨超过指定百分比时买入
+        
+        Args:
+            stock_code (str): 股票代码
+            start_date (str): 开始日期，格式为YYYYMMDD
+            end_date (str): 结束日期，格式为YYYYMMDD
+            **kwargs: 策略参数
+                - rise_threshold (float): 上涨阈值，默认为0.03（3%）
+                - time_window_minutes (int): 时间窗口（分钟），默认为10分钟
+                - multi_period_data: 多周期数据（可选）
+                - data_manager: 数据管理器（可选）
+        
+        Returns:
+            List[Dict[str, Any]]: 买入信号列表
+        """
+        self.logger.info(f"执行10分钟快速上涨买入策略，股票: {stock_code}")
+        
+        # 获取策略参数
+        rise_threshold = kwargs.get('rise_threshold', 0.03)  # 默认3%
+        time_window_minutes = kwargs.get('time_window_minutes', 10)  # 默认10分钟
+        
+        self.logger.debug(f"策略参数 - 上涨阈值: {rise_threshold:.1%}, 时间窗口: {time_window_minutes}分钟")
+        
+        signals = []
+        
+        from datetime import datetime, timedelta
+        import pandas as pd
+        
+        # 检查数据来源
+        multi_period_data = kwargs.get('multi_period_data')
+        batch_data = kwargs.get('batch_data')
+        data_manager = kwargs.get('data_manager')
+        
+        # 优先使用多周期数据中的分钟线数据
+        if multi_period_data and data_manager:
+            self.logger.info(f"使用多周期数据进行策略分析: {stock_code}")
+            available_periods = list(multi_period_data.get('data', {}).keys())
+            self.logger.debug(f"可用周期: {available_periods}")
+            
+            # 优先使用1m数据，如果没有则使用1d数据（虽然不太适合10分钟策略）
+            period_to_use = '1m' if '1m' in available_periods else ('1d' if '1d' in available_periods else None)
+            
+            if period_to_use:
+                self.logger.debug(f"使用周期: {period_to_use}")
+                df = data_manager.get_stock_dataframe_from_multi_period(
+                    stock_code=stock_code,
+                    multi_period_data=multi_period_data,
+                    period=period_to_use,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+                
+                if period_to_use == '1d':
+                    self.logger.warning("使用日线数据进行10分钟策略分析，精度可能不够")
+            else:
+                self.logger.warning(f"多周期数据中没有可用的数据周期")
+                df = None
+                
+        elif batch_data and data_manager:
+            # 使用批量数据（通常是日线数据）
+            self.logger.info(f"使用批量数据进行策略分析: {stock_code}")
+            self.logger.warning("使用日线数据进行10分钟策略分析，精度可能不够")
+            df = data_manager.get_stock_dataframe(stock_code, batch_data, start_date, end_date)
+        else:
+            df = None
+            
+        if df is None:
+            self.logger.warning(f"无法获取股票 {stock_code} 的数据 - DataFrame为None")
+        elif df.empty:
+            self.logger.warning(f"无法获取股票 {stock_code} 的数据 - DataFrame为空")
+        else:
+            self.logger.debug(f"成功获取 {len(df)} 条数据，时间范围: {df.index[0]} 到 {df.index[-1]}")
+            self.logger.debug(f"数据列: {df.columns.tolist()}")
+            
+        # 如果没有获取到数据，尝试传统方式获取分钟线数据
+        if df is None or df.empty:
+            self.logger.info(f"使用传统方式获取分钟线数据: {stock_code}")
+            try:
+                from xtquant import xtdata
+            except ImportError:
+                xtdata = None
+                
+            if xtdata is None:
+                self.logger.error("xtdata模块未安装，无法获取真实数据")
+                raise ImportError("xtdata模块未安装，项目只支持真实数据")
+            
+            # 获取分钟线数据
+            self.logger.debug(f"获取股票分钟线数据: {stock_code}, 时间范围: {start_date} - {end_date}")
+            
+            data = xtdata.get_market_data(
+                field_list=['open', 'high', 'low', 'close', 'volume'],
+                stock_list=[stock_code],
+                period='1m',  # 使用1分钟数据
+                start_time=start_date,
+                end_time=end_date,
+                dividend_type='none',
+                fill_data=True
+            )
+            
+            if data and 'close' in data and stock_code in data['close'].index:
+                # 构建DataFrame
+                df_data = {
+                    'Open': data['open'].loc[stock_code],
+                    'High': data['high'].loc[stock_code],
+                    'Low': data['low'].loc[stock_code],
+                    'Close': data['close'].loc[stock_code],
+                    'Volume': data['volume'].loc[stock_code]
+                }
+                
+                df = pd.DataFrame(df_data)
+                df.index = pd.to_datetime(df.index, format='%Y%m%d %H%M%S')
+                df.index.name = 'DateTime'
+                
+                self.logger.debug(f"成功获取 {len(df)} 条分钟线数据")
+            else:
+                self.logger.error(f"无法获取股票 {stock_code} 的分钟线数据")
+                return signals
+        
+        # 统一的数据分析逻辑
+        try:
+            self.logger.debug(f"开始数据分析，原始数据形状: {df.shape}")
+            
+            # 确保数据按时间排序
+            df = df.sort_index()
+            self.logger.debug(f"数据排序后，时间范围: {df.index[0]} 到 {df.index[-1]}")
+            
+            # 根据数据类型确定时间窗口
+            if 'DateTime' in str(df.index.name) or len(df) > 1000:  # 分钟线数据
+                # 分钟线数据：直接使用时间窗口
+                window_size = time_window_minutes
+                self.logger.debug(f"使用分钟线数据，时间窗口: {window_size}分钟")
+            else:
+                # 日线数据：模拟处理（不太准确，但可以作为备选）
+                window_size = max(1, time_window_minutes // (6.5 * 60))  # 假设一个交易日6.5小时
+                self.logger.debug(f"使用日线数据模拟，时间窗口: {window_size}天")
+            
+            # 遍历数据，寻找快速上涨的情况
+            self.logger.debug(f"开始遍历数据寻找快速上涨，窗口大小: {window_size}")
+            
+            for i in range(window_size, len(df)):
+                current_time = df.index[i]
+                current_date = current_time.strftime('%Y%m%d')
+                
+                # 只在当前检查日期生成信号
+                if current_date == end_date:
+                    self.logger.debug(f"检查时间 {current_time} (索引 {i})")
+                    
+                    # 获取时间窗口内的价格数据
+                    window_start_idx = i - window_size
+                    window_data = df.iloc[window_start_idx:i+1]
+                    
+                    if len(window_data) < 2:
+                        continue
+                    
+                    # 计算时间窗口内的最大涨幅
+                    start_price = window_data['Close'].iloc[0]
+                    end_price = window_data['Close'].iloc[-1]
+                    max_price = window_data['Close'].max()
+                    
+                    # 计算涨幅
+                    rise_rate = (max_price - start_price) / start_price
+                    current_rise_rate = (end_price - start_price) / start_price
+                    
+                    self.logger.debug(f"时间窗口 {window_data.index[0]} - {window_data.index[-1]}")
+                    self.logger.debug(f"起始价格: {start_price:.2f}, 结束价格: {end_price:.2f}, 最高价格: {max_price:.2f}")
+                    self.logger.debug(f"最大涨幅: {rise_rate:.2%}, 当前涨幅: {current_rise_rate:.2%}")
+                    
+                    # 检查是否满足快速上涨条件
+                    if rise_rate >= rise_threshold:
+                        # 快速上涨，生成买入信号
+                        buy_price = float(end_price)
+                        
+                        signal = {
+                            "date": current_date,
+                            "time": current_time.strftime('%H:%M:%S') if hasattr(current_time, 'hour') else '15:00:00',
+                            "price": round(buy_price, 2),
+                            "volume": 1000,
+                            "reason": f"10分钟快速上涨买入信号 (涨幅: {rise_rate:.2%}, 阈值: {rise_threshold:.2%})",
+                            "strategy": "rapid_rise_10min",
+                            "rise_rate": float(rise_rate),
+                            "time_window_minutes": time_window_minutes,
+                            "start_price": float(start_price),
+                            "max_price": float(max_price)
+                        }
+                        
+                        signals.append(signal)
+                        self.logger.info(f"✅ 发现10分钟快速上涨买入信号: {current_time}, 价格: {buy_price:.2f}, 涨幅: {rise_rate:.2%}")
+                    else:
+                        self.logger.debug(f"❌ {current_time} 不满足快速上涨条件 (涨幅: {rise_rate:.2%} < 阈值: {rise_threshold:.2%})")
+                else:
+                    self.logger.debug(f"跳过 {current_date}，不在回测期间内 ({start_date} - {end_date})")
+            
+            self.logger.info(f"数据分析完成，发现 {len(signals)} 个快速上涨的买入机会")
+                    
+        except Exception as e:
+            self.logger.error(f"执行10分钟快速上涨策略时发生错误: {str(e)}")
+            raise
+        
+        self.logger.debug(f"10分钟快速上涨策略生成 {len(signals)} 个信号: {signals}")
         return signals

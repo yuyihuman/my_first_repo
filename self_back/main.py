@@ -631,15 +631,48 @@ def run_example_random_strategy():
         print(f"随机选股策略演示失败: {str(e)}")
         print("详细错误信息请查看日志文件")
 
-def run_continuous_strategy_backtest():
+def run_continuous_strategy_backtest(buy_strategy_config=None, sell_strategy_config=None):
     """
     运行持续监控的策略回测：演示正确的量化交易逻辑
     每只股票在时间段内持续检查买卖信号，支持多次买卖
+    
+    Args:
+        buy_strategy_config (dict): 买入策略配置
+            {
+                'strategy_name': str,  # 策略名称
+                'params': dict         # 策略参数
+            }
+        sell_strategy_config (dict): 卖出策略配置
+            {
+                'strategy_name': str,  # 策略名称  
+                'params': dict         # 策略参数
+            }
     """
+    # 设置默认策略配置
+    if buy_strategy_config is None:
+        buy_strategy_config = {
+            'strategy_name': 'three_days_up',
+            'params': {
+                'short_period': 5,
+                'long_period': 20
+            }
+        }
+    
+    if sell_strategy_config is None:
+        sell_strategy_config = {
+            'strategy_name': 'hold_three_days',
+            'params': {
+                'stop_loss_pct': 0.08,
+                'take_profit_pct': 0.12,
+                'max_hold_days': 30
+            }
+        }
+    
     print("\n" + "=" * 60)
     print("🚀 持续监控策略回测")
     print("=" * 60)
     print("📝 交易逻辑：空仓→检查买入信号→买入→持仓→检查卖出信号→卖出→空仓（循环）")
+    print(f"🔄 策略配置：{buy_strategy_config['strategy_name']} + {sell_strategy_config['strategy_name']}")
     
     engine = BacktestEngine()
     
@@ -669,11 +702,23 @@ def run_continuous_strategy_backtest():
             print(f"可用买入策略: {buy_strategies}")
             print(f"可用卖出策略: {sell_strategies}")
             
-            # 选择策略
-            buy_strategy = "three_days_up"
-            sell_strategy = "hold_three_days"
+            # 使用配置的策略
+            buy_strategy = buy_strategy_config['strategy_name']
+            sell_strategy = sell_strategy_config['strategy_name']
             print(f"\n✅ 选用买入策略: {buy_strategy}")
+            if buy_strategy_config['params']:
+                for key, value in buy_strategy_config['params'].items():
+                    if isinstance(value, float) and 0 < value < 1:
+                        print(f"   - {key}: {value:.1%}")
+                    else:
+                        print(f"   - {key}: {value}")
             print(f"✅ 选用卖出策略: {sell_strategy}")
+            if sell_strategy_config['params']:
+                for key, value in sell_strategy_config['params'].items():
+                    if isinstance(value, float) and 0 < value < 1:
+                        print(f"   - {key}: {value:.1%}")
+                    else:
+                        print(f"   - {key}: {value}")
             
             # 计算近一年的回测时间范围
             from datetime import datetime, timedelta
@@ -686,17 +731,18 @@ def run_continuous_strategy_backtest():
             print(f"\n🔄 开始持续监控回测 ({start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')})")
             print("📊 每日检查买卖信号，支持同一股票多次交易...")
             
+            # 合并策略参数
+            strategy_params = {}
+            strategy_params.update(buy_strategy_config['params'])
+            strategy_params.update(sell_strategy_config['params'])
+            
             result = engine.run_strategy_backtest(
                 stocks=demo_stocks,
                 start_date=start_date_str,
                 end_date=end_date_str,
                 buy_strategy=buy_strategy,
                 sell_strategy=sell_strategy,
-                short_period=5,
-                long_period=20,
-                stop_loss_pct=0.08,
-                take_profit_pct=0.12,
-                max_hold_days=30
+                **strategy_params
             )
             
             if result['success']:

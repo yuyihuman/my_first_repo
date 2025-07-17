@@ -279,7 +279,22 @@ class DataManager:
             self.logger.debug(f"原始DataFrame形状: {df.shape}")
             self.logger.debug(f"原始索引范围: {df.index[0]} 到 {df.index[-1]}")
             
-            df.index = pd.to_datetime(df.index, format='%Y%m%d')
+            # 根据周期选择合适的时间格式
+            if period == '1m':
+                # 分钟线数据格式: YYYYMMDDHHMMSS
+                try:
+                    df.index = pd.to_datetime(df.index, format='%Y%m%d%H%M%S')
+                except ValueError:
+                    # 如果上述格式失败，尝试其他可能的格式
+                    try:
+                        df.index = pd.to_datetime(df.index, format='%Y%m%d %H%M%S')
+                    except ValueError:
+                        # 最后尝试自动推断格式
+                        df.index = pd.to_datetime(df.index)
+            else:
+                # 日线数据格式: YYYYMMDD
+                df.index = pd.to_datetime(df.index, format='%Y%m%d')
+            
             df.index.name = 'Date'
             self.logger.debug(f"转换后时间索引范围: {df.index[0]} 到 {df.index[-1]}")
             
@@ -348,7 +363,7 @@ class DataManager:
             return None
     
     def get_stock_price_series(self, stock_code: str, data: Dict[str, Any], 
-                              field: str = 'close') -> Optional[pd.Series]:
+                              field: str = 'close', period: str = '1d') -> Optional[pd.Series]:
         """
         从批量数据中提取单只股票的价格序列
         
@@ -368,7 +383,22 @@ class DataManager:
                 return None
             
             price_series = data[field].loc[stock_code]
-            price_series.index = pd.to_datetime(price_series.index, format='%Y%m%d')
+            
+            # 根据周期选择合适的时间格式
+            if period == '1m':
+                # 分钟线数据格式: YYYYMMDDHHMMSS
+                try:
+                    price_series.index = pd.to_datetime(price_series.index, format='%Y%m%d%H%M%S')
+                except ValueError:
+                    # 如果上述格式失败，尝试其他可能的格式
+                    try:
+                        price_series.index = pd.to_datetime(price_series.index, format='%Y%m%d %H%M%S')
+                    except ValueError:
+                        # 最后尝试自动推断格式
+                        price_series.index = pd.to_datetime(price_series.index)
+            else:
+                # 日线数据格式: YYYYMMDD
+                price_series.index = pd.to_datetime(price_series.index, format='%Y%m%d')
             
             self.logger.debug(f"成功提取 {stock_code} 的 {field} 价格序列，数据量: {len(price_series)}")
             return price_series
