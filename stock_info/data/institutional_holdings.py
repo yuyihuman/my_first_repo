@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class InstitutionalHoldingsData:
     def __init__(self):
         # 数据目录 - 使用真实数据文件路径
-        self.data_dir = r'C:\Users\Ramsey\github\my_first_repo\stock_holding\institutional_holdings_data\processed_data'
+        self.data_dir = r'C:\Users\17701\github\my_first_repo\stock_holding\institutional_holdings_data\processed_data'
         logger.info(f"机构持股数据目录: {self.data_dir}")
         
         # 缓存配置
