@@ -127,6 +127,17 @@
                 <canvas id="momRateChart"></canvas>
             </div>
             
+            <!-- 新增：M1同比增幅和沪深300指数图表 -->
+            <div class="chart-container">
+                <div id="m1Hs300ChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="m1Hs300Chart"></canvas>
+            </div>
+            
             <!-- 日志显示区域 -->
             <!-- 日志显示区域 -->
             <!-- <div class="mt-5">
@@ -159,10 +170,11 @@
         
         // 获取货币供应量数据
         function fetchMoneySupplyData(showLoading = false) {
-            // 显示图表加载状态
+            // 显示加载状态
             document.getElementById('moneySupplyChartLoading').style.display = 'flex';
             document.getElementById('indexComparisonChartLoading').style.display = 'flex';
             document.getElementById('momRateChartLoading').style.display = 'flex';
+            document.getElementById('m1Hs300ChartLoading').style.display = 'flex';
             
             // 发起API请求
             fetch('/api/macro/money_supply')
@@ -201,6 +213,7 @@
                     document.getElementById('moneySupplyChartLoading').style.display = 'none';
                     document.getElementById('indexComparisonChartLoading').style.display = 'none';
                     document.getElementById('momRateChartLoading').style.display = 'none';
+                    document.getElementById('m1Hs300ChartLoading').style.display = 'none';
                 });
         }
         
@@ -232,15 +245,20 @@
             createMoneySupplyChart(months, m2Growth, m1Growth, secondHandHousingData);
             
             // 创建指数对比图表
-            createIndexComparisonChart(sortedData);
-            
-            // 创建环比增长率图表
-            createMoMRateChart(sortedData);
-            
-            // 隐藏加载状态
-            document.getElementById('moneySupplyChartLoading').style.display = 'none';
-            document.getElementById('indexComparisonChartLoading').style.display = 'none';
-            document.getElementById('momRateChartLoading').style.display = 'none';
+                        createIndexComparisonChart(sortedData);
+                        
+                        // 创建环比增长率图表
+                        createMoMRateChart(sortedData);
+                        
+                        // 创建M1同比增幅和沪深300指数图表
+                        createM1Hs300Chart(sortedData);
+                        
+                        // 隐藏加载状态
+                        document.getElementById('moneySupplyChartLoading').style.display = 'none';
+                        document.getElementById('indexComparisonChartLoading').style.display = 'none';
+                        document.getElementById('momRateChartLoading').style.display = 'none';
+                        document.getElementById('m1Hs300ChartLoading').style.display = 'none';
+                        document.getElementById('m1Hs300ChartLoading').style.display = 'none';
         }
         
         // 创建货币供应量图表
@@ -548,6 +566,123 @@
                                     }
                                     return 1; // 其他网格线保持原样
                                 }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 创建M1同比增幅和沪深300指数图表
+        function createM1Hs300Chart(data) {
+            const ctx = document.getElementById('m1Hs300Chart').getContext('2d');
+            
+            // 提取数据
+            const labels = data.map(item => item.月份);
+            const m1Data = data.map(item => item.货币_狭义货币M1_同比);
+            const hs300Data = data.map(item => item.沪深300指数);
+            
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'M1同比增幅 (%)',
+                            data: m1Data,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 1,
+                            tension: 0.1,
+                            spanGaps: true,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '沪深300指数',
+                            data: hs300Data,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 1,
+                            tension: 0.1,
+                            spanGaps: true,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'M1同比增幅与沪深300指数对比',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'M1同比增幅 (%)',
+                                color: 'rgba(54, 162, 235, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(54, 162, 235, 1)'
+                            },
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.8)';
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)';
+                                },
+                                lineWidth: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 2;
+                                    }
+                                    return 1;
+                                }
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '沪深300指数',
+                                color: 'rgba(255, 99, 132, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(255, 99, 132, 1)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
                             }
                         }
                     }

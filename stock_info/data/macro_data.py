@@ -327,6 +327,78 @@ def fetch_macro_china_money_supply():
                         current_data['M0指数(2011.1=100)'] = None
         
         
+        # 获取沪深300指数数据
+        hs300_dict = {}
+        try:
+            # 获取沪深300指数历史数据
+            hs300_df = ak.stock_zh_index_daily(symbol="sh000300")
+            
+            # 确保日期列是字符串类型
+            hs300_df['date'] = hs300_df['date'].astype(str)
+            
+            # 按日期排序
+            hs300_df = hs300_df.sort_values(by='date')
+            
+            # 处理沪深300数据，按月份聚合（取每月最后一个交易日的收盘价）
+            hs300_monthly = {}
+            hs300_monthly_dot = {}
+            
+            # 按月份分组，保留每月最后一个交易日的数据
+            for _, row in hs300_df.iterrows():
+                date_str = row['date']
+                close_price = float(row['close'])
+                
+                # 提取年月
+                if len(date_str) >= 7:  # 格式如 "2023-01-01"
+                    year_month = date_str[:7]  # "2023-01"
+                    year, month = year_month.split('-')
+                    month = month.lstrip('0')  # 去掉前导零
+                    year_month_dot = f"{year}.{month}"  # "2023.1"
+                    
+                    # 由于数据是按日期排序的，后面的日期会覆盖前面的，这样就能得到每月最后一个交易日的数据
+                    hs300_monthly[year_month] = close_price
+                    hs300_monthly_dot[year_month_dot] = close_price
+            
+            # 合并两个字典
+            hs300_monthly.update(hs300_monthly_dot)
+            
+            # 计算沪深300指数的同比增长率
+            sorted_months = sorted(hs300_monthly.keys())
+            for month_key in sorted_months:
+                if '.' in month_key:  # 只处理点格式的键
+                    year, month = month_key.split('.')
+                    current_year = int(year)
+                    current_month = int(month)
+                    
+                    # 计算去年同期的键
+                    prev_year = current_year - 1
+                    prev_month_key = f"{prev_year}.{month}"
+                    
+                    if prev_month_key in hs300_monthly:
+                        current_price = hs300_monthly[month_key]
+                        prev_price = hs300_monthly[prev_month_key]
+                        
+                        if prev_price != 0:
+                            yoy_growth = ((current_price - prev_price) / prev_price) * 100
+                            hs300_dict[month_key] = {
+                                '沪深300指数': current_price,
+                                '沪深300指数_同比': round(yoy_growth, 2)
+                            }
+                        else:
+                            hs300_dict[month_key] = {
+                                '沪深300指数': current_price,
+                                '沪深300指数_同比': None
+                            }
+                    else:
+                        hs300_dict[month_key] = {
+                            '沪深300指数': hs300_monthly[month_key],
+                            '沪深300指数_同比': None
+                        }
+        
+        except Exception as e:
+            print(f"获取沪深300指数数据失败: {e}")
+            hs300_dict = {}
+        
         # 获取上海新房价格数据
         house_price_dict = {}  # 初始化为空字典
         try:
@@ -574,6 +646,26 @@ def fetch_macro_china_money_supply():
                         item['M2指数(2011.1=100)'] = None
                         item['M1指数(2011.1=100)'] = None
                         item['M0指数(2011.1=100)'] = None
+                
+                # 添加沪深300指数数据（如果存在）
+                if formatted_date in hs300_dict:
+                    item['沪深300指数'] = hs300_dict[formatted_date]['沪深300指数']
+                    item['沪深300指数_同比'] = hs300_dict[formatted_date]['沪深300指数_同比']
+                else:
+                    # 尝试其他可能的日期格式
+                    found = False
+                    for key in hs300_dict.keys():
+                        # 检查年份和月份是否匹配
+                        if '.' in formatted_date and '.' in key:
+                            if formatted_date.split('.')[0] == key.split('.')[0] and formatted_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
+                                item['沪深300指数'] = hs300_dict[key]['沪深300指数']
+                                item['沪深300指数_同比'] = hs300_dict[key]['沪深300指数_同比']
+                                found = True
+                                break
+                    
+                    if not found:
+                        item['沪深300指数'] = None
+                        item['沪深300指数_同比'] = None
                 
                 # 添加房价数据（如果存在）
                 if formatted_date in house_price_dict:
