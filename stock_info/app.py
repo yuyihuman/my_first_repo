@@ -206,37 +206,7 @@ def serve_house_price_image(image_name):
     
     return "图片未找到", 404
 
-# 南向持股页面路由
-@app.route('/southbound_holdings')
-def southbound_holdings():
-    return render_template('southbound_holdings.html')
 
-# 获取南向持股图片列表API
-@app.route('/api/southbound_holdings/images')
-def southbound_holdings_images():
-    try:
-        # 图片目录路径
-        image_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                                'stockapi', 'charts')
-        
-        # 获取所有图片文件
-        image_files = []
-        if os.path.exists(image_dir):
-            for file in os.listdir(image_dir):
-                if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
-                    # 去掉扩展名
-                    image_name = os.path.splitext(file)[0]
-                    image_files.append(image_name)
-        
-        return jsonify({
-            'status': 'success',
-            'images': sorted(image_files)
-        })
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        })
 
 # 提供图片文件
 @app.route('/southbound_holdings/images/<image_name>')

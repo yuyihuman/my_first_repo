@@ -74,9 +74,7 @@
                     <li class="nav-item">
                         <a class="nav-link" href="/sh_house_price">上海房价</a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/southbound_holdings">南向持股</a>
-                    </li>
+
                     <li class="nav-item">
                         <a class="nav-link" href="/institutional_holdings">机构持股</a>
                     </li>
@@ -418,8 +416,9 @@
             // 记录每个月的交易日
             const tradingDaysPerMonth = {};
             
-            // 新增：用于存储每月的指数平均值
-            const monthlyIndexData = {};
+            // 新增：存储每日指数数据
+            const dailyIndexData = [];
+            const dailyIndexLabels = [];
             
             dailyData.forEach(item => {
                 const date = new Date(item['日期']);
@@ -431,34 +430,22 @@
                     monthlyData[monthKey] = 0;
                     monthDays[monthKey] = 0;
                     tradingDaysPerMonth[monthKey] = new Set();
-                    // 新增：初始化月度指数数据
-                    monthlyIndexData[monthKey] = {
-                        indexSum: 0,
-                        days: 0
-                    };
                 }
                 
                 monthlyData[monthKey] += item['当日成交净买额'];
                 monthDays[monthKey]++;
                 tradingDaysPerMonth[monthKey].add(item['日期']);
                 
-                // 新增：累计指数数据
+                // 新增：存储每日指数数据
                 if (item['恒生指数'] !== null) {
-                    monthlyIndexData[monthKey].indexSum += item['恒生指数'];
-                    monthlyIndexData[monthKey].days += 1;
+                    dailyIndexData.push(item['恒生指数']);
+                    dailyIndexLabels.push(item['日期']);
                 }
             });
             
             // 准备图表数据
             const months = Object.keys(monthlyData).sort();
             const netBuyValues = months.map(month => monthlyData[month]);
-            
-            // 新增：计算每月平均指数
-            const avgIndexValues = months.map(month => 
-                monthlyIndexData[month].days > 0 ? 
-                monthlyIndexData[month].indexSum / monthlyIndexData[month].days : 
-                null
-            );
             
             // 检查最新月份是否是当前月份，如果是则计算预估值
             const latestMonth = months[months.length - 1];
@@ -563,18 +550,19 @@
                             borderDash: [5, 5],
                             yAxisID: 'y'
                         }] : []),
-                        // 新增：添加恒生指数折线图
+                        // 新增：添加恒生指数折线图（每日数据）
                         {
                             label: '恒生指数',
-                            data: avgIndexValues,
+                            data: dailyIndexData,
                             type: 'line',
                             fill: false,
-                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderColor: 'rgb(255, 99, 132)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
                             borderWidth: 2,
-                            pointRadius: 0,  // 修改：将点半径设为0，不显示数据点
-                            tension: 0.1,    // 添加：使线条更平滑
-                            yAxisID: 'y1'
+                            pointRadius: 0,
+                            tension: 0.1,
+                            yAxisID: 'y1',
+                            xAxisID: 'x1'
                         }
                     ]
                 },
@@ -626,6 +614,12 @@
                                 display: true,
                                 text: '月份'
                             }
+                        },
+                        x1: {
+                            type: 'category',
+                            labels: dailyIndexLabels,
+                            display: false,
+                            position: 'bottom'
                         },
                         y: {
                             title: {
