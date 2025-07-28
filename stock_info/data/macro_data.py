@@ -399,6 +399,9 @@ def fetch_macro_china_money_supply():
             print(f"获取沪深300指数数据失败: {e}")
             hs300_dict = {}
         
+        # 获取中证商品期货指数数据
+        ccidx_dict = get_ccidx_futures_index()
+        
         # 获取上海新房价格数据
         house_price_dict = {}  # 初始化为空字典
         try:
@@ -667,6 +670,23 @@ def fetch_macro_china_money_supply():
                         item['沪深300指数'] = None
                         item['沪深300指数_同比'] = None
                 
+                # 添加中证商品期货价格指数数据（如果存在）
+                if formatted_date in ccidx_dict:
+                    item['中证商品期货价格指数'] = ccidx_dict[formatted_date]['中证商品期货价格指数']
+                else:
+                    # 尝试其他可能的日期格式
+                    found = False
+                    for key in ccidx_dict.keys():
+                        # 检查年份和月份是否匹配
+                        if '.' in formatted_date and '.' in key:
+                            if formatted_date.split('.')[0] == key.split('.')[0] and formatted_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
+                                item['中证商品期货价格指数'] = ccidx_dict[key]['中证商品期货价格指数']
+                                found = True
+                                break
+                    
+                    if not found:
+                        item['中证商品期货价格指数'] = None
+                
                 # 添加房价数据（如果存在）
                 if formatted_date in house_price_dict:
                     item['上海新建商品住宅价格指数_同比'] = house_price_dict[formatted_date]['新建商品住宅价格指数_同比']
@@ -747,3 +767,53 @@ def fetch_macro_china_money_supply():
             'message': f'获取数据失败: {str(e)}',
             'data': []
         }
+
+def get_ccidx_futures_index():
+    """
+    获取中证商品期货价格指数数据
+    
+    Returns:
+        dict: 包含日期和指数值的字典
+    """
+    try:
+        # 获取中证商品期货价格指数数据
+        futures_index_ccidx_df = ak.futures_index_ccidx(symbol="中证商品期货价格指数")
+        
+        # 创建字典存储数据
+        ccidx_dict = {}
+        
+        for _, row in futures_index_ccidx_df.iterrows():
+            try:
+                # 获取日期和指数值
+                date_str = str(row['日期'])
+                index_value = float(row['收盘点位']) if not pd.isna(row['收盘点位']) else None
+                
+                # 将日期转换为YYYY.M格式
+                if '-' in date_str:
+                    date_parts = date_str.split('-')
+                    if len(date_parts) >= 2:
+                        year = date_parts[0]
+                        month = str(int(date_parts[1]))  # 去掉前导零
+                        formatted_date = f"{year}.{month}"
+                        
+                        # 如果该月份已存在，取最新的值（通常是月末值）
+                        if formatted_date not in ccidx_dict or date_str > ccidx_dict[formatted_date]['original_date']:
+                            ccidx_dict[formatted_date] = {
+                                '中证商品期货价格指数': round(index_value, 2) if index_value is not None else None,
+                                'original_date': date_str
+                            }
+                            
+            except Exception as e:
+                print(f"处理中证商品期货指数数据行时出错: {e}")
+                continue
+        
+        print(f"成功获取中证商品期货价格指数数据，共{len(ccidx_dict)}条记录")
+        # 调试：输出部分数据
+        if ccidx_dict:
+            sample_keys = list(ccidx_dict.keys())[:5]
+            print(f"中证商品期货价格指数数据样本: {[(k, ccidx_dict[k]) for k in sample_keys]}")
+        return ccidx_dict
+        
+    except Exception as e:
+        print(f"获取中证商品期货价格指数数据失败: {e}")
+        return {}
