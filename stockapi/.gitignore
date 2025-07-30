@@ -1,0 +1,31 @@
+# 缓存文件
+*.pkl
+stock_data_cache.pkl
+
+# 大型数据文件
+true_quarterly_analysis.json
+
+# 日志文件
+*.log
+quarterly_analysis_*.log
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 临时文件
+*.tmp
+*.temp
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
