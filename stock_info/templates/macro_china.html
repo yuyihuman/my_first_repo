@@ -141,6 +141,17 @@
                 <canvas id="m1CcidxChart"></canvas>
             </div>
             
+            <!-- 新增：沪深300指数和TTM市盈率图表 -->
+            <div class="chart-container">
+                <div id="hs300PeChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="hs300PeChart"></canvas>
+            </div>
+            
             <!-- 日志显示区域 -->
             <!-- 日志显示区域 -->
             <!-- <div class="mt-5">
@@ -202,6 +213,9 @@
                         // 隐藏加载状态
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
+                        document.getElementById('m1Hs300ChartLoading').style.display = 'none';
+                        document.getElementById('m1CcidxChartLoading').style.display = 'none';
+                        document.getElementById('hs300PeChartLoading').style.display = 'none';
 
     
                     }
@@ -220,6 +234,7 @@
 
                     document.getElementById('m1Hs300ChartLoading').style.display = 'none';
                     document.getElementById('m1CcidxChartLoading').style.display = 'none';
+                    document.getElementById('hs300PeChartLoading').style.display = 'none';
                 });
         }
         
@@ -261,12 +276,16 @@
                         // 创建M1同比增幅和中证商品期货指数图表
                         createM1CcidxChart(sortedData);
                         
+                        // 创建沪深300指数和TTM市盈率图表
+                        createHs300PeChart(sortedData);
+                        
                         // 隐藏加载状态
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
 
                         document.getElementById('m1Hs300ChartLoading').style.display = 'none';
                         document.getElementById('m1CcidxChartLoading').style.display = 'none';
+                        document.getElementById('hs300PeChartLoading').style.display = 'none';
         }
         
         // 创建货币供应量图表
@@ -794,6 +813,146 @@
                             },
                             ticks: {
                                 color: 'rgba(255, 165, 0, 1)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 创建沪深300指数和TTM市盈率图表
+        function createHs300PeChart(data) {
+            const ctx = document.getElementById('hs300PeChart').getContext('2d');
+            
+            // 提取数据
+            const labels = data.map(item => item.月份);
+            const hs300Data = data.map(item => {
+                return item.沪深300指数 !== null ? item.沪深300指数 : null;
+            });
+            const ttmPeData = data.map(item => {
+                return item.TTM市盈率 !== null ? item.TTM市盈率 : null;
+            });
+            
+            // 过滤掉所有数据都为null的点
+            const filteredData = [];
+            const filteredLabels = [];
+            const filteredHs300 = [];
+            const filteredTtmPe = [];
+            
+            for (let i = 0; i < labels.length; i++) {
+                if (hs300Data[i] !== null || ttmPeData[i] !== null) {
+                    filteredLabels.push(labels[i]);
+                    filteredHs300.push(hs300Data[i]);
+                    filteredTtmPe.push(ttmPeData[i]);
+                }
+            }
+            
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: filteredLabels,
+                    datasets: [
+                        {
+                            label: '沪深300指数',
+                            data: filteredHs300,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            tension: 0.1,
+                            spanGaps: true,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'TTM市盈率',
+                            data: filteredTtmPe,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            tension: 0.1,
+                            spanGaps: true,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '沪深300指数与主要股票TTM市盈率对比',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        if (context.dataset.label === 'TTM市盈率') {
+                                            label += context.parsed.y.toFixed(2) + '倍';
+                                        } else {
+                                            label += context.parsed.y.toFixed(2);
+                                        }
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '沪深300指数',
+                                color: 'rgba(255, 99, 132, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(255, 99, 132, 1)'
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'TTM市盈率 (倍)',
+                                color: 'rgba(75, 192, 192, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(75, 192, 192, 1)'
                             },
                             grid: {
                                 drawOnChartArea: false

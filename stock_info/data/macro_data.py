@@ -402,6 +402,10 @@ def fetch_macro_china_money_supply():
         # 获取中证商品期货指数数据
         ccidx_dict = get_ccidx_futures_index()
         
+        # 获取TTM市盈率数据
+        ttm_pe_dict = get_ttm_pe_ratio_data()
+        print(f"DEBUG: TTM市盈率数据获取成功，共{len(ttm_pe_dict)}条记录")
+        
         # 获取上海新房价格数据
         house_price_dict = {}  # 初始化为空字典
         try:
@@ -687,6 +691,27 @@ def fetch_macro_china_money_supply():
                     if not found:
                         item['中证商品期货价格指数'] = None
                 
+                # 添加TTM市盈率数据（如果存在）
+                if formatted_date in ttm_pe_dict:
+                    item['TTM市盈率'] = ttm_pe_dict[formatted_date]['TTM市盈率']
+                    print(f"DEBUG: 直接匹配成功 {formatted_date} -> {item['TTM市盈率']}")
+                else:
+                    # 尝试其他可能的日期格式
+                    found = False
+                    for key in ttm_pe_dict.keys():
+                        # 检查年份和月份是否匹配
+                        if '.' in formatted_date and '.' in key:
+                            if formatted_date.split('.')[0] == key.split('.')[0] and formatted_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
+                                item['TTM市盈率'] = ttm_pe_dict[key]['TTM市盈率']
+                                print(f"DEBUG: 格式匹配成功 {formatted_date} -> {key} -> {item['TTM市盈率']}")
+                                found = True
+                                break
+                    
+                    if not found:
+                        item['TTM市盈率'] = None
+                        if len(ttm_pe_dict) > 0:  # 只在前几条记录中打印调试信息
+                            print(f"DEBUG: 未找到匹配 {formatted_date}，TTM数据键示例: {list(ttm_pe_dict.keys())[:3]}")
+                
                 # 添加房价数据（如果存在）
                 if formatted_date in house_price_dict:
                     item['上海新建商品住宅价格指数_同比'] = house_price_dict[formatted_date]['新建商品住宅价格指数_同比']
@@ -816,4 +841,62 @@ def get_ccidx_futures_index():
         
     except Exception as e:
         print(f"获取中证商品期货价格指数数据失败: {e}")
+        return {}
+
+def get_ttm_pe_ratio_data():
+    """
+    获取主要股票TTM市盈率数据
+    从true_quarterly_analysis.json文件中读取pe_ratio数据
+    只有success_count大于100时，当季数据才被采用
+    
+    Returns:
+        dict: 包含日期和TTM市盈率的字典
+    """
+    try:
+        # 读取JSON文件
+        json_file_path = r'C:\Users\17701\github\my_first_repo\stockapi\true_quarterly_analysis.json'
+        
+        if not os.path.exists(json_file_path):
+            print(f"TTM市盈率数据文件不存在: {json_file_path}")
+            return {}
+        
+        print(f"DEBUG: 开始读取TTM市盈率数据文件: {json_file_path}")
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        print(f"DEBUG: JSON文件读取成功，包含 {len(data.get('quarterly_data', {}))} 个季度数据")
+        pe_ratio_dict = {}
+        
+        # 遍历季度数据
+        quarterly_data = data.get('quarterly_data', {})
+        
+        for quarter, quarter_info in quarterly_data.items():
+            # 新的JSON结构中，pe_ratio直接在quarter_info根级别
+            pe_ratio = quarter_info.get('pe_ratio')
+            stock_count = quarter_info.get('stock_count', 0)
+            
+            # 检查stock_count是否大于50（相当于原来的success_count）
+            if stock_count > 50 and pe_ratio is not None:
+                # 将季度格式转换为年月格式
+                # 例如：2024-Q1 -> 2024.3, 2024-Q2 -> 2024.6, 2024-Q3 -> 2024.9, 2024-Q4 -> 2024.12
+                year, quarter_num = quarter.split('-Q')
+                quarter_month_map = {'1': '3', '2': '6', '3': '9', '4': '12'}
+                month = quarter_month_map.get(quarter_num, '12')
+                formatted_date = f"{year}.{month}"
+                
+                pe_ratio_dict[formatted_date] = {
+                    'TTM市盈率': round(pe_ratio, 2),
+                    'success_count': stock_count
+                    }
+        
+        print(f"成功获取TTM市盈率数据，共{len(pe_ratio_dict)}条记录")
+        # 调试：输出部分数据
+        if pe_ratio_dict:
+            sample_keys = list(pe_ratio_dict.keys())[:5]
+            print(f"TTM市盈率数据样本: {[(k, pe_ratio_dict[k]) for k in sample_keys]}")
+        
+        return pe_ratio_dict
+        
+    except Exception as e:
+        print(f"获取TTM市盈率数据失败: {e}")
         return {}
