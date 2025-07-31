@@ -378,10 +378,16 @@ def calculate_rolling_profit(quarterly_data):
                 
                 valid_quarters += 1
         
-        # 添加滚动数据到当前季度
-        quarter['滚动4季度净利润'] = rolling_profit if rolling_profit != 0 else None
-        quarter['滚动4季度营业收入'] = rolling_revenue if rolling_revenue != 0 else None
-        quarter['滚动4季度归属母公司净利润'] = rolling_parent_profit if rolling_parent_profit != 0 else None
+        # 只有当有完整的4个季度数据时才设置滚动数据，否则设置为None
+        if valid_quarters >= 4:
+            quarter['滚动4季度净利润'] = rolling_profit if rolling_profit != 0 else None
+            quarter['滚动4季度营业收入'] = rolling_revenue if rolling_revenue != 0 else None
+            quarter['滚动4季度归属母公司净利润'] = rolling_parent_profit if rolling_parent_profit != 0 else None
+        else:
+            quarter['滚动4季度净利润'] = None
+            quarter['滚动4季度营业收入'] = None
+            quarter['滚动4季度归属母公司净利润'] = None
+        
         quarter['滚动季度数'] = valid_quarters
     
     # 恢复按时间倒序排列
@@ -850,32 +856,55 @@ def analyze_all_stocks_true_quarterly(start_year=2010):
     # 基于日线数据和总股本数据计算每个季度的市值总和
     quarterly_market_caps = calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_data, quarterly_stats)
     
-    # 准备基础结果数据
-    analysis_result = {
-        'analysis_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'start_year': start_year,
-        'total_stocks': total_stocks,
-        'success_count': success_count,
-        'failed_count': len(failed_stocks),
-        'failed_stocks': failed_stocks,
-        'quarterly_statistics': quarterly_stats,
-        'quarterly_market_caps': quarterly_market_caps,
-        'results': results
+    # 构建清理后的简洁数据结构
+    cleaned_data = {
+        "metadata": {
+            "analysis_type": "Quarterly Analysis",
+            "start_year": start_year,
+            "total_stocks": total_stocks,
+            "total_quarters": len(quarterly_stats),
+            "generated_at": datetime.now().strftime('%Y-%m-%d')
+        },
+        "quarterly_data": {}
     }
+    
+    # 合并每个季度的统计数据和市值数据
+    for quarter in quarterly_stats.keys():
+        quarter_stats = quarterly_stats.get(quarter, {})
+        market_data = quarterly_market_caps.get(quarter, {})
+        
+        # 检查是否有有效的滚动4Q数据
+        rolling_4q_count = quarter_stats.get('rolling_4q_count', 0)
+        has_valid_rolling_data = rolling_4q_count > 0
+        
+        cleaned_data["quarterly_data"][quarter] = {
+            "total_profit": quarter_stats.get('total_profit', 0),
+            "total_revenue": quarter_stats.get('total_revenue', 0),
+            "rolling_4q_profit": quarter_stats.get('rolling_4q_profit', 0) if has_valid_rolling_data else None,
+            "rolling_4q_revenue": quarter_stats.get('rolling_4q_revenue', 0) if has_valid_rolling_data else None,
+            "stock_count": quarter_stats.get('stock_count', 0),
+            "profitable_count": quarter_stats.get('profitable_count', 0),
+            "loss_count": quarter_stats.get('loss_count', 0),
+            "profit_rate": quarter_stats.get('profit_rate', 0),
+            "total_market_cap": market_data.get('total_market_cap', 0),
+            "pe_ratio": market_data.get('pe_ratio', 0),
+            "date": market_data.get('date', '')
+        }
 
     logger.info("=== 真实季度分析完成 ===")
     logger.info(f"总股票数: {total_stocks}")
     logger.info(f"成功获取: {success_count}")
     logger.info(f"获取失败: {len(failed_stocks)}")
     
-    # 保存完整结果到JSON文件
+    # 保存清理后的简洁结果到JSON文件
     output_file = 'true_quarterly_analysis.json'
     with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(analysis_result, f, ensure_ascii=False, indent=2)
+        json.dump(cleaned_data, f, ensure_ascii=False, indent=2)
     
-    logger.info(f"完整分析结果已保存到: {output_file}")
+    logger.info(f"清理后的分析结果已保存到: {output_file}")
+    logger.info(f"数据结构: metadata + {len(cleaned_data['quarterly_data'])} 个季度数据")
     
-    return analysis_result
+    return cleaned_data
 
 def generate_quarterly_statistics(results):
     """
@@ -964,45 +993,43 @@ def print_quarterly_summary(analysis_result, logger):
     """
     logger.info("=== 真实季度盈利分析摘要 ===")
     
-    quarterly_stats = analysis_result['quarterly_statistics']
-    quarterly_market_caps = analysis_result.get('quarterly_market_caps', {})
+    quarterly_data = analysis_result['quarterly_data']
     
-    logger.info("最近10个季度盈利情况:")
-    logger.info(f"{'季度':<12} {'总净利润(亿)':<15} {'总营收(万亿)':<15} {'滚动4Q净利润(亿)':<18} {'总市值(万亿)':<15} {'市盈率':<10} {'盈利率':<10} {'股票数':<8}")
-    logger.info("-" * 125)
+    logger.info("所有季度盈利情况:")
+    logger.info(f"{'季度':<12} {'总净利润(亿)':<16} {'总营收(万亿)':<16} {'滚动4Q净利润(亿)':<20} {'总市值(万亿)':<16} {'市盈率':<11} {'盈利率':<11} {'股票数':<8}")
+    logger.info("-" * 130)
     
-    for i, (quarter_key, stats) in enumerate(quarterly_stats.items()):
-        if i >= 10:  # 只显示最近10个季度
-            break
+    # 按季度倒序排列，显示所有季度
+    sorted_quarters = sorted(quarterly_data.keys(), reverse=True)
+    for i, quarter_key in enumerate(sorted_quarters):
+        # 显示所有季度数据
         
+        stats = quarterly_data[quarter_key]
         total_profit_yi = stats['total_profit'] / 100000000
         total_revenue_wanyi = stats['total_revenue'] / 1000000000000
-        rolling_4q_profit_yi = stats['rolling_4q_profit'] / 100000000 if stats['rolling_4q_count'] > 0 else 0
+        rolling_4q_profit_yi = stats['rolling_4q_profit'] / 100000000 if stats['rolling_4q_profit'] is not None else 0
         profit_rate = stats['profit_rate']
         stock_count = stats['stock_count']
+        total_market_cap_wanyi = stats['total_market_cap'] / 1000000000000
+        pe_ratio = stats['pe_ratio']
+        pe_ratio_str = f"{pe_ratio:.1f}" if pe_ratio is not None and pe_ratio > 0 else "N/A"
+        rolling_4q_profit_str = f"{rolling_4q_profit_yi:.0f}" if stats['rolling_4q_profit'] is not None else "N/A"
         
-        # 获取市值数据
-        market_cap_data = quarterly_market_caps.get(quarter_key, {})
-        total_market_cap_wanyi = market_cap_data.get('total_market_cap', 0) / 1000000000000
-        pe_ratio = market_cap_data.get('pe_ratio', None)
-        pe_ratio_str = f"{pe_ratio:.1f}" if pe_ratio is not None else "N/A"
-        
-        logger.info(f"{quarter_key:<12} {total_profit_yi:<15.0f} {total_revenue_wanyi:<15.1f} {rolling_4q_profit_yi:<18.0f} {total_market_cap_wanyi:<15.1f} {pe_ratio_str:<10} {profit_rate:<10.1f}% {stock_count:<8}")
+        logger.info(f"{quarter_key:<12} {total_profit_yi:<16.0f} {total_revenue_wanyi:<16.1f} {rolling_4q_profit_str:<20} {total_market_cap_wanyi:<16.1f} {pe_ratio_str:<11} {profit_rate:<10.1f}% {stock_count:<8}")
     
     # 显示市值统计摘要
-    if quarterly_market_caps:
+    if quarterly_data:
         logger.info("=== 市值统计摘要 ===")
-        total_quarters_with_market_cap = len(quarterly_market_caps)
+        total_quarters_with_market_cap = len(quarterly_data)
         logger.info(f"已计算市值的季度数: {total_quarters_with_market_cap}")
         
-        if quarterly_market_caps:
-            latest_quarter = list(quarterly_market_caps.keys())[0]
-            latest_data = quarterly_market_caps[latest_quarter]
-            logger.info(f"最新季度 ({latest_quarter}):")
-            logger.info(f"  总市值: {latest_data['total_market_cap']/1000000000000:.2f} 万亿元")
-            logger.info(f"  成功获取市值的股票数: {latest_data['success_count']}")
-            logger.info(f"  获取失败的股票数: {latest_data['failed_count']}")
-            logger.info(f"  数据日期: {latest_data['date']}")
+        latest_quarter = sorted_quarters[0]
+        latest_data = quarterly_data[latest_quarter]
+        logger.info(f"最新季度 ({latest_quarter}):")
+        logger.info(f"  总市值: {latest_data['total_market_cap']/1000000000000:.2f} 万亿元")
+        logger.info(f"  股票数: {latest_data['stock_count']}")
+        logger.info(f"  市盈率: {latest_data['pe_ratio']:.2f}")
+        logger.info(f"  数据日期: {latest_data['date']}")
 
 def main():
     """
