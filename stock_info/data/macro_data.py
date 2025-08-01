@@ -695,7 +695,9 @@ def fetch_macro_china_money_supply():
                 if formatted_date in rolling_4q_dict:
                     item['TTM市盈率'] = rolling_4q_dict[formatted_date]['TTM市盈率']
                     item['滚动4Q净利润'] = rolling_4q_dict[formatted_date]['滚动4Q净利润']
-                    print(f"DEBUG: 直接匹配成功 {formatted_date} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}")
+                    item['银行滚动4Q净利润'] = rolling_4q_dict[formatted_date]['银行滚动4Q净利润']
+                    item['非银行滚动4Q净利润'] = rolling_4q_dict[formatted_date]['非银行滚动4Q净利润']
+                    print(f"DEBUG: 直接匹配成功 {formatted_date} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}, 银行4Q: {item['银行滚动4Q净利润']}, 非银行4Q: {item['非银行滚动4Q净利润']}")
                 else:
                     # 尝试其他可能的日期格式
                     found = False
@@ -705,13 +707,17 @@ def fetch_macro_china_money_supply():
                             if formatted_date.split('.')[0] == key.split('.')[0] and formatted_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
                                 item['TTM市盈率'] = rolling_4q_dict[key]['TTM市盈率']
                                 item['滚动4Q净利润'] = rolling_4q_dict[key]['滚动4Q净利润']
-                                print(f"DEBUG: 格式匹配成功 {formatted_date} -> {key} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}")
+                                item['银行滚动4Q净利润'] = rolling_4q_dict[key]['银行滚动4Q净利润']
+                                item['非银行滚动4Q净利润'] = rolling_4q_dict[key]['非银行滚动4Q净利润']
+                                print(f"DEBUG: 格式匹配成功 {formatted_date} -> {key} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}, 银行4Q: {item['银行滚动4Q净利润']}, 非银行4Q: {item['非银行滚动4Q净利润']}")
                                 found = True
                                 break
                     
                     if not found:
                         item['TTM市盈率'] = None
                         item['滚动4Q净利润'] = None
+                        item['银行滚动4Q净利润'] = None
+                        item['非银行滚动4Q净利润'] = None
                         if len(rolling_4q_dict) > 0:  # 只在前几条记录中打印调试信息
                             print(f"DEBUG: 未找到匹配 {formatted_date}，滚动4Q数据键示例: {list(rolling_4q_dict.keys())[:3]}")
                 
@@ -853,7 +859,7 @@ def get_rolling_4q_profit_data():
     只有stock_count大于50时，当季数据才被采用
     
     Returns:
-        dict: 包含日期、TTM市盈率和滚动4Q净利润的字典
+        dict: 包含日期、TTM市盈率、滚动4Q净利润、银行滚动4Q净利润和非银行滚动4Q净利润的字典
     """
     try:
         # 读取JSON文件
@@ -861,11 +867,22 @@ def get_rolling_4q_profit_data():
         
         if not os.path.exists(json_file_path):
             print(f"TTM市盈率数据文件不存在: {json_file_path}")
+            print("返回空数据字典")
             return {}
         
         print(f"DEBUG: 开始读取TTM市盈率数据文件: {json_file_path}")
+        
+        # 检查文件是否为空
+        if os.path.getsize(json_file_path) == 0:
+            print(f"TTM市盈率数据文件为空: {json_file_path}")
+            return {}
+            
         with open(json_file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+            content = f.read().strip()
+            if not content:
+                print(f"TTM市盈率数据文件内容为空: {json_file_path}")
+                return {}
+            data = json.loads(content)
         
         print(f"DEBUG: JSON文件读取成功，包含 {len(data.get('quarterly_data', {}))} 个季度数据")
         rolling_4q_dict = {}
@@ -877,10 +894,13 @@ def get_rolling_4q_profit_data():
             # 获取pe_ratio和rolling_4q_profit数据
             pe_ratio = quarter_info.get('pe_ratio')
             rolling_4q_profit = quarter_info.get('rolling_4q_profit')
+            # 获取银行和非银行滚动4Q净利润数据
+            bank_rolling_4q_profit = quarter_info.get('bank_rolling_4q_profit')
+            non_bank_rolling_4q_profit = quarter_info.get('non_bank_rolling_4q_profit')
             stock_count = quarter_info.get('stock_count', 0)
             
             # 检查stock_count是否大于50
-            if stock_count > 50 and (pe_ratio is not None or rolling_4q_profit is not None):
+            if stock_count > 50 and (pe_ratio is not None or rolling_4q_profit is not None or bank_rolling_4q_profit is not None or non_bank_rolling_4q_profit is not None):
                 # 将季度格式转换为年月格式
                 # 例如：2024-Q1 -> 2024.3, 2024-Q2 -> 2024.6, 2024-Q3 -> 2024.9, 2024-Q4 -> 2024.12
                 year, quarter_num = quarter.split('-Q')
@@ -891,6 +911,8 @@ def get_rolling_4q_profit_data():
                 rolling_4q_dict[formatted_date] = {
                     'TTM市盈率': round(pe_ratio, 2) if pe_ratio is not None else None,
                     '滚动4Q净利润': round(rolling_4q_profit / 100000000, 2) if rolling_4q_profit is not None else None,  # 转换为亿元
+                    '银行滚动4Q净利润': round(bank_rolling_4q_profit / 100000000, 2) if bank_rolling_4q_profit is not None else None,  # 转换为亿元
+                    '非银行滚动4Q净利润': round(non_bank_rolling_4q_profit / 100000000, 2) if non_bank_rolling_4q_profit is not None else None,  # 转换为亿元
                     'success_count': stock_count
                     }
         

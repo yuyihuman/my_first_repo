@@ -989,15 +989,19 @@
             const months = data.map(item => item.月份);
             const hs300Index = data.map(item => item.沪深300指数);
             const rolling4qProfit = data.map(item => item.滚动4Q净利润);
+            const bankRolling4qProfit = data.map(item => item.银行滚动4Q净利润);
+            const nonBankRolling4qProfit = data.map(item => item.非银行滚动4Q净利润);
             
             // 过滤掉所有数据都为null的点
             const filteredData = [];
             for (let i = 0; i < months.length; i++) {
-                if (hs300Index[i] !== null || rolling4qProfit[i] !== null) {
+                if (hs300Index[i] !== null || rolling4qProfit[i] !== null || bankRolling4qProfit[i] !== null || nonBankRolling4qProfit[i] !== null) {
                     filteredData.push({
                         month: months[i],
                         hs300: hs300Index[i],
-                        profit: rolling4qProfit[i]
+                        profit: rolling4qProfit[i],
+                        bankProfit: bankRolling4qProfit[i],
+                        nonBankProfit: nonBankRolling4qProfit[i]
                     });
                 }
             }
@@ -1027,6 +1031,20 @@
                         backgroundColor: 'rgba(54, 162, 235, 0.2)',
                         yAxisID: 'y1',
                         tension: 0.1
+                    }, {
+                        label: '银行滚动4Q净利润 (亿元)',
+                        data: filteredData.map(item => item.bankProfit),
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        yAxisID: 'y1',
+                        tension: 0.1
+                    }, {
+                        label: '非银行滚动4Q净利润 (亿元)',
+                        data: filteredData.map(item => item.nonBankProfit),
+                        borderColor: 'rgba(255, 206, 86, 1)',
+                        backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                        yAxisID: 'y1',
+                        tension: 0.1
                     }]
                 },
                 options: {
@@ -1039,7 +1057,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: '沪深300指数与滚动4Q净利润对比'
+                            text: '沪深300指数与滚动4Q净利润对比（含银行/非银行分类）'
                         },
                         legend: {
                             display: true
