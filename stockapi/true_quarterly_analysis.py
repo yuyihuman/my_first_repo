@@ -719,12 +719,38 @@ def calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_dat
                 debug_info.append(f"{stock_code}: 计算错误 - {str(e)}")
                 continue
         
+        # 获取股票名称映射
+        stock_name_mapping = get_stock_name_mapping()
+        
+        # 分别计算银行和非银行的市值
+        bank_market_cap = 0
+        non_bank_market_cap = 0
+        
+        for stock_code, details in stock_details.items():
+            stock_name = stock_name_mapping.get(stock_code, '')
+            if is_bank_stock(stock_name):
+                bank_market_cap += details['market_cap']
+            else:
+                non_bank_market_cap += details['market_cap']
+        
         # 计算市盈率 (PE ratio)
         pe_ratio = None
+        bank_pe_ratio = None
+        non_bank_pe_ratio = None
+        
         if quarter_key in quarterly_stats:
             rolling_4q_profit = quarterly_stats[quarter_key].get('rolling_4q_profit', 0)
+            bank_rolling_4q_profit = quarterly_stats[quarter_key].get('bank_rolling_4q_profit', 0)
+            non_bank_rolling_4q_profit = quarterly_stats[quarter_key].get('non_bank_rolling_4q_profit', 0)
+            
             if rolling_4q_profit > 0:
                 pe_ratio = total_market_cap / rolling_4q_profit
+            
+            if bank_rolling_4q_profit > 0:
+                bank_pe_ratio = bank_market_cap / bank_rolling_4q_profit
+            
+            if non_bank_rolling_4q_profit > 0:
+                non_bank_pe_ratio = non_bank_market_cap / non_bank_rolling_4q_profit
         
         quarterly_market_caps[quarter_key] = {
             'total_market_cap': total_market_cap,
@@ -732,6 +758,10 @@ def calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_dat
             'failed_count': failed_count,
             'date': quarter_end_date,
             'pe_ratio': pe_ratio,
+            'bank_market_cap': bank_market_cap,
+            'non_bank_market_cap': non_bank_market_cap,
+            'bank_pe_ratio': bank_pe_ratio,
+            'non_bank_pe_ratio': non_bank_pe_ratio,
             'stock_details': stock_details
         }
         
@@ -947,6 +977,22 @@ def analyze_all_stocks_true_quarterly(start_year=2010):
             "profit_rate": quarter_stats.get('profit_rate', 0),
             "total_market_cap": market_data.get('total_market_cap', 0),
             "pe_ratio": market_data.get('pe_ratio', 0),
+            # 银行股指标
+            "bank_rolling_4q_profit": quarter_stats.get('bank_rolling_4q_profit', 0) if has_valid_rolling_data else None,
+            "bank_stock_count": quarter_stats.get('bank_stock_count', 0),
+            "bank_profitable_count": quarter_stats.get('bank_profitable_count', 0),
+            "bank_loss_count": quarter_stats.get('bank_loss_count', 0),
+            "bank_profit_rate": quarter_stats.get('bank_profit_rate', 0),
+            "bank_market_cap": market_data.get('bank_market_cap', 0),
+            "bank_pe_ratio": market_data.get('bank_pe_ratio', 0),
+            # 非银行股指标
+            "non_bank_rolling_4q_profit": quarter_stats.get('non_bank_rolling_4q_profit', 0) if has_valid_rolling_data else None,
+            "non_bank_stock_count": quarter_stats.get('non_bank_stock_count', 0),
+            "non_bank_profitable_count": quarter_stats.get('non_bank_profitable_count', 0),
+            "non_bank_loss_count": quarter_stats.get('non_bank_loss_count', 0),
+            "non_bank_profit_rate": quarter_stats.get('non_bank_profit_rate', 0),
+            "non_bank_market_cap": market_data.get('non_bank_market_cap', 0),
+            "non_bank_pe_ratio": market_data.get('non_bank_pe_ratio', 0),
             "date": market_data.get('date', ''),
             "stock_details": market_data.get('stock_details', {})
         }
@@ -970,6 +1016,22 @@ def analyze_all_stocks_true_quarterly(start_year=2010):
         'results': results
     }
 
+def is_bank_stock(stock_name):
+    """
+    判断是否为银行股票
+    
+    Args:
+        stock_name: 股票名称
+    
+    Returns:
+        bool: 是否为银行股票
+    """
+    if not stock_name:
+        return False
+    
+    bank_keywords = ['银行', '农商', '农信', '村镇银行', '信用社']
+    return any(keyword in stock_name for keyword in bank_keywords)
+
 def generate_quarterly_statistics(results):
     """
     生成季度统计数据
@@ -982,6 +1044,9 @@ def generate_quarterly_statistics(results):
     """
     from collections import defaultdict
     
+    # 获取股票名称映射
+    stock_name_mapping = get_stock_name_mapping()
+    
     quarterly_stats = defaultdict(lambda: {
         'total_profit': 0,
         'total_revenue': 0,
@@ -991,11 +1056,27 @@ def generate_quarterly_statistics(results):
         'rolling_4q_profit': 0,
         'rolling_4q_revenue': 0,
         'rolling_4q_parent_profit': 0,
-        'rolling_4q_count': 0
+        'rolling_4q_count': 0,
+        # 银行股票统计
+        'bank_rolling_4q_profit': 0,
+        'bank_rolling_4q_count': 0,
+        'bank_stock_count': 0,
+        'bank_profitable_count': 0,
+        'bank_loss_count': 0,
+        # 非银行股票统计
+        'non_bank_rolling_4q_profit': 0,
+        'non_bank_rolling_4q_count': 0,
+        'non_bank_stock_count': 0,
+        'non_bank_profitable_count': 0,
+        'non_bank_loss_count': 0
     })
     
     # 按季度统计
     for stock_code, stock_data in results.items():
+        # 判断是否为银行股票
+        stock_name = stock_name_mapping.get(stock_code, '')
+        is_bank = is_bank_stock(stock_name)
+        
         for quarter_data in stock_data['quarterly_data']:
             year = quarter_data['年份']
             quarter = quarter_data['季度']
@@ -1006,12 +1087,26 @@ def generate_quarterly_statistics(results):
             
             quarterly_stats[quarter_key]['stock_count'] += 1
             
+            # 分类统计股票数量
+            if is_bank:
+                quarterly_stats[quarter_key]['bank_stock_count'] += 1
+            else:
+                quarterly_stats[quarter_key]['non_bank_stock_count'] += 1
+            
             if net_profit is not None:
                 quarterly_stats[quarter_key]['total_profit'] += net_profit
                 if net_profit > 0:
                     quarterly_stats[quarter_key]['profitable_count'] += 1
+                    if is_bank:
+                        quarterly_stats[quarter_key]['bank_profitable_count'] += 1
+                    else:
+                        quarterly_stats[quarter_key]['non_bank_profitable_count'] += 1
                 else:
                     quarterly_stats[quarter_key]['loss_count'] += 1
+                    if is_bank:
+                        quarterly_stats[quarter_key]['bank_loss_count'] += 1
+                    else:
+                        quarterly_stats[quarter_key]['non_bank_loss_count'] += 1
             
             if revenue is not None:
                 quarterly_stats[quarter_key]['total_revenue'] += revenue
@@ -1024,6 +1119,14 @@ def generate_quarterly_statistics(results):
             if rolling_profit is not None:
                 quarterly_stats[quarter_key]['rolling_4q_profit'] += rolling_profit
                 quarterly_stats[quarter_key]['rolling_4q_count'] += 1
+                
+                # 分类统计滚动4季度利润
+                if is_bank:
+                    quarterly_stats[quarter_key]['bank_rolling_4q_profit'] += rolling_profit
+                    quarterly_stats[quarter_key]['bank_rolling_4q_count'] += 1
+                else:
+                    quarterly_stats[quarter_key]['non_bank_rolling_4q_profit'] += rolling_profit
+                    quarterly_stats[quarter_key]['non_bank_rolling_4q_count'] += 1
             
             if rolling_revenue is not None:
                 quarterly_stats[quarter_key]['rolling_4q_revenue'] += rolling_revenue
@@ -1038,6 +1141,20 @@ def generate_quarterly_statistics(results):
             stats['profit_rate'] = stats['profitable_count'] / total_with_profit_data * 100
         else:
             stats['profit_rate'] = 0
+        
+        # 计算银行股票盈利率
+        bank_total_with_profit_data = stats['bank_profitable_count'] + stats['bank_loss_count']
+        if bank_total_with_profit_data > 0:
+            stats['bank_profit_rate'] = stats['bank_profitable_count'] / bank_total_with_profit_data * 100
+        else:
+            stats['bank_profit_rate'] = 0
+        
+        # 计算非银行股票盈利率
+        non_bank_total_with_profit_data = stats['non_bank_profitable_count'] + stats['non_bank_loss_count']
+        if non_bank_total_with_profit_data > 0:
+            stats['non_bank_profit_rate'] = stats['non_bank_profitable_count'] / non_bank_total_with_profit_data * 100
+        else:
+            stats['non_bank_profit_rate'] = 0
     
     # 转换为普通字典并排序
     sorted_stats = dict(sorted(quarterly_stats.items(), reverse=True))
@@ -1341,31 +1458,48 @@ def main():
     """
     主函数
     """
-    # 分析真实季度数据
-    full_result = analyze_all_stocks_true_quarterly(start_year=2010)
-    analysis_result = full_result['cleaned_data']
-    
-    # 获取logger实例
-    logger = logging.getLogger(__name__)
-    
-    # 获取股票名称映射
-    stock_name_mapping = get_stock_name_mapping()
-    
-    # 打印详细股票信息
-    print_detailed_stock_info(full_result, logger, ['2010-Q4', '2011-Q4'])
-    
-    # 打印2010-2011年市值趋势变化分析
-    print_market_cap_trend_analysis(full_result, logger, stock_name_mapping)
-    
-    # 打印摘要
-    print_quarterly_summary(full_result, logger)
-    
-    logger.info("真实季度分析完成！")
-    logger.info("主要改进:")
-    logger.info("• 使用'按报告期'参数获取真正的季度数据")
-    logger.info("• 数据包含Q1、Q2、Q3、Q4四个季度的详细信息")
-    logger.info("• 可以分析季度间的盈利变化趋势")
-    logger.info("• 提供更精确的季度盈利统计")
+    try:
+        print("开始执行主函数...")
+        # 分析真实季度数据
+        print("正在分析真实季度数据...")
+        full_result = analyze_all_stocks_true_quarterly(start_year=2010)
+        print("季度数据分析完成")
+        
+        analysis_result = full_result['cleaned_data']
+        
+        # 获取logger实例
+        logger = logging.getLogger(__name__)
+        
+        # 获取股票名称映射
+        print("正在获取股票名称映射...")
+        stock_name_mapping = get_stock_name_mapping()
+        print("股票名称映射获取完成")
+        
+        # 打印详细股票信息
+        print("正在打印详细股票信息...")
+        print_detailed_stock_info(full_result, logger, ['2010-Q4', '2011-Q4'])
+        
+        # 打印2010-2011年市值趋势变化分析
+        print("正在打印市值趋势分析...")
+        print_market_cap_trend_analysis(full_result, logger, stock_name_mapping)
+        
+        # 打印摘要
+        print("正在打印摘要...")
+        print_quarterly_summary(full_result, logger)
+        
+        logger.info("真实季度分析完成！")
+        logger.info("主要改进:")
+        logger.info("• 使用'按报告期'参数获取真正的季度数据")
+        logger.info("• 数据包含Q1、Q2、Q3、Q4四个季度的详细信息")
+        logger.info("• 可以分析季度间的盈利变化趋势")
+        logger.info("• 提供更精确的季度盈利统计")
+        logger.info("• 新增银行和非银行股票分类统计")
+        print("程序执行完成！")
+        
+    except Exception as e:
+        print(f"程序执行出错: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
