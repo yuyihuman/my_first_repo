@@ -23,6 +23,53 @@ CACHE_DURATION_HOURS = 2  # 缓存有效期2小时
 # 3. 缓存可以显著提高重复运行的速度
 # 4. 如需强制刷新数据，可删除缓存文件
 
+def get_stock_name_mapping():
+    """
+    获取所有A股股票代码和名称的映射关系（支持缓存）
+    
+    Returns:
+        dict: 股票代码到股票名称的映射字典
+    """
+    # 尝试从缓存加载股票名称数据
+    cached_data = load_cache('stock_names')
+    if cached_data is not None:
+        return cached_data
+    
+    logger = logging.getLogger(__name__)
+    logger.info("开始获取所有A股股票代码和名称映射...")
+    
+    try:
+        # 使用akshare获取所有A股股票代码和名称 <mcreference link="https://cloud.tencent.com/developer/article/1666899" index="1">1</mcreference>
+        stock_info_df = ak.stock_info_a_code_name()
+        
+        # 创建代码到名称的映射字典
+        stock_name_mapping = {}
+        
+        for _, row in stock_info_df.iterrows():
+            code = row['code']
+            name = row['name']
+            
+            # 为深圳和上海股票添加交易所后缀
+            if code.startswith(('000', '002', '300', '301', '302')):
+                full_code = f"{code}.SZ"
+            elif code.startswith('6'):
+                full_code = f"{code}.SH"
+            else:
+                full_code = code
+            
+            stock_name_mapping[full_code] = name
+        
+        logger.info(f"成功获取 {len(stock_name_mapping)} 只股票的名称映射")
+        
+        # 保存到缓存
+        save_cache(stock_name_mapping, 'stock_names')
+        
+        return stock_name_mapping
+        
+    except Exception as e:
+        logger.error(f"获取股票名称映射失败: {e}")
+        return {}
+
 def setup_logging():
     """
     设置日志系统
@@ -1162,14 +1209,23 @@ def print_quarterly_summary(analysis_result, logger):
         logger.info(f"  市盈率: {latest_data['pe_ratio']:.2f}")
         logger.info(f"  数据日期: {latest_data['date']}")
 
-def print_market_cap_trend_analysis(analysis_result, logger):
+def print_market_cap_trend_analysis(analysis_result, logger, stock_name_mapping=None):
     """
     打印2010到2011年的市值趋势变化表
+    
+    Args:
+        analysis_result: 分析结果数据
+        logger: 日志记录器
+        stock_name_mapping: 股票代码到名称的映射字典
     """
     logger.info("")
     logger.info("=== 2010-2011年市值趋势变化分析 ===")
-    logger.info("股票代码         2010-Q4市值(亿)    2011-Q4市值(亿)    变化值(亿)       变化百分比(%)")
-    logger.info("-" * 100)
+    if stock_name_mapping:
+        logger.info("股票代码         股票名称              2010-Q4市值(亿)    2011-Q4市值(亿)    变化值(亿)       变化百分比(%)")
+        logger.info("-" * 120)
+    else:
+        logger.info("股票代码         2010-Q4市值(亿)    2011-Q4市值(亿)    变化值(亿)       变化百分比(%)")
+        logger.info("-" * 100)
     
     # 获取季度数据
     quarterly_data = analysis_result.get('cleaned_data', {}).get('quarterly_data', {})
@@ -1234,11 +1290,19 @@ def print_market_cap_trend_analysis(analysis_result, logger):
         change_value = data['change_value']
         change_percent = data['change_percent']
         
+        # 获取股票名称
+        stock_name = stock_name_mapping.get(stock_code, "未知") if stock_name_mapping else ""
+        
         # 格式化输出
         change_sign = "+" if change_value >= 0 else ""
         percent_sign = "+" if change_percent >= 0 else ""
         
-        logger.info(f"{stock_code:<12} {market_cap_2010:>12.2f}      {market_cap_2011:>12.2f}      {change_sign}{change_value:>10.2f}      {percent_sign}{change_percent:>8.1f}%")
+        if stock_name_mapping:
+            # 包含股票名称的格式
+            logger.info(f"{stock_code:<12} {stock_name:<20} {market_cap_2010:>12.2f}      {market_cap_2011:>12.2f}      {change_sign}{change_value:>10.2f}      {percent_sign}{change_percent:>8.1f}%")
+        else:
+            # 原始格式（不包含股票名称）
+            logger.info(f"{stock_code:<12} {market_cap_2010:>12.2f}      {market_cap_2011:>12.2f}      {change_sign}{change_value:>10.2f}      {percent_sign}{change_percent:>8.1f}%")
     
     # 统计汇总
     total_market_cap_2010 = sum(d['market_cap_2010'] for d in trend_data)
@@ -1284,11 +1348,14 @@ def main():
     # 获取logger实例
     logger = logging.getLogger(__name__)
     
+    # 获取股票名称映射
+    stock_name_mapping = get_stock_name_mapping()
+    
     # 打印详细股票信息
     print_detailed_stock_info(full_result, logger, ['2010-Q4', '2011-Q4'])
     
     # 打印2010-2011年市值趋势变化分析
-    print_market_cap_trend_analysis(full_result, logger)
+    print_market_cap_trend_analysis(full_result, logger, stock_name_mapping)
     
     # 打印摘要
     print_quarterly_summary(full_result, logger)
