@@ -1035,6 +1035,9 @@ def print_detailed_stock_info(analysis_result, logger, target_quarters):
             quarter_stats = quarterly_data.get(quarter_key, {})
             stock_details = quarter_stats.get('stock_details', {})
             
+            # 收集所有股票数据用于排序
+            stock_data_list = []
+            
             # 遍历所有股票，找到该季度的数据
             for stock_code, stock_info in results.items():
                 quarterly_list = stock_info.get('quarterly_data', [])
@@ -1057,16 +1060,40 @@ def print_detailed_stock_info(analysis_result, logger, target_quarters):
                         close_price = market_cap_info['close_price']
                         total_shares_wan = market_cap_info['total_shares'] / 10000  # 转换为万股
                         
-                        logger.info(f"{stock_code:<12} {net_profit:<15.0f} {market_cap_yi:<15.2f} {close_price:<12.2f} {total_shares_wan:<15.0f}")
+                        stock_data_list.append({
+                            'stock_code': stock_code,
+                            'net_profit': net_profit,
+                            'market_cap_yi': market_cap_yi,
+                            'close_price': close_price,
+                            'total_shares_wan': total_shares_wan,
+                            'market_cap_raw': market_cap_info['market_cap']
+                        })
                         
                         total_market_cap_check += market_cap_info['market_cap']
                         total_profit_check += net_profit * 10000  # 转换为元
                         stock_count += 1
                     else:
                         # 如果没有市值数据，只显示净利润
-                        logger.info(f"{stock_code:<12} {net_profit:<15.0f} {'N/A':<15} {'N/A':<12} {'N/A':<15}")
+                        stock_data_list.append({
+                            'stock_code': stock_code,
+                            'net_profit': net_profit,
+                            'market_cap_yi': 0,
+                            'close_price': 'N/A',
+                            'total_shares_wan': 'N/A',
+                            'market_cap_raw': 0
+                        })
                         total_profit_check += net_profit * 10000  # 转换为元
                         stock_count += 1
+            
+            # 按市值从大到小排序
+            stock_data_list.sort(key=lambda x: x['market_cap_raw'], reverse=True)
+            
+            # 打印排序后的股票信息
+            for stock_data in stock_data_list:
+                if stock_data['close_price'] == 'N/A':
+                    logger.info(f"{stock_data['stock_code']:<12} {stock_data['net_profit']:<15.0f} {'N/A':<15} {'N/A':<12} {'N/A':<15}")
+                else:
+                    logger.info(f"{stock_data['stock_code']:<12} {stock_data['net_profit']:<15.0f} {stock_data['market_cap_yi']:<15.2f} {stock_data['close_price']:<12.2f} {stock_data['total_shares_wan']:<15.0f}")
             
             # 显示汇总信息
             logger.info("-" * 80)
@@ -1119,8 +1146,7 @@ def print_quarterly_summary(analysis_result, logger):
         
         logger.info(f"{quarter_key:<12} {total_profit_yi:<16.0f} {total_revenue_wanyi:<16.1f} {rolling_4q_profit_str:<20} {total_market_cap_wanyi:<16.1f} {pe_ratio_str:<11} {profit_rate:<10.1f}% {stock_count:<8}")
     
-    # 打印2010年Q4和2011年Q4的详细股票信息
-    print_detailed_stock_info(analysis_result, logger, ['2010-Q4', '2011-Q4'])
+    # 详细股票信息将在main函数中单独调用
     
     # 显示市值统计摘要
     if quarterly_data:
@@ -1136,6 +1162,117 @@ def print_quarterly_summary(analysis_result, logger):
         logger.info(f"  市盈率: {latest_data['pe_ratio']:.2f}")
         logger.info(f"  数据日期: {latest_data['date']}")
 
+def print_market_cap_trend_analysis(analysis_result, logger):
+    """
+    打印2010到2011年的市值趋势变化表
+    """
+    logger.info("")
+    logger.info("=== 2010-2011年市值趋势变化分析 ===")
+    logger.info("股票代码         2010-Q4市值(亿)    2011-Q4市值(亿)    变化值(亿)       变化百分比(%)")
+    logger.info("-" * 100)
+    
+    # 获取季度数据
+    quarterly_data = analysis_result.get('cleaned_data', {}).get('quarterly_data', {})
+    
+    if not quarterly_data:
+        logger.info("缺少季度数据")
+        return
+    
+    # 获取2010-Q4和2011-Q4的市值详情
+    quarter_2010_q4 = quarterly_data.get('2010-Q4', {})
+    quarter_2011_q4 = quarterly_data.get('2011-Q4', {})
+    
+    stock_details_2010 = quarter_2010_q4.get('stock_details', {})
+    stock_details_2011 = quarter_2011_q4.get('stock_details', {})
+    
+    logger.info(f"2010-Q4有市值数据的股票: {len(stock_details_2010)}只")
+    logger.info(f"2011-Q4有市值数据的股票: {len(stock_details_2011)}只")
+    
+    if not stock_details_2010 or not stock_details_2011:
+        logger.info("缺少2010-Q4或2011-Q4的市值数据")
+        return
+    
+    # 收集所有股票的市值变化数据
+    trend_data = []
+    
+    # 找到两个季度都有数据的股票
+    common_stocks = set(stock_details_2010.keys()) & set(stock_details_2011.keys())
+    logger.info(f"两个季度都有数据的股票: {len(common_stocks)}只")
+    
+    if not common_stocks:
+        logger.info("没有找到同时包含2010-Q4和2011-Q4市值数据的股票")
+        return
+    
+    for stock_code in common_stocks:
+        market_cap_2010 = stock_details_2010[stock_code]['market_cap'] / 100000000  # 转换为亿元
+        market_cap_2011 = stock_details_2011[stock_code]['market_cap'] / 100000000  # 转换为亿元
+        
+        # 计算变化值和百分比
+        change_value = market_cap_2011 - market_cap_2010
+        change_percent = (change_value / market_cap_2010) * 100 if market_cap_2010 > 0 else 0
+        
+        trend_data.append({
+            'stock_code': stock_code,
+            'market_cap_2010': market_cap_2010,
+            'market_cap_2011': market_cap_2011,
+            'change_value': change_value,
+            'change_percent': change_percent
+        })
+    
+    if len(trend_data) == 0:
+        logger.info("没有找到同时包含2010-Q4和2011-Q4市值数据的股票")
+        return
+    
+    # 按2010年市值排序（从大到小）
+    trend_data.sort(key=lambda x: x['market_cap_2010'], reverse=True)
+    
+    # 打印所有股票的变化情况
+    for i, data in enumerate(trend_data):
+        stock_code = data['stock_code']
+        market_cap_2010 = data['market_cap_2010']
+        market_cap_2011 = data['market_cap_2011']
+        change_value = data['change_value']
+        change_percent = data['change_percent']
+        
+        # 格式化输出
+        change_sign = "+" if change_value >= 0 else ""
+        percent_sign = "+" if change_percent >= 0 else ""
+        
+        logger.info(f"{stock_code:<12} {market_cap_2010:>12.2f}      {market_cap_2011:>12.2f}      {change_sign}{change_value:>10.2f}      {percent_sign}{change_percent:>8.1f}%")
+    
+    # 统计汇总
+    total_market_cap_2010 = sum(d['market_cap_2010'] for d in trend_data)
+    total_market_cap_2011 = sum(d['market_cap_2011'] for d in trend_data)
+    total_change = total_market_cap_2011 - total_market_cap_2010
+    total_change_percent = (total_change / total_market_cap_2010) * 100 if total_market_cap_2010 > 0 else 0
+    
+    # 计算上涨和下跌的股票数量
+    rising_stocks = [d for d in trend_data if d['change_percent'] > 0]
+    falling_stocks = [d for d in trend_data if d['change_percent'] < 0]
+    unchanged_stocks = len(trend_data) - len(rising_stocks) - len(falling_stocks)
+    
+    # 打印统计信息
+    logger.info("-" * 100)
+    logger.info(f"统计信息:")
+    logger.info(f"2010-Q4总市值: {total_market_cap_2010/10000:.2f}万亿元")
+    logger.info(f"2011-Q4总市值: {total_market_cap_2011/10000:.2f}万亿元")
+    logger.info(f"总变化值: {total_change/10000:+.2f}万亿元 ({total_change_percent:+.2f}%)")
+    logger.info("")
+    logger.info("=== 涨跌分布统计 ===")
+    logger.info(f"上涨股票: {len(rising_stocks)}只 ({len(rising_stocks)/len(trend_data)*100:.1f}%)")
+    logger.info(f"下跌股票: {len(falling_stocks)}只 ({len(falling_stocks)/len(trend_data)*100:.1f}%)")
+    logger.info(f"持平股票: {unchanged_stocks}只 ({unchanged_stocks/len(trend_data)*100:.1f}%)")
+    
+    if rising_stocks:
+        avg_rise = sum(d['change_percent'] for d in rising_stocks) / len(rising_stocks)
+        logger.info(f"上涨股票平均涨幅: {avg_rise:.1f}%")
+    
+    if falling_stocks:
+        avg_fall = sum(d['change_percent'] for d in falling_stocks) / len(falling_stocks)
+        logger.info(f"下跌股票平均跌幅: {avg_fall:.1f}%")
+    
+    logger.info("-" * 100)
+
 def main():
     """
     主函数
@@ -1149,6 +1286,9 @@ def main():
     
     # 打印详细股票信息
     print_detailed_stock_info(full_result, logger, ['2010-Q4', '2011-Q4'])
+    
+    # 打印2010-2011年市值趋势变化分析
+    print_market_cap_trend_analysis(full_result, logger)
     
     # 打印摘要
     print_quarterly_summary(full_result, logger)
