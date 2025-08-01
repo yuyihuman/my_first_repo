@@ -623,6 +623,9 @@ def calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_dat
         
         logger.info(f"该季度有财务数据的股票数: {len(stocks_in_quarter)}")
         
+        # 存储每只股票的详细市值信息
+        stock_details = {}
+        
         # 计算每只股票的市值
         for stock_code in stocks_in_quarter:
             try:
@@ -656,6 +659,14 @@ def calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_dat
                 total_market_cap += market_cap
                 success_count += 1
                 
+                # 存储股票详细信息
+                stock_details[stock_code] = {
+                    'market_cap': market_cap,
+                    'close_price': close_price,
+                    'total_shares': total_shares,
+                    'date': target_date.strftime('%Y-%m-%d')
+                }
+                
             except Exception as e:
                 failed_count += 1
                 debug_info.append(f"{stock_code}: 计算错误 - {str(e)}")
@@ -673,7 +684,8 @@ def calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_dat
             'success_count': success_count,
             'failed_count': failed_count,
             'date': quarter_end_date,
-            'pe_ratio': pe_ratio
+            'pe_ratio': pe_ratio,
+            'stock_details': stock_details
         }
         
         logger.info(f"✅ {quarter_key}: 总市值 {total_market_cap/1000000000000:.2f} 万亿元")
@@ -888,7 +900,8 @@ def analyze_all_stocks_true_quarterly(start_year=2010):
             "profit_rate": quarter_stats.get('profit_rate', 0),
             "total_market_cap": market_data.get('total_market_cap', 0),
             "pe_ratio": market_data.get('pe_ratio', 0),
-            "date": market_data.get('date', '')
+            "date": market_data.get('date', ''),
+            "stock_details": market_data.get('stock_details', {})
         }
 
     logger.info("=== 真实季度分析完成 ===")
@@ -904,7 +917,11 @@ def analyze_all_stocks_true_quarterly(start_year=2010):
     logger.info(f"清理后的分析结果已保存到: {output_file}")
     logger.info(f"数据结构: metadata + {len(cleaned_data['quarterly_data'])} 个季度数据")
     
-    return cleaned_data
+    # 返回包含详细股票数据的完整结果
+    return {
+        'cleaned_data': cleaned_data,
+        'results': results
+    }
 
 def generate_quarterly_statistics(results):
     """
@@ -983,17 +1000,102 @@ def generate_quarterly_statistics(results):
 
 
 
+def print_detailed_stock_info(analysis_result, logger, target_quarters):
+    """
+    打印指定季度每只股票的详细市值和净利润信息
+    
+    Args:
+        analysis_result: 分析结果（包含cleaned_data和results）
+        logger: 日志记录器
+        target_quarters: 目标季度列表，如['2010-Q4', '2011-Q4']
+    """
+    results = analysis_result.get('results', {})
+    quarterly_data = analysis_result.get('cleaned_data', {}).get('quarterly_data', {})
+    
+    for quarter_key in target_quarters:
+        try:
+            if quarter_key not in quarterly_data:
+                logger.info(f"未找到季度 {quarter_key} 的数据")
+                continue
+            
+            logger.info(f"开始处理季度 {quarter_key}")
+            logger.info(f"\n=== {quarter_key} 详细股票信息 ===")
+            logger.info(f"{'股票代码':<12} {'净利润(万元)':<15} {'市值(亿元)':<15} {'收盘价(元)':<12} {'总股本(万股)':<15}")
+            logger.info("-" * 80)
+            
+            year, quarter = quarter_key.split('-')
+            year = int(year)
+            quarter_num = int(quarter[1:])
+            
+            total_market_cap_check = 0
+            total_profit_check = 0
+            stock_count = 0
+            
+            # 获取该季度的市值详情
+            quarter_stats = quarterly_data.get(quarter_key, {})
+            stock_details = quarter_stats.get('stock_details', {})
+            
+            # 遍历所有股票，找到该季度的数据
+            for stock_code, stock_info in results.items():
+                quarterly_list = stock_info.get('quarterly_data', [])
+                
+                # 查试该季度的数据
+                quarter_data = None
+                quarter_str = f'Q{quarter_num}'  # 转换为Q1, Q2, Q3, Q4格式
+                for q_data in quarterly_list:
+                    if q_data.get('年份') == year and q_data.get('季度') == quarter_str:
+                        quarter_data = q_data
+                        break
+                
+                if quarter_data:
+                    net_profit = quarter_data.get('净利润', 0) or 0  # 单季度净利润，单位：万元
+                    
+                    # 获取市值信息
+                    if stock_code in stock_details:
+                        market_cap_info = stock_details[stock_code]
+                        market_cap_yi = market_cap_info['market_cap'] / 100000000  # 转换为亿元
+                        close_price = market_cap_info['close_price']
+                        total_shares_wan = market_cap_info['total_shares'] / 10000  # 转换为万股
+                        
+                        logger.info(f"{stock_code:<12} {net_profit:<15.0f} {market_cap_yi:<15.2f} {close_price:<12.2f} {total_shares_wan:<15.0f}")
+                        
+                        total_market_cap_check += market_cap_info['market_cap']
+                        total_profit_check += net_profit * 10000  # 转换为元
+                        stock_count += 1
+                    else:
+                        # 如果没有市值数据，只显示净利润
+                        logger.info(f"{stock_code:<12} {net_profit:<15.0f} {'N/A':<15} {'N/A':<12} {'N/A':<15}")
+                        total_profit_check += net_profit * 10000  # 转换为元
+                        stock_count += 1
+            
+            # 显示汇总信息
+            logger.info("-" * 80)
+            logger.info(f"汇总: 股票数={stock_count}, 总净利润={total_profit_check/100000000:.0f}亿元, 总市值={total_market_cap_check/1000000000000:.2f}万亿元")
+            
+            # 与季度统计数据对比
+            quarter_stats = quarterly_data.get(quarter_key, {})
+            official_profit = quarter_stats.get('total_profit', 0) / 100000000
+            official_market_cap = quarter_stats.get('total_market_cap', 0) / 1000000000000
+            official_stock_count = quarter_stats.get('stock_count', 0)
+            
+            logger.info(f"官方统计: 股票数={official_stock_count}, 总净利润={official_profit:.0f}亿元, 总市值={official_market_cap:.2f}万亿元")
+        
+        except Exception as e:
+            logger.error(f"处理季度 {quarter_key} 时发生错误: {str(e)}")
+            continue
+
+
 def print_quarterly_summary(analysis_result, logger):
     """
     打印季度分析摘要
     
     Args:
-        analysis_result: 分析结果
+        analysis_result: 分析结果（包含cleaned_data和results）
         logger: 日志记录器
     """
     logger.info("=== 真实季度盈利分析摘要 ===")
     
-    quarterly_data = analysis_result['quarterly_data']
+    quarterly_data = analysis_result['cleaned_data']['quarterly_data']
     
     logger.info("所有季度盈利情况:")
     logger.info(f"{'季度':<12} {'总净利润(亿)':<16} {'总营收(万亿)':<16} {'滚动4Q净利润(亿)':<20} {'总市值(万亿)':<16} {'市盈率':<11} {'盈利率':<11} {'股票数':<8}")
@@ -1017,6 +1119,9 @@ def print_quarterly_summary(analysis_result, logger):
         
         logger.info(f"{quarter_key:<12} {total_profit_yi:<16.0f} {total_revenue_wanyi:<16.1f} {rolling_4q_profit_str:<20} {total_market_cap_wanyi:<16.1f} {pe_ratio_str:<11} {profit_rate:<10.1f}% {stock_count:<8}")
     
+    # 打印2010年Q4和2011年Q4的详细股票信息
+    print_detailed_stock_info(analysis_result, logger, ['2010-Q4', '2011-Q4'])
+    
     # 显示市值统计摘要
     if quarterly_data:
         logger.info("=== 市值统计摘要 ===")
@@ -1036,13 +1141,17 @@ def main():
     主函数
     """
     # 分析真实季度数据
-    analysis_result = analyze_all_stocks_true_quarterly(start_year=2010)
+    full_result = analyze_all_stocks_true_quarterly(start_year=2010)
+    analysis_result = full_result['cleaned_data']
     
     # 获取logger实例
     logger = logging.getLogger(__name__)
     
+    # 打印详细股票信息
+    print_detailed_stock_info(full_result, logger, ['2010-Q4', '2011-Q4'])
+    
     # 打印摘要
-    print_quarterly_summary(analysis_result, logger)
+    print_quarterly_summary(full_result, logger)
     
     logger.info("真实季度分析完成！")
     logger.info("主要改进:")
