@@ -402,9 +402,9 @@ def fetch_macro_china_money_supply():
         # 获取中证商品期货指数数据
         ccidx_dict = get_ccidx_futures_index()
         
-        # 获取TTM市盈率数据
-        ttm_pe_dict = get_ttm_pe_ratio_data()
-        print(f"DEBUG: TTM市盈率数据获取成功，共{len(ttm_pe_dict)}条记录")
+        # 获取滚动4Q净利润和TTM市盈率数据
+        rolling_4q_dict = get_rolling_4q_profit_data()
+        print(f"DEBUG: 滚动4Q净利润和TTM市盈率数据获取成功，共{len(rolling_4q_dict)}条记录")
         
         # 获取上海新房价格数据
         house_price_dict = {}  # 初始化为空字典
@@ -691,26 +691,29 @@ def fetch_macro_china_money_supply():
                     if not found:
                         item['中证商品期货价格指数'] = None
                 
-                # 添加TTM市盈率数据（如果存在）
-                if formatted_date in ttm_pe_dict:
-                    item['TTM市盈率'] = ttm_pe_dict[formatted_date]['TTM市盈率']
-                    print(f"DEBUG: 直接匹配成功 {formatted_date} -> {item['TTM市盈率']}")
+                # 添加滚动4Q净利润和TTM市盈率数据（如果存在）
+                if formatted_date in rolling_4q_dict:
+                    item['TTM市盈率'] = rolling_4q_dict[formatted_date]['TTM市盈率']
+                    item['滚动4Q净利润'] = rolling_4q_dict[formatted_date]['滚动4Q净利润']
+                    print(f"DEBUG: 直接匹配成功 {formatted_date} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}")
                 else:
                     # 尝试其他可能的日期格式
                     found = False
-                    for key in ttm_pe_dict.keys():
+                    for key in rolling_4q_dict.keys():
                         # 检查年份和月份是否匹配
                         if '.' in formatted_date and '.' in key:
                             if formatted_date.split('.')[0] == key.split('.')[0] and formatted_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
-                                item['TTM市盈率'] = ttm_pe_dict[key]['TTM市盈率']
-                                print(f"DEBUG: 格式匹配成功 {formatted_date} -> {key} -> {item['TTM市盈率']}")
+                                item['TTM市盈率'] = rolling_4q_dict[key]['TTM市盈率']
+                                item['滚动4Q净利润'] = rolling_4q_dict[key]['滚动4Q净利润']
+                                print(f"DEBUG: 格式匹配成功 {formatted_date} -> {key} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}")
                                 found = True
                                 break
                     
                     if not found:
                         item['TTM市盈率'] = None
-                        if len(ttm_pe_dict) > 0:  # 只在前几条记录中打印调试信息
-                            print(f"DEBUG: 未找到匹配 {formatted_date}，TTM数据键示例: {list(ttm_pe_dict.keys())[:3]}")
+                        item['滚动4Q净利润'] = None
+                        if len(rolling_4q_dict) > 0:  # 只在前几条记录中打印调试信息
+                            print(f"DEBUG: 未找到匹配 {formatted_date}，滚动4Q数据键示例: {list(rolling_4q_dict.keys())[:3]}")
                 
                 # 添加房价数据（如果存在）
                 if formatted_date in house_price_dict:
@@ -843,14 +846,14 @@ def get_ccidx_futures_index():
         print(f"获取中证商品期货价格指数数据失败: {e}")
         return {}
 
-def get_ttm_pe_ratio_data():
+def get_rolling_4q_profit_data():
     """
-    获取主要股票TTM市盈率数据
-    从true_quarterly_analysis.json文件中读取pe_ratio数据
-    只有success_count大于100时，当季数据才被采用
+    获取滚动4Q净利润和TTM市盈率数据
+    从true_quarterly_analysis.json文件中读取pe_ratio和rolling_4q_profit数据
+    只有stock_count大于50时，当季数据才被采用
     
     Returns:
-        dict: 包含日期和TTM市盈率的字典
+        dict: 包含日期、TTM市盈率和滚动4Q净利润的字典
     """
     try:
         # 读取JSON文件
@@ -865,18 +868,19 @@ def get_ttm_pe_ratio_data():
             data = json.load(f)
         
         print(f"DEBUG: JSON文件读取成功，包含 {len(data.get('quarterly_data', {}))} 个季度数据")
-        pe_ratio_dict = {}
+        rolling_4q_dict = {}
         
         # 遍历季度数据
         quarterly_data = data.get('quarterly_data', {})
         
         for quarter, quarter_info in quarterly_data.items():
-            # 新的JSON结构中，pe_ratio直接在quarter_info根级别
+            # 获取pe_ratio和rolling_4q_profit数据
             pe_ratio = quarter_info.get('pe_ratio')
+            rolling_4q_profit = quarter_info.get('rolling_4q_profit')
             stock_count = quarter_info.get('stock_count', 0)
             
-            # 检查stock_count是否大于50（相当于原来的success_count）
-            if stock_count > 50 and pe_ratio is not None:
+            # 检查stock_count是否大于50
+            if stock_count > 50 and (pe_ratio is not None or rolling_4q_profit is not None):
                 # 将季度格式转换为年月格式
                 # 例如：2024-Q1 -> 2024.3, 2024-Q2 -> 2024.6, 2024-Q3 -> 2024.9, 2024-Q4 -> 2024.12
                 year, quarter_num = quarter.split('-Q')
@@ -884,18 +888,19 @@ def get_ttm_pe_ratio_data():
                 month = quarter_month_map.get(quarter_num, '12')
                 formatted_date = f"{year}.{month}"
                 
-                pe_ratio_dict[formatted_date] = {
-                    'TTM市盈率': round(pe_ratio, 2),
+                rolling_4q_dict[formatted_date] = {
+                    'TTM市盈率': round(pe_ratio, 2) if pe_ratio is not None else None,
+                    '滚动4Q净利润': round(rolling_4q_profit / 100000000, 2) if rolling_4q_profit is not None else None,  # 转换为亿元
                     'success_count': stock_count
                     }
         
-        print(f"成功获取TTM市盈率数据，共{len(pe_ratio_dict)}条记录")
+        print(f"成功获取滚动4Q净利润和TTM市盈率数据，共{len(rolling_4q_dict)}条记录")
         # 调试：输出部分数据
-        if pe_ratio_dict:
-            sample_keys = list(pe_ratio_dict.keys())[:5]
-            print(f"TTM市盈率数据样本: {[(k, pe_ratio_dict[k]) for k in sample_keys]}")
+        if rolling_4q_dict:
+            sample_keys = list(rolling_4q_dict.keys())[:5]
+            print(f"滚动4Q净利润和TTM市盈率数据样本: {[(k, rolling_4q_dict[k]) for k in sample_keys]}")
         
-        return pe_ratio_dict
+        return rolling_4q_dict
         
     except Exception as e:
         print(f"获取TTM市盈率数据失败: {e}")

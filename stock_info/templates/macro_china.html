@@ -152,6 +152,17 @@
                 <canvas id="hs300PeChart"></canvas>
             </div>
             
+            <!-- 新增：沪深300指数和滚动4Q净利润图表 -->
+            <div class="chart-container">
+                <div id="hs300ProfitChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="hs300ProfitChart"></canvas>
+            </div>
+            
             <!-- 日志显示区域 -->
             <!-- 日志显示区域 -->
             <!-- <div class="mt-5">
@@ -174,6 +185,10 @@
         // 全局变量
         let moneySupplyChart = null;
         let indexComparisonChart = null;
+        let m1Hs300Chart = null;
+        let m1CcidxChart = null;
+        let hs300PeChart = null;
+        let hs300ProfitChart = null;
 
         
         // 页面加载完成后执行
@@ -187,9 +202,10 @@
             // 显示加载状态
             document.getElementById('moneySupplyChartLoading').style.display = 'flex';
             document.getElementById('indexComparisonChartLoading').style.display = 'flex';
-
             document.getElementById('m1Hs300ChartLoading').style.display = 'flex';
             document.getElementById('m1CcidxChartLoading').style.display = 'flex';
+            document.getElementById('hs300PeChartLoading').style.display = 'flex';
+            document.getElementById('hs300ProfitChartLoading').style.display = 'flex';
             
             // 发起API请求
             fetch('/api/macro/money_supply')
@@ -216,6 +232,7 @@
                         document.getElementById('m1Hs300ChartLoading').style.display = 'none';
                         document.getElementById('m1CcidxChartLoading').style.display = 'none';
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
+                        document.getElementById('hs300ProfitChartLoading').style.display = 'none';
 
     
                     }
@@ -231,10 +248,10 @@
                     // 隐藏加载状态
                     document.getElementById('moneySupplyChartLoading').style.display = 'none';
                     document.getElementById('indexComparisonChartLoading').style.display = 'none';
-
                     document.getElementById('m1Hs300ChartLoading').style.display = 'none';
                     document.getElementById('m1CcidxChartLoading').style.display = 'none';
                     document.getElementById('hs300PeChartLoading').style.display = 'none';
+                    document.getElementById('hs300ProfitChartLoading').style.display = 'none';
                 });
         }
         
@@ -279,13 +296,16 @@
                         // 创建沪深300指数和TTM市盈率图表
                         createHs300PeChart(sortedData);
                         
+                        // 创建沪深300指数和滚动4Q净利润图表
+                        createHs300ProfitChart(sortedData);
+                        
                         // 隐藏加载状态
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
-
                         document.getElementById('m1Hs300ChartLoading').style.display = 'none';
                         document.getElementById('m1CcidxChartLoading').style.display = 'none';
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
+                        document.getElementById('hs300ProfitChartLoading').style.display = 'none';
         }
         
         // 创建货币供应量图表
@@ -953,6 +973,113 @@
                             },
                             ticks: {
                                 color: 'rgba(75, 192, 192, 1)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 创建沪深300指数和滚动4Q净利润图表
+        function createHs300ProfitChart(data) {
+            // 提取数据
+            const months = data.map(item => item.月份);
+            const hs300Index = data.map(item => item.沪深300指数);
+            const rolling4qProfit = data.map(item => item.滚动4Q净利润);
+            
+            // 过滤掉所有数据都为null的点
+            const filteredData = [];
+            for (let i = 0; i < months.length; i++) {
+                if (hs300Index[i] !== null || rolling4qProfit[i] !== null) {
+                    filteredData.push({
+                        month: months[i],
+                        hs300: hs300Index[i],
+                        profit: rolling4qProfit[i]
+                    });
+                }
+            }
+            
+            const ctx = document.getElementById('hs300ProfitChart').getContext('2d');
+            
+            // 销毁旧图表（如果存在）
+            if (hs300ProfitChart) {
+                hs300ProfitChart.destroy();
+            }
+            
+            hs300ProfitChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: filteredData.map(item => item.month),
+                    datasets: [{
+                        label: '沪深300指数',
+                        data: filteredData.map(item => item.hs300),
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        yAxisID: 'y',
+                        tension: 0.1
+                    }, {
+                        label: '滚动4Q净利润 (亿元)',
+                        data: filteredData.map(item => item.profit),
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        yAxisID: 'y1',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '沪深300指数与滚动4Q净利润对比'
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '沪深300指数',
+                                color: 'rgba(255, 99, 132, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(255, 99, 132, 1)'
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '滚动4Q净利润 (亿元)',
+                                color: 'rgba(54, 162, 235, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(54, 162, 235, 1)'
                             },
                             grid: {
                                 drawOnChartArea: false
