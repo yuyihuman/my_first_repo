@@ -406,6 +406,10 @@ def fetch_macro_china_money_supply():
         rolling_4q_dict = get_rolling_4q_profit_data()
         print(f"DEBUG: 滚动4Q净利润和TTM市盈率数据获取成功，共{len(rolling_4q_dict)}条记录")
         
+        # 获取商品价格指数数据
+        commodity_dict = get_commodity_price_index_data()
+        print(f"DEBUG: 商品价格指数数据获取成功，共{len(commodity_dict)}条记录")
+        
         # 获取上海新房价格数据
         house_price_dict = {}  # 初始化为空字典
         try:
@@ -769,6 +773,33 @@ def fetch_macro_china_money_supply():
                         item['上海新建商品住宅价格指数(2011.1=100)'] = None
                         item['上海二手住宅价格指数(2011.1=100)'] = None
                 
+                # 添加商品价格指数数据（如果存在）
+                # 商品价格指数数据现在使用日期格式（YYYY-MM-DD）作为键
+                commodity_value = None
+                target_year = int(formatted_date.split('.')[0])
+                target_month = int(formatted_date.split('.')[1])
+                
+                # 查找该月份的最新商品价格指数数据
+                latest_date = None
+                for date_key in commodity_dict.keys():
+                    try:
+                        # 解析日期格式 YYYY-MM-DD
+                        date_parts = date_key.split('-')
+                        if len(date_parts) == 3:
+                            year = int(date_parts[0])
+                            month = int(date_parts[1])
+                            
+                            # 如果年月匹配
+                            if year == target_year and month == target_month:
+                                # 找到该月份的最新日期
+                                if latest_date is None or date_key > latest_date:
+                                    latest_date = date_key
+                                    commodity_value = commodity_dict[date_key]['商品价格指数']
+                    except (ValueError, IndexError):
+                        continue
+                
+                item['商品价格指数'] = commodity_value
+                
                 data.append(item)
                 processed_rows += 1
                 
@@ -937,4 +968,69 @@ def get_rolling_4q_profit_data():
         
     except Exception as e:
         print(f"获取TTM市盈率数据失败: {e}")
+        return {}
+
+def get_commodity_price_index_data():
+    """
+    获取商品价格指数数据
+    从commodity_price_index.json文件中读取指数数据
+    
+    Returns:
+        dict: 包含日期和商品价格指数的字典
+    """
+    try:
+        # 读取JSON文件
+        json_file_path = r'C:\Users\17701\github\my_first_repo\stockapi\commodity_price_index.json'
+        
+        if not os.path.exists(json_file_path):
+            print(f"商品价格指数数据文件不存在: {json_file_path}")
+            return {}
+        
+        print(f"DEBUG: 开始读取商品价格指数数据文件: {json_file_path}")
+        
+        # 检查文件是否为空
+        if os.path.getsize(json_file_path) == 0:
+            print(f"商品价格指数数据文件为空: {json_file_path}")
+            return {}
+            
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if not content:
+                print(f"商品价格指数数据文件内容为空: {json_file_path}")
+                return {}
+            data = json.loads(content)
+        
+        print(f"DEBUG: 商品价格指数JSON文件读取成功，包含 {len(data.get('指数数据', []))} 条数据")
+        commodity_dict = {}
+        
+        # 遍历指数数据
+        index_data = data.get('指数数据', [])
+        
+        for item in index_data:
+            date_str = item.get('日期')
+            index_value = item.get('指数值')
+            
+            if date_str and index_value is not None:
+                # 保持原始日期格式，不进行月份聚合
+                try:
+                    # 验证日期格式
+                    datetime.strptime(date_str, '%Y-%m-%d')
+                    
+                    # 直接使用原始日期作为键
+                    commodity_dict[date_str] = {
+                        '商品价格指数': round(index_value, 2)
+                    }
+                except ValueError:
+                    continue
+        
+        print(f"成功获取商品价格指数数据，共{len(commodity_dict)}条记录")
+        # 调试：输出部分数据
+        if commodity_dict:
+            sample_keys = list(commodity_dict.keys())[-5:]  # 显示最新的5条数据
+            print(f"商品价格指数数据样本: {[(k, commodity_dict[k]) for k in sample_keys]}")
+        
+        return commodity_dict
+        
+    except Exception as e:
+        print(f"获取商品价格指数数据失败: {e}")
         return {}

@@ -17,6 +17,10 @@
             position: relative;
             margin: 20px 0;
             height: 400px;
+            width: 100%;
+        }
+        .chart-container.large {
+            height: 500px;
         }
         .loading-overlay {
             position: absolute;
@@ -163,6 +167,17 @@
                 <canvas id="hs300ProfitChart"></canvas>
             </div>
             
+            <!-- 新增：非银行滚动4Q净利润、商品价格指数和沪深300指数图表 -->
+            <div class="chart-container large">
+                <div id="nonBankProfitCommodityChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="nonBankProfitCommodityChart"></canvas>
+            </div>
+            
             <!-- 日志显示区域 -->
             <!-- 日志显示区域 -->
             <!-- <div class="mt-5">
@@ -189,6 +204,7 @@
         let m1CcidxChart = null;
         let hs300PeChart = null;
         let hs300ProfitChart = null;
+        let nonBankProfitCommodityChart = null;
 
         
         // 页面加载完成后执行
@@ -252,6 +268,7 @@
                     document.getElementById('m1CcidxChartLoading').style.display = 'none';
                     document.getElementById('hs300PeChartLoading').style.display = 'none';
                     document.getElementById('hs300ProfitChartLoading').style.display = 'none';
+                    document.getElementById('nonBankProfitCommodityChartLoading').style.display = 'none';
                 });
         }
         
@@ -299,6 +316,9 @@
                         // 创建沪深300指数和滚动4Q净利润图表
                         createHs300ProfitChart(sortedData);
                         
+                        // 创建非银行滚动4Q净利润和商品价格指数图表
+                        createNonBankProfitCommodityChart(sortedData);
+                        
                         // 隐藏加载状态
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
@@ -306,6 +326,7 @@
                         document.getElementById('m1CcidxChartLoading').style.display = 'none';
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
+                        document.getElementById('nonBankProfitCommodityChartLoading').style.display = 'none';
         }
         
         // 创建货币供应量图表
@@ -1149,6 +1170,147 @@
                             grid: {
                                 drawOnChartArea: false
                             }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 创建非银行滚动4Q净利润、商品价格指数和沪深300指数图表
+        function createNonBankProfitCommodityChart(data) {
+            const ctx = document.getElementById('nonBankProfitCommodityChart').getContext('2d');
+            
+            // 销毁旧图表（如果存在）
+            if (nonBankProfitCommodityChart) {
+                nonBankProfitCommodityChart.destroy();
+            }
+            
+            // 提取和过滤数据
+            const filteredData = data.filter(item => {
+                return item.非银行滚动4Q净利润 !== null || item.商品价格指数 !== null || item.沪深300指数 !== null;
+            });
+            
+            const months = filteredData.map(item => item.月份);
+            const nonBankProfit = filteredData.map(item => item.非银行滚动4Q净利润);
+            const commodityIndex = filteredData.map(item => item.商品价格指数);
+            const hs300Index = filteredData.map(item => item.沪深300指数);
+            
+            // 创建新图表
+            nonBankProfitCommodityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: months,
+                    datasets: [
+                        {
+                            label: '非银行滚动4Q净利润',
+                            data: nonBankProfit,
+                            borderColor: 'rgba(255, 206, 84, 1)',
+                            backgroundColor: 'rgba(255, 206, 84, 0.2)',
+                            yAxisID: 'y',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: '商品价格指数',
+                            data: commodityIndex,
+                            borderColor: 'rgba(153, 102, 255, 1)',
+                            backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                            yAxisID: 'y1',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: '沪深300指数',
+                            data: hs300Index,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            yAxisID: 'y2',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            tension: 0.1,
+                            spanGaps: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '非银行滚动4Q净利润、商品价格指数与沪深300指数对比',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: '时间'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '非银行滚动4Q净利润 (亿元)',
+                                color: 'rgba(255, 206, 84, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(255, 206, 84, 1)'
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '商品价格指数',
+                                color: 'rgba(153, 102, 255, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(153, 102, 255, 1)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        },
+                        y2: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '沪深300指数',
+                                color: 'rgba(75, 192, 192, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(75, 192, 192, 1)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            },
+                            offset: true
                         }
                     }
                 }
