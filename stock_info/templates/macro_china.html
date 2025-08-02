@@ -1054,29 +1054,41 @@
                         data: filteredData.map(item => item.hs300),
                         borderColor: 'rgba(255, 99, 132, 1)',
                         backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                        yAxisID: 'y',
-                        tension: 0.1
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.1,
+                        spanGaps: true,
+                        yAxisID: 'y'
                     }, {
                         label: '滚动4Q净利润 (亿元)',
                         data: filteredData.map(item => item.profit),
                         borderColor: 'rgba(54, 162, 235, 1)',
                         backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                        yAxisID: 'y1',
-                        tension: 0.1
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.1,
+                        spanGaps: true,
+                        yAxisID: 'y1'
                     }, {
                         label: '银行滚动4Q净利润 (亿元)',
                         data: filteredData.map(item => item.bankProfit),
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        yAxisID: 'y1',
-                        tension: 0.1
+                        borderColor: 'rgba(0, 191, 255, 1)',
+                        backgroundColor: 'rgba(0, 191, 255, 0.2)',
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.1,
+                        spanGaps: true,
+                        yAxisID: 'y1'
                     }, {
                         label: '非银行滚动4Q净利润 (亿元)',
                         data: filteredData.map(item => item.nonBankProfit),
-                        borderColor: 'rgba(255, 206, 86, 1)',
-                        backgroundColor: 'rgba(255, 206, 86, 0.2)',
-                        yAxisID: 'y1',
-                        tension: 0.1
+                        borderColor: 'rgba(255, 206, 84, 1)',
+                        backgroundColor: 'rgba(255, 206, 84, 0.2)',
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.1,
+                        spanGaps: true,
+                        yAxisID: 'y1'
                     }]
                 },
                 options: {
@@ -1089,7 +1101,10 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: '沪深300指数与滚动4Q净利润对比（含银行/非银行分类）'
+                            text: '沪深300指数与滚动4Q净利润对比（含银行/非银行分类）',
+                            font: {
+                                size: 16
+                            }
                         },
                         legend: {
                             display: true
