@@ -178,6 +178,17 @@
                 <canvas id="nonBankProfitCommodityChart"></canvas>
             </div>
             
+            <!-- 新增：非银行滚动4Q净利润和PMI订单指数图表 -->
+            <div class="chart-container">
+                <div id="nonBankProfitPmiChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="nonBankProfitPmiChart"></canvas>
+            </div>
+            
             <!-- 日志显示区域 -->
             <!-- 日志显示区域 -->
             <!-- <div class="mt-5">
@@ -205,6 +216,7 @@
         let hs300PeChart = null;
         let hs300ProfitChart = null;
         let nonBankProfitCommodityChart = null;
+        let nonBankProfitPmiChart = null;
 
         
         // 页面加载完成后执行
@@ -222,6 +234,7 @@
             document.getElementById('m1CcidxChartLoading').style.display = 'flex';
             document.getElementById('hs300PeChartLoading').style.display = 'flex';
             document.getElementById('hs300ProfitChartLoading').style.display = 'flex';
+            document.getElementById('nonBankProfitPmiChartLoading').style.display = 'flex';
             
             // 发起API请求
             fetch('/api/macro/money_supply')
@@ -249,6 +262,7 @@
                         document.getElementById('m1CcidxChartLoading').style.display = 'none';
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
+                        document.getElementById('nonBankProfitPmiChartLoading').style.display = 'none';
 
     
                     }
@@ -269,6 +283,7 @@
                     document.getElementById('hs300PeChartLoading').style.display = 'none';
                     document.getElementById('hs300ProfitChartLoading').style.display = 'none';
                     document.getElementById('nonBankProfitCommodityChartLoading').style.display = 'none';
+                    document.getElementById('nonBankProfitPmiChartLoading').style.display = 'none';
                 });
         }
         
@@ -319,6 +334,9 @@
                         // 创建非银行滚动4Q净利润和商品价格指数图表
                         createNonBankProfitCommodityChart(sortedData);
                         
+                        // 创建非银行滚动4Q净利润和PMI订单指数图表
+                        createNonBankProfitPmiChart(sortedData);
+                        
                         // 隐藏加载状态
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
@@ -327,6 +345,7 @@
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
                         document.getElementById('nonBankProfitCommodityChartLoading').style.display = 'none';
+                        document.getElementById('nonBankProfitPmiChartLoading').style.display = 'none';
         }
         
         // 创建货币供应量图表
@@ -1458,6 +1477,167 @@
                                 drawOnChartArea: false
                             },
                             offset: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 创建非银行滚动4Q净利润和PMI订单指数图表
+        function createNonBankProfitPmiChart(data) {
+            // 提取数据
+            const months = data.map(item => item.月份);
+            const nonBankProfit = data.map(item => item.非银行滚动4Q净利润);
+            const newOrderIndex = data.map(item => item['新订单指数(%)']);
+            const newExportOrderIndex = data.map(item => item['新出口订单指数(%)']);
+            
+            // 过滤掉所有数据都为null的点
+            const filteredData = [];
+            for (let i = 0; i < months.length; i++) {
+                if (nonBankProfit[i] !== null || newOrderIndex[i] !== null || newExportOrderIndex[i] !== null) {
+                    filteredData.push({
+                        month: months[i],
+                        nonBankProfit: nonBankProfit[i],
+                        newOrderIndex: newOrderIndex[i],
+                        newExportOrderIndex: newExportOrderIndex[i]
+                    });
+                }
+            }
+            
+            const ctx = document.getElementById('nonBankProfitPmiChart').getContext('2d');
+            
+            // 销毁旧图表（如果存在）
+            if (nonBankProfitPmiChart) {
+                nonBankProfitPmiChart.destroy();
+            }
+            
+            nonBankProfitPmiChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: filteredData.map(item => item.month),
+                    datasets: [{
+                        label: '非银行滚动4Q净利润 (亿元)',
+                        data: filteredData.map(item => item.nonBankProfit),
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.1,
+                        spanGaps: true,
+                        yAxisID: 'y'
+                    }, {
+                        label: '新订单指数(%)',
+                        data: filteredData.map(item => item.newOrderIndex),
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.1,
+                        spanGaps: true,
+                        yAxisID: 'y1'
+                    }, {
+                        label: '新出口订单指数(%)',
+                        data: filteredData.map(item => item.newExportOrderIndex),
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.1,
+                        spanGaps: true,
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '非银行滚动4Q净利润与PMI订单指数对比',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        if (context.dataset.label.includes('净利润')) {
+                                            label += context.parsed.y.toFixed(0) + '亿元';
+                                        } else {
+                                            label += context.parsed.y.toFixed(1) + '%';
+                                        }
+                                    }
+                                    return label;
+                                }
+                            }
+                        },
+                        annotation: {
+                            annotations: {
+                                line50: {
+                                    type: 'line',
+                                    yMin: 50,
+                                    yMax: 50,
+                                    yScaleID: 'y1',
+                                    borderColor: 'rgba(0, 0, 0, 0.8)',
+                                    borderWidth: 1,
+                                    borderDash: [5, 5]
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '非银行滚动4Q净利润 (亿元)',
+                                color: 'rgba(255, 99, 132, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(255, 99, 132, 1)'
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'PMI订单指数 (%)',
+                                color: 'rgba(54, 162, 235, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(54, 162, 235, 1)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
                         }
                     }
                 }

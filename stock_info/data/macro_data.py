@@ -808,6 +808,56 @@ def fetch_macro_china_money_supply():
                 continue
         
         print(f"成功获取并缓存货币供应量、总量和房价数据，共{len(data)}条记录（2000年以后）")
+        
+        # 合并PMI数据中的新订单指数和新出口订单指数
+        try:
+            pmi_file_path = r'C:\Users\17701\github\my_first_repo\stockapi\pmi_data.json'
+            if os.path.exists(pmi_file_path):
+                with open(pmi_file_path, 'r', encoding='utf-8') as f:
+                    pmi_data = json.load(f)
+                
+                # 创建PMI数据的月份到指数的映射
+                pmi_mapping = {}
+                for item in pmi_data:
+                    date_str = item['date']  # 格式: "2010-01"
+                    year, month = date_str.split('-')
+                    # 转换为货币供应量数据的月份格式: "2010.1"
+                    formatted_date = f"{year}.{int(month)}"
+                    
+                    # 获取新订单指数和新出口订单指数
+                    new_order_index = item['indicators'].get('新订单指数(%)', None)
+                    new_export_order_index = item['indicators'].get('新出口订单指数(%)', None)
+                    
+                    pmi_mapping[formatted_date] = {
+                        '新订单指数(%)': new_order_index,
+                        '新出口订单指数(%)': new_export_order_index
+                    }
+                
+                # 为每个月份数据添加PMI指数
+                for item in data:
+                    month = item['月份']
+                    if month in pmi_mapping:
+                        item['新订单指数(%)'] = pmi_mapping[month]['新订单指数(%)']
+                        item['新出口订单指数(%)'] = pmi_mapping[month]['新出口订单指数(%)']
+                    else:
+                        item['新订单指数(%)'] = None
+                        item['新出口订单指数(%)'] = None
+                
+                new_order_count = len([item for item in data if item.get('新订单指数(%)') is not None])
+                new_export_order_count = len([item for item in data if item.get('新出口订单指数(%)') is not None])
+                print(f"成功合并PMI数据，共{new_order_count}条记录有新订单指数数据，{new_export_order_count}条记录有新出口订单指数数据")
+            else:
+                print(f"PMI数据文件不存在: {pmi_file_path}")
+                # 如果PMI文件不存在，为所有数据添加None值
+                for item in data:
+                    item['新订单指数(%)'] = None
+                    item['新出口订单指数(%)'] = None
+        except Exception as e:
+            print(f"合并PMI数据时出错: {e}")
+            # 出错时为所有数据添加None值
+            for item in data:
+                item['新订单指数(%)'] = None
+                item['新出口订单指数(%)'] = None
 
         # 准备返回数据
         result = {
