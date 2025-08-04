@@ -557,7 +557,26 @@ def fetch_macro_china_money_supply():
         # 按日期排序（从新到旧）
         money_supply_df = money_supply_df.sort_values(by='sort_date', ascending=False)
         
-        # 获取所有历史数据，但只保留2000年以后的
+        # 确定数据获取的起始月份：使用沪深300指数的最新月份作为截止点
+        end_year_month = None
+        if hs300_dict:
+            # 找到沪深300指数的最新月份
+            latest_hs300_date = max(hs300_dict.keys(), key=lambda x: (int(x.split('.')[0]), int(x.split('.')[1])))
+            end_year_month = latest_hs300_date
+            print(f"使用沪深300指数最新月份作为截止点: {end_year_month}")
+        else:
+            # 如果没有沪深300数据，默认获取所有数据
+            end_year_month = None
+            print("未找到沪深300指数数据，获取所有可用数据")
+        
+        # 解析截止年月
+        end_year = None
+        end_month = None
+        if end_year_month:
+            end_year, end_month = end_year_month.split('.')
+            end_year = int(end_year)
+            end_month = int(end_month)
+        
         processed_rows = 0
         matched_with_total = 0
         
@@ -569,17 +588,24 @@ def fetch_macro_china_money_supply():
                 if '-' in date_str:
                     # 如果日期格式为 "2023-01"，保持原样
                     formatted_date = date_str
-                    # 提取年份
+                    # 提取年份和月份
                     year = int(formatted_date.split('-')[0])
+                    month = int(formatted_date.split('-')[1])
                 else:
                     # 处理格式如 "2023.01" 或 "2023.1"
                     formatted_date = date_str
-                    # 提取年份
+                    # 提取年份和月份
                     year = int(formatted_date.split('.')[0])
+                    month = int(formatted_date.split('.')[1])
                 
-                # 只保留2000年以后的数据
+                # 只保留2000年以后且不超过沪深300指数最新月份的数据
                 if year < 2000:
                     continue
+                
+                # 如果设置了截止月份，则过滤超出该月份的数据
+                if end_year is not None and end_month is not None:
+                    if year > end_year or (year == end_year and month > end_month):
+                        continue
                 
                 # 处理NaN值，将其转换为None，并保留两位小数
                 m2_growth = None
@@ -807,6 +833,61 @@ def fetch_macro_china_money_supply():
                 print(f"处理行数据时出错: {e}")
                 continue
         
+        # 确保包含所有沪深300指数有数据但货币供应量没有数据的月份
+        if hs300_dict:
+            # 获取现有数据中的所有月份
+            existing_months = set(item['月份'] for item in data)
+            
+            # 检查沪深300指数数据中是否有缺失的月份
+            for hs300_month in hs300_dict.keys():
+                if hs300_month not in existing_months:
+                    # 解析年月，确保是2000年以后的数据
+                    try:
+                        year, month = hs300_month.split('.')
+                        if int(year) >= 2000:
+                            print(f"添加沪深300指数月份数据: {hs300_month}")
+                            
+                            # 创建基本数据项，货币供应量相关字段设为null
+                            item = {
+                                '月份': hs300_month,
+                                '货币和准货币_广义货币M2_同比': None,
+                                '货币_狭义货币M1_同比': None,
+                                '流通中现金_M0_同比': None,
+                                'M2总量(亿元)': None,
+                                'M1总量(亿元)': None,
+                                'M0总量(亿元)': None,
+                                'M2总量环比(%)': None,
+                                'M1总量环比(%)': None,
+                                'M0总量环比(%)': None,
+                                'M2指数(2011.1=100)': None,
+                                'M1指数(2011.1=100)': None,
+                                'M0指数(2011.1=100)': None
+                            }
+                            
+                            # 添加沪深300指数数据
+                            item['沪深300指数'] = hs300_dict[hs300_month]['沪深300指数']
+                            item['沪深300指数_同比'] = hs300_dict[hs300_month]['沪深300指数_同比']
+                            
+                            # 添加其他数据字段（设为null）
+                            item['中证商品期货价格指数'] = None
+                            item['TTM市盈率'] = None
+                            item['滚动4Q净利润'] = None
+                            item['银行滚动4Q净利润'] = None
+                            item['非银行滚动4Q净利润'] = None
+                            item['银行TTM市盈率'] = None
+                            item['非银行TTM市盈率'] = None
+                            item['上海新建商品住宅价格指数_同比'] = None
+                            item['上海二手住宅价格指数_同比'] = None
+                            item['上海新建商品住宅价格指数_环比'] = None
+                            item['上海二手住宅价格指数_环比'] = None
+                            item['上海新建商品住宅价格指数(2011.1=100)'] = None
+                            item['上海二手住宅价格指数(2011.1=100)'] = None
+                            item['商品价格指数'] = None
+                            
+                            data.append(item)
+                    except (ValueError, IndexError):
+                        continue
+        
         print(f"成功获取并缓存货币供应量、总量和房价数据，共{len(data)}条记录（2000年以后）")
         
         # 合并PMI数据中的新订单指数和新出口订单指数
@@ -859,6 +940,24 @@ def fetch_macro_china_money_supply():
                 item['新订单指数(%)'] = None
                 item['新出口订单指数(%)'] = None
 
+        # 按时间正序排列数据
+        def parse_date_key(date_str):
+            """解析日期字符串，返回用于排序的元组 (年, 月)"""
+            try:
+                if '.' in date_str:
+                    year, month = date_str.split('.')
+                    return (int(year), int(month))
+                elif '-' in date_str:
+                    year, month = date_str.split('-')
+                    return (int(year), int(month))
+                else:
+                    return (0, 0)  # 默认值
+            except (ValueError, IndexError):
+                return (0, 0)  # 默认值
+        
+        # 按时间倒序排序（从晚到早）
+        data.sort(key=lambda x: parse_date_key(x['月份']), reverse=True)
+        
         # 准备返回数据
         result = {
             'status': 'success',
