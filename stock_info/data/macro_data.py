@@ -915,10 +915,15 @@ def fetch_macro_china_money_supply():
                     # 获取新订单指数和新出口订单指数
                     new_order_index = item['indicators'].get('新订单指数(%)', None)
                     new_export_order_index = item['indicators'].get('新出口订单指数(%)', None)
+                    # 获取工业生产者购进价格指数和燃料、动力类购进价格指数
+                    producer_price_index = item['indicators'].get('工业生产者购进价格指数(2011年1月=100)', None)
+                    fuel_power_price_index = item['indicators'].get('燃料、动力类购进价格指数(2011年1月=100)', None)
                     
                     pmi_mapping[formatted_date] = {
                         '新订单指数(%)': new_order_index,
-                        '新出口订单指数(%)': new_export_order_index
+                        '新出口订单指数(%)': new_export_order_index,
+                        '工业生产者购进价格指数(2011年1月=100)': producer_price_index,
+                        '燃料、动力类购进价格指数(2011年1月=100)': fuel_power_price_index
                     }
                 
                 # 为每个月份数据添加PMI指数
@@ -927,9 +932,13 @@ def fetch_macro_china_money_supply():
                     if month in pmi_mapping:
                         item['新订单指数(%)'] = pmi_mapping[month]['新订单指数(%)']
                         item['新出口订单指数(%)'] = pmi_mapping[month]['新出口订单指数(%)']
+                        item['工业生产者购进价格指数(2011年1月=100)'] = pmi_mapping[month]['工业生产者购进价格指数(2011年1月=100)']
+                        item['燃料、动力类购进价格指数(2011年1月=100)'] = pmi_mapping[month]['燃料、动力类购进价格指数(2011年1月=100)']
                     else:
                         item['新订单指数(%)'] = None
                         item['新出口订单指数(%)'] = None
+                        item['工业生产者购进价格指数(2011年1月=100)'] = None
+                        item['燃料、动力类购进价格指数(2011年1月=100)'] = None
                 
                 new_order_count = len([item for item in data if item.get('新订单指数(%)') is not None])
                 new_export_order_count = len([item for item in data if item.get('新出口订单指数(%)') is not None])
@@ -940,12 +949,16 @@ def fetch_macro_china_money_supply():
                 for item in data:
                     item['新订单指数(%)'] = None
                     item['新出口订单指数(%)'] = None
+                    item['工业生产者购进价格指数(2011年1月=100)'] = None
+                    item['燃料、动力类购进价格指数(2011年1月=100)'] = None
         except Exception as e:
             print(f"合并PMI数据时出错: {e}")
             # 出错时为所有数据添加None值
             for item in data:
                 item['新订单指数(%)'] = None
                 item['新出口订单指数(%)'] = None
+                item['工业生产者购进价格指数(2011年1月=100)'] = None
+                item['燃料、动力类购进价格指数(2011年1月=100)'] = None
 
         # 按时间正序排列数据
         def parse_date_key(date_str):
