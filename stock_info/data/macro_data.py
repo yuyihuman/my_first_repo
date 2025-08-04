@@ -28,8 +28,15 @@ def fetch_macro_china_money_supply():
             current_time = datetime.now().timestamp()
             # 如果缓存文件在24小时内，直接返回缓存数据
             if current_time - file_time < 24 * 60 * 60:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                        if content:  # 检查文件是否为空
+                            return json.loads(content)
+                        else:
+                            print(f"缓存文件为空，将重新获取数据: {cache_file}")
+                except (json.JSONDecodeError, Exception) as e:
+                    print(f"读取缓存文件失败: {e}，将重新获取数据")
         
         # 获取货币供应量数据（增速）
         money_supply_df = ak.macro_china_supply_of_money()
