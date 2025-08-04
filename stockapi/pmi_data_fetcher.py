@@ -38,6 +38,85 @@ logger.info("开始获取PMI数据...")
 macro_china_nbs_nation_df = ak.macro_china_nbs_nation(kind="月度数据", path="采购经理指数 > 制造业采购经理指数", period="2010-")
 logger.info(f"成功获取PMI数据，数据维度: {macro_china_nbs_nation_df.shape}")
 
+# 获取工业生产者购进价格指数数据
+logger.info("开始获取工业生产者购进价格指数数据...")
+ppi_purchase_df = ak.macro_china_nbs_nation(kind="月度数据", path="价格指数 > 工业生产者购进价格指数 > 工业生产者购进价格指数(上月=100)", period="2010-")
+logger.info(f"成功获取工业生产者购进价格指数数据，数据维度: {ppi_purchase_df.shape}")
+
+# 计算工业生产者购进价格指数（以2010年1月为基数100）
+logger.info("开始计算工业生产者购进价格指数...")
+ppi_cumulative_index = {}
+
+# 计算燃料、动力类购进价格指数（以2010年1月为基数100）
+logger.info("开始计算燃料、动力类购进价格指数...")
+fuel_power_cumulative_index = {}
+
+# 获取所有月份并排序
+all_months = []
+for col in ppi_purchase_df.columns:
+    try:
+        year_month = col.replace('年', '-').replace('月', '')
+        date_obj = datetime.strptime(year_month, '%Y-%m')
+        all_months.append((date_obj.strftime('%Y-%m'), col))
+    except (ValueError, TypeError):
+        continue
+
+all_months.sort(key=lambda x: x[0])
+
+# 计算累积指数
+base_value = 100.0  # 2010年1月基数
+current_index = base_value
+
+for date_str, col in all_months:
+    # 获取主要指数值（第一行：工业生产者购进价格指数(上月=100)）
+    monthly_change = ppi_purchase_df.iloc[0][col]
+    
+    if pd.notna(monthly_change):
+        # 计算累积指数：当前指数 = 上月指数 * (本月指数/100)
+        current_index = current_index * (monthly_change / 100.0)
+        ppi_cumulative_index[date_str] = round(current_index, 2)
+
+# 计算燃料、动力类购进价格指数的累积指数
+fuel_power_base_value = 100.0  # 2010年1月基数
+fuel_power_current_index = fuel_power_base_value
+
+for date_str, col in all_months:
+    # 获取燃料、动力类指数值（第二行：燃料、动力类购进价格指数(上月=100)）
+    fuel_power_monthly_change = ppi_purchase_df.iloc[1][col]
+    
+    if pd.notna(fuel_power_monthly_change):
+        # 计算累积指数：当前指数 = 上月指数 * (本月指数/100)
+        fuel_power_current_index = fuel_power_current_index * (fuel_power_monthly_change / 100.0)
+        fuel_power_cumulative_index[date_str] = round(fuel_power_current_index, 2)
+        
+logger.info(f"工业生产者购进价格指数计算完成，共{len(ppi_cumulative_index)}个月份")
+logger.info(f"前5个月份的指数值: {dict(list(ppi_cumulative_index.items())[:5])}")
+logger.info(f"后5个月份的指数值: {dict(list(ppi_cumulative_index.items())[-5:])}")
+
+logger.info(f"燃料、动力类购进价格指数计算完成，共{len(fuel_power_cumulative_index)}个月份")
+logger.info(f"燃料、动力类前5个月份的指数值: {dict(list(fuel_power_cumulative_index.items())[:5])}")
+logger.info(f"燃料、动力类后5个月份的指数值: {dict(list(fuel_power_cumulative_index.items())[-5:])}")
+
+# 为2011年1月设置基数100（作为新的基准点）
+if '2011-01' in ppi_cumulative_index:
+    # 获取2011年1月的原始计算值
+    original_2011_01 = ppi_cumulative_index['2011-01']
+    # 重新计算所有月份，以2011年1月为基数100
+    adjustment_factor = 100.0 / original_2011_01
+    for date_str in ppi_cumulative_index:
+        ppi_cumulative_index[date_str] = round(ppi_cumulative_index[date_str] * adjustment_factor, 2)
+    logger.info(f"已将工业生产者购进价格指数2011年1月设置为基数100，调整系数: {adjustment_factor:.4f}")
+
+# 为燃料、动力类购进价格指数2011年1月设置基数100
+if '2011-01' in fuel_power_cumulative_index:
+    # 获取2011年1月的原始计算值
+    fuel_power_original_2011_01 = fuel_power_cumulative_index['2011-01']
+    # 重新计算所有月份，以2011年1月为基数100
+    fuel_power_adjustment_factor = 100.0 / fuel_power_original_2011_01
+    for date_str in fuel_power_cumulative_index:
+        fuel_power_cumulative_index[date_str] = round(fuel_power_cumulative_index[date_str] * fuel_power_adjustment_factor, 2)
+    logger.info(f"已将燃料、动力类购进价格指数2011年1月设置为基数100，调整系数: {fuel_power_adjustment_factor:.4f}")
+
 # 重新组织数据格式：将同一月份的多个指标合并到一个时间条目下
 logger.info("开始重新组织数据格式...")
 reshaped_data = {}
@@ -68,6 +147,52 @@ for index, row in macro_china_nbs_nation_df.iterrows():
                 
             except (ValueError, TypeError):
                 continue
+
+# 将工业生产者购进价格指数添加到对应月份（仅2011年及以后）
+logger.info(f"开始添加工业生产者购进价格指数到数据中，共{len(ppi_cumulative_index)}个月份")
+added_count = 0
+for date_str, ppi_value in ppi_cumulative_index.items():
+    # 只添加2011年及以后的数据
+    if date_str >= '2011-01':
+        if date_str in reshaped_data:
+            reshaped_data[date_str]['indicators']['工业生产者购进价格指数(2011年1月=100)'] = ppi_value
+            added_count += 1
+            if added_count <= 5:  # 只记录前5个
+                logger.info(f"已添加{date_str}的工业生产者购进价格指数: {ppi_value}")
+        else:
+            # 如果PMI数据中没有该月份，创建新条目
+            reshaped_data[date_str] = {
+                'date': date_str,
+                'indicators': {'工业生产者购进价格指数(2011年1月=100)': ppi_value}
+            }
+            added_count += 1
+            if added_count <= 5:  # 只记录前5个
+                logger.info(f"为{date_str}创建新条目，工业生产者购进价格指数: {ppi_value}")
+
+logger.info(f"工业生产者购进价格指数添加完成，共添加{added_count}个月份（仅2011年及以后）")
+
+# 将燃料、动力类购进价格指数添加到对应月份（仅2011年及以后）
+logger.info(f"开始添加燃料、动力类购进价格指数到数据中，共{len(fuel_power_cumulative_index)}个月份")
+fuel_power_added_count = 0
+for date_str, fuel_power_value in fuel_power_cumulative_index.items():
+    # 只添加2011年及以后的数据
+    if date_str >= '2011-01':
+        if date_str in reshaped_data:
+            reshaped_data[date_str]['indicators']['燃料、动力类购进价格指数(2011年1月=100)'] = fuel_power_value
+            fuel_power_added_count += 1
+            if fuel_power_added_count <= 5:  # 只记录前5个
+                logger.info(f"已添加{date_str}的燃料、动力类购进价格指数: {fuel_power_value}")
+        else:
+            # 如果PMI数据中没有该月份，创建新条目
+            reshaped_data[date_str] = {
+                'date': date_str,
+                'indicators': {'燃料、动力类购进价格指数(2011年1月=100)': fuel_power_value}
+            }
+            fuel_power_added_count += 1
+            if fuel_power_added_count <= 5:  # 只记录前5个
+                logger.info(f"为{date_str}创建新条目，燃料、动力类购进价格指数: {fuel_power_value}")
+
+logger.info(f"燃料、动力类购进价格指数添加完成，共添加{fuel_power_added_count}个月份（仅2011年及以后）")
 
 # 转换为列表并按日期排序
 reshaped_data_list = list(reshaped_data.values())
