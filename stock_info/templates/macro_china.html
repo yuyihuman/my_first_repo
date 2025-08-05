@@ -189,6 +189,17 @@
                 <canvas id="nonBankProfitPmiChart"></canvas>
             </div>
             
+            <!-- 新增：价格指数对比图表 -->
+            <div class="chart-container">
+                <div id="priceIndexChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="priceIndexChart"></canvas>
+            </div>
+            
             <!-- 日志显示区域 -->
             <!-- 日志显示区域 -->
             <!-- <div class="mt-5">
@@ -217,6 +228,7 @@
         let hs300ProfitChart = null;
         let nonBankProfitCommodityChart = null;
         let nonBankProfitPmiChart = null;
+        let priceIndexChart = null;
 
         
         // 页面加载完成后执行
@@ -235,6 +247,7 @@
             document.getElementById('hs300PeChartLoading').style.display = 'flex';
             document.getElementById('hs300ProfitChartLoading').style.display = 'flex';
             document.getElementById('nonBankProfitPmiChartLoading').style.display = 'flex';
+            document.getElementById('priceIndexChartLoading').style.display = 'flex';
             
             // 发起API请求
             fetch('/api/macro/money_supply')
@@ -263,6 +276,7 @@
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
                         document.getElementById('nonBankProfitPmiChartLoading').style.display = 'none';
+                        document.getElementById('priceIndexChartLoading').style.display = 'none';
 
     
                     }
@@ -284,6 +298,7 @@
                     document.getElementById('hs300ProfitChartLoading').style.display = 'none';
                     document.getElementById('nonBankProfitCommodityChartLoading').style.display = 'none';
                     document.getElementById('nonBankProfitPmiChartLoading').style.display = 'none';
+                    document.getElementById('priceIndexChartLoading').style.display = 'none';
                 });
         }
         
@@ -337,6 +352,9 @@
                         // 创建非银行滚动4Q净利润和PMI订单指数图表
                         createNonBankProfitPmiChart(sortedData);
                         
+                        // 创建价格指数对比图表
+                        createPriceIndexChart(sortedData);
+                        
                         // 隐藏加载状态
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
@@ -346,6 +364,7 @@
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
                         document.getElementById('nonBankProfitCommodityChartLoading').style.display = 'none';
                         document.getElementById('nonBankProfitPmiChartLoading').style.display = 'none';
+                        document.getElementById('priceIndexChartLoading').style.display = 'none';
         }
         
         // 创建货币供应量图表
@@ -1637,6 +1656,123 @@
                             },
                             grid: {
                                 drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 创建价格指数对比图表
+        function createPriceIndexChart(data) {
+            const ctx = document.getElementById('priceIndexChart').getContext('2d');
+            
+            // 销毁旧图表（如果存在）
+            if (priceIndexChart) {
+                priceIndexChart.destroy();
+            }
+            
+            // 筛选2011年1月之后的数据
+            const filteredData = data.filter(item => {
+                if (item['月份'].includes('.')) {
+                    const [year, month] = item['月份'].split('.');
+                    return parseInt(year) >= 2011;
+                } else if (item['月份'].includes('-')) {
+                    const [year, month] = item['月份'].split('-');
+                    return parseInt(year) >= 2011;
+                }
+                return false;
+            });
+            
+            const labels = filteredData.map(item => item['月份']);
+            const commodityPriceIndex = filteredData.map(item => item['商品价格指数']);
+            const industrialPurchaseIndex = filteredData.map(item => item['工业生产者购进价格指数(2011年1月=100)']);
+            const fuelPowerIndex = filteredData.map(item => item['燃料、动力类购进价格指数(2011年1月=100)']);
+            
+            // 创建新图表
+            priceIndexChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '商品价格指数',
+                            data: commodityPriceIndex,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: '工业生产者购进价格指数(2011年1月=100)',
+                            data: industrialPurchaseIndex,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: true
+                        },
+                        {
+                            label: '燃料、动力类购进价格指数(2011年1月=100)',
+                            data: fuelPowerIndex,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            spanGaps: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '价格指数对比图表',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: '指数值'
+                            },
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 100) {
+                                        return 'rgba(0, 0, 0, 0.8)'; // 100基准线加粗
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)'; // 其他网格线保持原样
+                                },
+                                lineWidth: function(context) {
+                                    if (context.tick.value === 100) {
+                                        return 2; // 100基准线加粗
+                                    }
+                                    return 1; // 其他网格线保持原样
+                                }
                             }
                         }
                     }

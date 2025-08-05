@@ -414,8 +414,14 @@ def fetch_macro_china_money_supply():
         print(f"DEBUG: 滚动4Q净利润和TTM市盈率数据获取成功，共{len(rolling_4q_dict)}条记录")
         
         # 获取商品价格指数数据
+        print("DEBUG: 开始获取商品价格指数数据...")
         commodity_dict = get_commodity_price_index_data()
-        print(f"DEBUG: 商品价格指数数据获取成功，共{len(commodity_dict)}条记录")
+        print(f"DEBUG: 商品价格指数数据获取完成，共{len(commodity_dict)}条记录")
+        if len(commodity_dict) > 0:
+            sample_keys = list(commodity_dict.keys())[:3]
+            print(f"DEBUG: 商品价格指数数据样本键: {sample_keys}")
+        else:
+            print("DEBUG: 警告 - 商品价格指数数据为空！")
         
         # 获取上海新房价格数据
         house_price_dict = {}  # 初始化为空字典
@@ -809,27 +815,53 @@ def fetch_macro_china_money_supply():
                 # 添加商品价格指数数据（如果存在）
                 # 商品价格指数数据现在使用日期格式（YYYY-MM-DD）作为键
                 commodity_value = None
-                target_year = int(formatted_date.split('.')[0])
-                target_month = int(formatted_date.split('.')[1])
+                print(f"DEBUG: 处理日期 {formatted_date}，商品价格指数数据条数: {len(commodity_dict)}")
+                if len(commodity_dict) == 0:
+                    print("WARNING: 商品价格指数数据为空！")
                 
-                # 查找该月份的最新商品价格指数数据
-                latest_date = None
-                for date_key in commodity_dict.keys():
-                    try:
-                        # 解析日期格式 YYYY-MM-DD
-                        date_parts = date_key.split('-')
-                        if len(date_parts) == 3:
-                            year = int(date_parts[0])
-                            month = int(date_parts[1])
-                            
-                            # 如果年月匹配
-                            if year == target_year and month == target_month:
-                                # 找到该月份的最新日期
-                                if latest_date is None or date_key > latest_date:
-                                    latest_date = date_key
-                                    commodity_value = commodity_dict[date_key]['商品价格指数']
-                    except (ValueError, IndexError):
-                        continue
+                # 解析目标年月，支持多种格式：YYYY.MM, YYYY-MM, YYYY.M, YYYY-M
+                target_year = None
+                target_month = None
+                
+                # 尝试解析日期格式
+                if '.' in formatted_date:
+                    parts = formatted_date.split('.')
+                    if len(parts) == 2:
+                        target_year = int(parts[0])
+                        target_month = int(parts[1].lstrip('0'))
+                elif '-' in formatted_date:
+                    parts = formatted_date.split('-')
+                    if len(parts) == 2:
+                        target_year = int(parts[0])
+                        target_month = int(parts[1].lstrip('0'))
+                
+                if target_year is not None and target_month is not None:
+                    # 查找该月份的最新商品价格指数数据
+                    latest_date = None
+                    matching_count = 0
+                    for date_key in commodity_dict.keys():
+                        try:
+                            # 解析日期格式 YYYY-MM-DD
+                            date_parts = date_key.split('-')
+                            if len(date_parts) == 3:
+                                year = int(date_parts[0])
+                                month = int(date_parts[1])
+                                
+                                # 如果年月匹配
+                                if year == target_year and month == target_month:
+                                    matching_count += 1
+                                    # 找到该月份的最新日期
+                                    if latest_date is None or date_key > latest_date:
+                                        latest_date = date_key
+                                        commodity_value = commodity_dict[date_key]['商品价格指数']
+                        except (ValueError, IndexError):
+                            continue
+                    print(f"DEBUG: {formatted_date} 找到 {matching_count} 个匹配日期，最新日期: {latest_date}，指数值: {commodity_value}")
+                else:
+                    # 如果格式不匹配，设置为None但不跳过整个数据项
+                    commodity_value = None
+                
+
                 
                 item['商品价格指数'] = commodity_value
                 
@@ -875,21 +907,82 @@ def fetch_macro_china_money_supply():
                             item['沪深300指数'] = hs300_dict[hs300_month]['沪深300指数']
                             item['沪深300指数_同比'] = hs300_dict[hs300_month]['沪深300指数_同比']
                             
-                            # 添加其他数据字段（设为null）
-                            item['中证商品期货价格指数'] = None
-                            item['TTM市盈率'] = None
-                            item['滚动4Q净利润'] = None
-                            item['银行滚动4Q净利润'] = None
-                            item['非银行滚动4Q净利润'] = None
-                            item['银行TTM市盈率'] = None
-                            item['非银行TTM市盈率'] = None
-                            item['上海新建商品住宅价格指数_同比'] = None
-                            item['上海二手住宅价格指数_同比'] = None
-                            item['上海新建商品住宅价格指数_环比'] = None
-                            item['上海二手住宅价格指数_环比'] = None
-                            item['上海新建商品住宅价格指数(2011.1=100)'] = None
-                            item['上海二手住宅价格指数(2011.1=100)'] = None
-                            item['商品价格指数'] = None
+                            # 添加中证商品期货价格指数数据（如果存在）
+                            if hs300_month in ccidx_dict:
+                                item['中证商品期货价格指数'] = ccidx_dict[hs300_month]['中证商品期货价格指数']
+                            else:
+                                item['中证商品期货价格指数'] = None
+                            
+                            # 添加滚动4Q净利润和TTM市盈率数据（如果存在）
+                            if hs300_month in rolling_4q_dict:
+                                item['TTM市盈率'] = rolling_4q_dict[hs300_month]['TTM市盈率']
+                                item['滚动4Q净利润'] = rolling_4q_dict[hs300_month]['滚动4Q净利润']
+                                item['银行滚动4Q净利润'] = rolling_4q_dict[hs300_month]['银行滚动4Q净利润']
+                                item['非银行滚动4Q净利润'] = rolling_4q_dict[hs300_month]['非银行滚动4Q净利润']
+                                item['银行TTM市盈率'] = rolling_4q_dict[hs300_month]['银行TTM市盈率']
+                                item['非银行TTM市盈率'] = rolling_4q_dict[hs300_month]['非银行TTM市盈率']
+                            else:
+                                item['TTM市盈率'] = None
+                                item['滚动4Q净利润'] = None
+                                item['银行滚动4Q净利润'] = None
+                                item['非银行滚动4Q净利润'] = None
+                                item['银行TTM市盈率'] = None
+                                item['非银行TTM市盈率'] = None
+                            
+                            # 添加房价数据（如果存在）
+                            if hs300_month in house_price_dict:
+                                item['上海新建商品住宅价格指数_同比'] = house_price_dict[hs300_month]['新建商品住宅价格指数_同比']
+                                item['上海二手住宅价格指数_同比'] = house_price_dict[hs300_month]['二手住宅价格指数_同比']
+                                item['上海新建商品住宅价格指数_环比'] = house_price_dict[hs300_month]['新建商品住宅价格指数_环比']
+                                item['上海二手住宅价格指数_环比'] = house_price_dict[hs300_month]['二手住宅价格指数_环比']
+                                item['上海新建商品住宅价格指数(2011.1=100)'] = house_price_dict[hs300_month].get('新建商品住宅价格指数(2011.1=100)')
+                                item['上海二手住宅价格指数(2011.1=100)'] = house_price_dict[hs300_month].get('二手住宅价格指数(2011.1=100)')
+                            else:
+                                item['上海新建商品住宅价格指数_同比'] = None
+                                item['上海二手住宅价格指数_同比'] = None
+                                item['上海新建商品住宅价格指数_环比'] = None
+                                item['上海二手住宅价格指数_环比'] = None
+                                item['上海新建商品住宅价格指数(2011.1=100)'] = None
+                                item['上海二手住宅价格指数(2011.1=100)'] = None
+                            
+                            # 添加商品价格指数数据（如果存在）
+                            commodity_value = None
+                            print(f"DEBUG: 处理新增沪深300月份 {hs300_month}，商品价格指数数据条数: {len(commodity_dict)}")
+                            
+                            # 解析目标年月
+                            target_year = None
+                            target_month = None
+                            
+                            if '.' in hs300_month:
+                                parts = hs300_month.split('.')
+                                if len(parts) == 2:
+                                    target_year = int(parts[0])
+                                    target_month = int(parts[1].lstrip('0'))
+                            
+                            if target_year is not None and target_month is not None:
+                                # 查找该月份的最新商品价格指数数据
+                                latest_date = None
+                                matching_count = 0
+                                for date_key in commodity_dict.keys():
+                                    try:
+                                        # 解析日期格式 YYYY-MM-DD
+                                        date_parts = date_key.split('-')
+                                        if len(date_parts) == 3:
+                                            year = int(date_parts[0])
+                                            month = int(date_parts[1])
+                                            
+                                            # 如果年月匹配
+                                            if year == target_year and month == target_month:
+                                                matching_count += 1
+                                                # 找到该月份的最新日期
+                                                if latest_date is None or date_key > latest_date:
+                                                    latest_date = date_key
+                                                    commodity_value = commodity_dict[date_key]['商品价格指数']
+                                    except (ValueError, IndexError):
+                                        continue
+                                print(f"DEBUG: 新增月份 {hs300_month} 找到 {matching_count} 个匹配日期，最新日期: {latest_date}，指数值: {commodity_value}")
+                            
+                            item['商品价格指数'] = commodity_value
                             
                             data.append(item)
                     except (ValueError, IndexError):
@@ -1148,8 +1241,12 @@ def get_commodity_price_index_data():
         dict: 包含日期和商品价格指数的字典
     """
     try:
-        # 读取JSON文件
-        json_file_path = r'C:\Users\17701\github\my_first_repo\stockapi\commodity_price_index.json'
+        # 读取JSON文件 - 使用相对路径
+        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        json_file_path = os.path.join(current_dir, '..', 'stockapi', 'commodity_price_index.json')
+        json_file_path = os.path.abspath(json_file_path)
+        
+        print(f"DEBUG: 尝试读取商品价格指数文件: {json_file_path}")
         
         if not os.path.exists(json_file_path):
             print(f"商品价格指数数据文件不存在: {json_file_path}")
