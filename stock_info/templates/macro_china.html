@@ -1132,10 +1132,11 @@
             const bankRolling4qProfit = data.map(item => item.银行滚动4Q净利润);
             const nonBankRolling4qProfit = data.map(item => item.非银行滚动4Q净利润);
             
-            // 过滤掉所有数据都为null的点
+            // 过滤数据，以沪深300指数的起点作为x轴起点
             const filteredData = [];
             for (let i = 0; i < months.length; i++) {
-                if (hs300Index[i] !== null || rolling4qProfit[i] !== null || bankRolling4qProfit[i] !== null || nonBankRolling4qProfit[i] !== null) {
+                // 只保留沪深300指数不为null的月份
+                if (hs300Index[i] !== null) {
                     filteredData.push({
                         month: months[i],
                         hs300: hs300Index[i],
@@ -1221,7 +1222,7 @@
                         borderWidth: 2,
                         pointRadius: 2,
                         tension: 0.1,
-                        spanGaps: true,
+                        spanGaps: true,  // 跳过null值，连接有效数据点
                         yAxisID: 'y1'
                     }, {
                         label: '银行滚动4Q净利润 (亿元)',
@@ -1231,7 +1232,7 @@
                         borderWidth: 2,
                         pointRadius: 2,
                         tension: 0.1,
-                        spanGaps: true,
+                        spanGaps: true,  // 跳过null值，连接有效数据点
                         yAxisID: 'y1'
                     }, {
                         label: '非银行滚动4Q净利润 (亿元)',
@@ -1241,7 +1242,7 @@
                         borderWidth: 2,
                         pointRadius: 2,
                         tension: 0.1,
-                        spanGaps: true,
+                        spanGaps: true,  // 跳过null值，连接有效数据点
                         yAxisID: 'y1'
                     }]
                 },
@@ -1321,11 +1322,8 @@
                 nonBankProfitCommodityChart.destroy();
             }
             
-            // 提取和过滤数据
-            const filteredData = data.filter(item => {
-                return item.非银行滚动4Q净利润 !== null || item.商品价格指数 !== null || item.沪深300指数 !== null;
-            });
-            
+            // 过滤数据，以沪深300指数的起点作为x轴起点
+            const filteredData = data.filter(item => item.沪深300指数 !== null);
             const months = filteredData.map(item => item.月份);
             const nonBankProfit = filteredData.map(item => item.非银行滚动4Q净利润);
             const commodityIndex = filteredData.map(item => item.商品价格指数);
@@ -1392,7 +1390,7 @@
                             borderWidth: 2,
                             pointRadius: 2,
                             tension: 0.1,
-                            spanGaps: true
+                            spanGaps: true  // 跳过null值，连接有效数据点
                         },
                         {
                             label: '商品价格指数',
@@ -1408,8 +1406,8 @@
                         {
                             label: '沪深300指数',
                             data: hs300Index,
-                            borderColor: 'rgba(75, 192, 192, 1)',
-                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
                             yAxisID: 'y2',
                             borderWidth: 2,
                             pointRadius: 2,
@@ -1504,24 +1502,12 @@
         
         // 创建非银行滚动4Q净利润和PMI订单指数图表
         function createNonBankProfitPmiChart(data) {
-            // 提取数据
-            const months = data.map(item => item.月份);
-            const nonBankProfit = data.map(item => item.非银行滚动4Q净利润);
-            const newOrderIndex = data.map(item => item['新订单指数(%)']);
-            const newExportOrderIndex = data.map(item => item['新出口订单指数(%)']);
-            
-            // 过滤掉所有数据都为null的点
-            const filteredData = [];
-            for (let i = 0; i < months.length; i++) {
-                if (nonBankProfit[i] !== null || newOrderIndex[i] !== null || newExportOrderIndex[i] !== null) {
-                    filteredData.push({
-                        month: months[i],
-                        nonBankProfit: nonBankProfit[i],
-                        newOrderIndex: newOrderIndex[i],
-                        newExportOrderIndex: newExportOrderIndex[i]
-                    });
-                }
-            }
+            // 过滤数据，以新订单指数的起点作为x轴起点
+            const filteredData = data.filter(item => item['新订单指数(%)'] !== null);
+            const months = filteredData.map(item => item.月份);
+            const nonBankProfit = filteredData.map(item => item.非银行滚动4Q净利润);
+            const newOrderIndex = filteredData.map(item => item['新订单指数(%)']);
+            const newExportOrderIndex = filteredData.map(item => item['新出口订单指数(%)']);
             
             const ctx = document.getElementById('nonBankProfitPmiChart').getContext('2d');
             
@@ -1533,20 +1519,20 @@
             nonBankProfitPmiChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: filteredData.map(item => item.month),
+                    labels: months,
                     datasets: [{
                         label: '非银行滚动4Q净利润 (亿元)',
-                        data: filteredData.map(item => item.nonBankProfit),
+                        data: nonBankProfit,
                         borderColor: 'rgba(255, 99, 132, 1)',
                         backgroundColor: 'rgba(255, 99, 132, 0.2)',
                         borderWidth: 2,
                         pointRadius: 2,
                         tension: 0.1,
-                        spanGaps: true,
+                        spanGaps: true,  // 跳过null值，连接有效数据点
                         yAxisID: 'y'
                     }, {
                         label: '新订单指数(%)',
-                        data: filteredData.map(item => item.newOrderIndex),
+                        data: newOrderIndex,
                         borderColor: 'rgba(54, 162, 235, 1)',
                         backgroundColor: 'rgba(54, 162, 235, 0.2)',
                         borderWidth: 2,
@@ -1556,7 +1542,7 @@
                         yAxisID: 'y1'
                     }, {
                         label: '新出口订单指数(%)',
-                        data: filteredData.map(item => item.newExportOrderIndex),
+                        data: newExportOrderIndex,
                         borderColor: 'rgba(75, 192, 192, 1)',
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
                         borderWidth: 2,

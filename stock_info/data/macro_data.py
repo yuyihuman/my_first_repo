@@ -735,40 +735,121 @@ def fetch_macro_china_money_supply():
                         item['中证商品期货价格指数'] = None
                 
                 # 添加滚动4Q净利润和TTM市盈率数据（如果存在）
-                if formatted_date in rolling_4q_dict:
-                    item['TTM市盈率'] = rolling_4q_dict[formatted_date]['TTM市盈率']
-                    item['滚动4Q净利润'] = rolling_4q_dict[formatted_date]['滚动4Q净利润']
-                    item['银行滚动4Q净利润'] = rolling_4q_dict[formatted_date]['银行滚动4Q净利润']
-                    item['非银行滚动4Q净利润'] = rolling_4q_dict[formatted_date]['非银行滚动4Q净利润']
-                    item['银行TTM市盈率'] = rolling_4q_dict[formatted_date]['银行TTM市盈率']
-                    item['非银行TTM市盈率'] = rolling_4q_dict[formatted_date]['非银行TTM市盈率']
-                    print(f"DEBUG: 直接匹配成功 {formatted_date} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}, 银行4Q: {item['银行滚动4Q净利润']}, 非银行4Q: {item['非银行滚动4Q净利润']}, 银行TTM: {item['银行TTM市盈率']}, 非银行TTM: {item['非银行TTM市盈率']}")
-                else:
-                    # 尝试其他可能的日期格式
-                    found = False
-                    for key in rolling_4q_dict.keys():
-                        # 检查年份和月份是否匹配
-                        if '.' in formatted_date and '.' in key:
-                            if formatted_date.split('.')[0] == key.split('.')[0] and formatted_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
-                                item['TTM市盈率'] = rolling_4q_dict[key]['TTM市盈率']
-                                item['滚动4Q净利润'] = rolling_4q_dict[key]['滚动4Q净利润']
-                                item['银行滚动4Q净利润'] = rolling_4q_dict[key]['银行滚动4Q净利润']
-                                item['非银行滚动4Q净利润'] = rolling_4q_dict[key]['非银行滚动4Q净利润']
-                                item['银行TTM市盈率'] = rolling_4q_dict[key]['银行TTM市盈率']
-                                item['非银行TTM市盈率'] = rolling_4q_dict[key]['非银行TTM市盈率']
-                                print(f"DEBUG: 格式匹配成功 {formatted_date} -> {key} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}, 银行4Q: {item['银行滚动4Q净利润']}, 非银行4Q: {item['非银行滚动4Q净利润']}, 银行TTM: {item['银行TTM市盈率']}, 非银行TTM: {item['非银行TTM市盈率']}")
-                                found = True
-                                break
+                def find_latest_rolling_data(target_date, rolling_dict):
+                    """查找最近一次的滚动4Q数据"""
+                    if target_date in rolling_dict:
+                        return rolling_dict[target_date], target_date
                     
-                    if not found:
-                        item['TTM市盈率'] = None
+                    # 尝试其他可能的日期格式匹配
+                    for key in rolling_dict.keys():
+                        if '.' in target_date and '.' in key:
+                            if target_date.split('.')[0] == key.split('.')[0] and target_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
+                                return rolling_dict[key], key
+                    
+                    # 如果没有精确匹配，查找最近一次的数据
+                    try:
+                        target_year = int(target_date.split('.')[0])
+                        target_month = int(target_date.split('.')[1].lstrip('0'))
+                        
+                        # 按时间倒序排列所有可用的数据键
+                        available_dates = []
+                        for key in rolling_dict.keys():
+                            try:
+                                key_year = int(key.split('.')[0])
+                                key_month = int(key.split('.')[1].lstrip('0'))
+                                key_date = key_year * 12 + key_month
+                                target_date_num = target_year * 12 + target_month
+                                
+                                # 只考虑目标日期之前的数据
+                                if key_date <= target_date_num:
+                                    available_dates.append((key_date, key))
+                            except:
+                                continue
+                        
+                        if available_dates:
+                            # 按时间倒序排列，取最近的一个
+                            available_dates.sort(reverse=True)
+                            latest_key = available_dates[0][1]
+                            return rolling_dict[latest_key], latest_key
+                    except:
+                        pass
+                    
+                    return None, None
+                
+                rolling_data, matched_key = find_latest_rolling_data(formatted_date, rolling_4q_dict)
+                
+                if rolling_data:
+                    # 检查当前月份是否超过了最新的季度数据，如果是，则不设置净利润数据
+                    # 这样可以避免显示补全的净利润数据
+                    should_set_profit_data = (matched_key == formatted_date)
+                    
+                    if should_set_profit_data:
+                        # 获取滚动4Q净利润数据（只有当月份有真实季度数据时才设置）
+                        item['滚动4Q净利润'] = rolling_data['滚动4Q净利润']
+                        item['银行滚动4Q净利润'] = rolling_data['银行滚动4Q净利润']
+                        item['非银行滚动4Q净利润'] = rolling_data['非银行滚动4Q净利润']
+                    else:
+                        # 对于没有真实季度数据的月份，净利润保持为None
                         item['滚动4Q净利润'] = None
                         item['银行滚动4Q净利润'] = None
                         item['非银行滚动4Q净利润'] = None
-                        item['银行TTM市盈率'] = None
-                        item['非银行TTM市盈率'] = None
-                        if len(rolling_4q_dict) > 0:  # 只在前几条记录中打印调试信息
-                            print(f"DEBUG: 未找到匹配 {formatted_date}，滚动4Q数据键示例: {list(rolling_4q_dict.keys())[:3]}")
+                    
+                    # 根据当月沪深300指数重新计算TTM市盈率
+                    # TTM市盈率 = 当月市值 / 滚动4Q净利润
+                    # 假设基准季度的市值 = 基准季度TTM市盈率 * 滚动4Q净利润
+                    # 当月市值 = 基准市值 * (当月沪深300指数 / 基准沪深300指数)
+                    # 当月TTM市盈率 = 当月市值 / 滚动4Q净利润
+                    
+                    base_ttm_pe = rolling_data['TTM市盈率']
+                    base_bank_ttm_pe = rolling_data['银行TTM市盈率']
+                    base_non_bank_ttm_pe = rolling_data['非银行TTM市盈率']
+                    
+                    # 获取基准季度的沪深300指数（从matched_key对应的数据中获取）
+                    base_hs300_index = None
+                    if matched_key in hs300_dict:
+                        base_hs300_index = hs300_dict[matched_key]['沪深300指数']
+                    
+                    # 获取当月的沪深300指数
+                    current_hs300_index = item.get('沪深300指数')
+                    
+                    if (base_ttm_pe is not None and base_hs300_index is not None and 
+                        current_hs300_index is not None and base_hs300_index != 0):
+                        # 计算指数比率
+                        index_ratio = current_hs300_index / base_hs300_index
+                        # 重新计算TTM市盈率
+                        item['TTM市盈率'] = round(base_ttm_pe * index_ratio, 2)
+                    else:
+                        item['TTM市盈率'] = base_ttm_pe
+                    
+                    # 计算银行TTM市盈率
+                    if (base_bank_ttm_pe is not None and base_hs300_index is not None and 
+                        current_hs300_index is not None and base_hs300_index != 0):
+                        index_ratio = current_hs300_index / base_hs300_index
+                        item['银行TTM市盈率'] = round(base_bank_ttm_pe * index_ratio, 2)
+                    else:
+                        item['银行TTM市盈率'] = base_bank_ttm_pe
+                    
+                    # 计算非银行TTM市盈率
+                    if (base_non_bank_ttm_pe is not None and base_hs300_index is not None and 
+                        current_hs300_index is not None and base_hs300_index != 0):
+                        index_ratio = current_hs300_index / base_hs300_index
+                        item['非银行TTM市盈率'] = round(base_non_bank_ttm_pe * index_ratio, 2)
+                    else:
+                        item['非银行TTM市盈率'] = base_non_bank_ttm_pe
+                    
+                    if matched_key == formatted_date:
+                        print(f"DEBUG: 直接匹配成功 {formatted_date} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}")
+                    else:
+                        print(f"DEBUG: 使用最近数据 {formatted_date} -> {matched_key} -> TTM: {item['TTM市盈率']}, 4Q净利润: {item['滚动4Q净利润']}")
+                else:
+                    item['TTM市盈率'] = None
+                    item['滚动4Q净利润'] = None
+                    item['银行滚动4Q净利润'] = None
+                    item['非银行滚动4Q净利润'] = None
+                    item['银行TTM市盈率'] = None
+                    item['非银行TTM市盈率'] = None
+                    if len(rolling_4q_dict) > 0:
+                        print(f"DEBUG: 未找到任何匹配数据 {formatted_date}，滚动4Q数据键示例: {list(rolling_4q_dict.keys())[:3]}")
                 
                 # 添加房价数据（如果存在）
                 if formatted_date in house_price_dict:
@@ -876,6 +957,7 @@ def fetch_macro_china_money_supply():
         if hs300_dict:
             # 获取现有数据中的所有月份
             existing_months = set(item['月份'] for item in data)
+
             
             # 检查沪深300指数数据中是否有缺失的月份
             for hs300_month in hs300_dict.keys():
@@ -913,14 +995,90 @@ def fetch_macro_china_money_supply():
                             else:
                                 item['中证商品期货价格指数'] = None
                             
-                            # 添加滚动4Q净利润和TTM市盈率数据（如果存在）
-                            if hs300_month in rolling_4q_dict:
-                                item['TTM市盈率'] = rolling_4q_dict[hs300_month]['TTM市盈率']
-                                item['滚动4Q净利润'] = rolling_4q_dict[hs300_month]['滚动4Q净利润']
-                                item['银行滚动4Q净利润'] = rolling_4q_dict[hs300_month]['银行滚动4Q净利润']
-                                item['非银行滚动4Q净利润'] = rolling_4q_dict[hs300_month]['非银行滚动4Q净利润']
-                                item['银行TTM市盈率'] = rolling_4q_dict[hs300_month]['银行TTM市盈率']
-                                item['非银行TTM市盈率'] = rolling_4q_dict[hs300_month]['非银行TTM市盈率']
+                            # 添加滚动4Q净利润和TTM市盈率数据（使用最近一次数据）
+                            def find_latest_rolling_data_for_new_month(target_date, rolling_dict):
+                                """为新增月份查找最近一次的滚动4Q数据"""
+                                if target_date in rolling_dict:
+                                    return rolling_dict[target_date], target_date
+                                
+                                # 如果没有精确匹配，查找最近一次的数据
+                                try:
+                                    target_year = int(target_date.split('.')[0])
+                                    target_month = int(target_date.split('.')[1].lstrip('0'))
+                                    
+                                    # 按时间倒序排列所有可用的数据键
+                                    available_dates = []
+                                    for key in rolling_dict.keys():
+                                        try:
+                                            key_year = int(key.split('.')[0])
+                                            key_month = int(key.split('.')[1].lstrip('0'))
+                                            key_date = key_year * 12 + key_month
+                                            target_date_num = target_year * 12 + target_month
+                                            
+                                            # 只考虑目标日期之前的数据
+                                            if key_date <= target_date_num:
+                                                available_dates.append((key_date, key))
+                                        except:
+                                            continue
+                                    
+                                    if available_dates:
+                                        # 按时间倒序排列，取最近的一个
+                                        available_dates.sort(reverse=True)
+                                        latest_key = available_dates[0][1]
+                                        return rolling_dict[latest_key], latest_key
+                                except:
+                                    pass
+                                
+                                return None, None
+                            
+                            rolling_data_new, matched_key_new = find_latest_rolling_data_for_new_month(hs300_month, rolling_4q_dict)
+                            
+                            if rolling_data_new:
+                                # 注意：为了满足用户需求，这里只补全TTM市盈率用于计算，不补全净利润数据用于图表显示
+                                # 净利润数据保持为None，这样前端图表就不会显示这些补全的数据点
+                                
+                                # 根据当月沪深300指数重新计算TTM市盈率（用于TTM计算）
+                                base_ttm_pe = rolling_data_new['TTM市盈率']
+                                base_bank_ttm_pe = rolling_data_new['银行TTM市盈率']
+                                base_non_bank_ttm_pe = rolling_data_new['非银行TTM市盈率']
+                                
+                                # 获取基准季度的沪深300指数
+                                base_hs300_index = None
+                                if matched_key_new in hs300_dict:
+                                    base_hs300_index = hs300_dict[matched_key_new]['沪深300指数']
+                                
+                                # 获取当月的沪深300指数
+                                current_hs300_index = item.get('沪深300指数')
+                                
+                                if (base_ttm_pe is not None and base_hs300_index is not None and 
+                                    current_hs300_index is not None and base_hs300_index != 0):
+                                    # 计算指数比率
+                                    index_ratio = current_hs300_index / base_hs300_index
+                                    # 重新计算TTM市盈率
+                                    item['TTM市盈率'] = round(base_ttm_pe * index_ratio, 2)
+                                else:
+                                    item['TTM市盈率'] = base_ttm_pe
+                                
+                                # 计算银行TTM市盈率
+                                if (base_bank_ttm_pe is not None and base_hs300_index is not None and 
+                                    current_hs300_index is not None and base_hs300_index != 0):
+                                    index_ratio = current_hs300_index / base_hs300_index
+                                    item['银行TTM市盈率'] = round(base_bank_ttm_pe * index_ratio, 2)
+                                else:
+                                    item['银行TTM市盈率'] = base_bank_ttm_pe
+                                
+                                # 计算非银行TTM市盈率
+                                if (base_non_bank_ttm_pe is not None and base_hs300_index is not None and 
+                                    current_hs300_index is not None and base_hs300_index != 0):
+                                    index_ratio = current_hs300_index / base_hs300_index
+                                    item['非银行TTM市盈率'] = round(base_non_bank_ttm_pe * index_ratio, 2)
+                                else:
+                                    item['非银行TTM市盈率'] = base_non_bank_ttm_pe
+                                
+                                # 净利润数据保持为None，不进行补全，这样图表就不会显示这些数据点
+                                item['滚动4Q净利润'] = None
+                                item['银行滚动4Q净利润'] = None
+                                item['非银行滚动4Q净利润'] = None
                             else:
                                 item['TTM市盈率'] = None
                                 item['滚动4Q净利润'] = None
