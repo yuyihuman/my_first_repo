@@ -55,42 +55,17 @@ def get_hkstock_data():
                 '买入成交额': float(row['买入成交额']),
                 '卖出成交额': float(row['卖出成交额']),
                 '历史累计净买额': float(row['历史累计净买额']),
-                '领涨股': row['领涨股'],
-                '领涨股代码': row['领涨股-代码'],
-                '领涨股涨跌幅': float(row['领涨股-涨跌幅']),
+
                 '恒生指数': float(hsi_close) if hsi_close is not None else None
             })
         
-        # 获取最近半年的数据
-        half_year_ago = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
-        recent_data = df[df['日期'] >= half_year_ago].copy()
-        
-        # 统计领涨股出现次数
-        leading_stocks = {}
-        for _, row in recent_data.iterrows():
-            stock_name = row['领涨股']
-            stock_code = row['领涨股-代码']
-            if stock_name in leading_stocks:
-                leading_stocks[stock_name]['count'] += 1
-            else:
-                leading_stocks[stock_name] = {
-                    'code': stock_code,
-                    'count': 1
-                }
-        
-        # 转换为列表并按出现次数排序
-        leading_stocks_list = [{'name': k, 'code': v['code'], 'count': v['count']} 
-                              for k, v in leading_stocks.items()]
-        leading_stocks_list.sort(key=lambda x: x['count'], reverse=True)
-        
-        # 取前20名领涨股
-        top_leading_stocks = leading_stocks_list[:20]
+
         
         # 构建结果数据
         result = {
             'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'daily_data': daily_data,
-            'top_leading_stocks': top_leading_stocks
+
         }
         
         # 保存到缓存文件
@@ -109,5 +84,5 @@ def get_hkstock_data():
         return {
             'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'daily_data': [],
-            'top_leading_stocks': []
+
         }
