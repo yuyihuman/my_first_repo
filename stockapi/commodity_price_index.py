@@ -310,8 +310,8 @@ if all_hist_data:
             plt.savefig(chart_filename, dpi=300, bbox_inches='tight')
             logger.info(f"价格趋势图已保存到: {chart_filename}")
             
-            # 显示图表
-            plt.show()
+            # 关闭图表以释放内存
+            plt.close()
             
             # 输出统计信息
             logger.info(f"图表包含 {num_symbols} 种商品的独立价格趋势图")
