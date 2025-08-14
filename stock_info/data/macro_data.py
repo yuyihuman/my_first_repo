@@ -38,11 +38,11 @@ def fetch_macro_china_money_supply():
                 except (json.JSONDecodeError, Exception) as e:
                     print(f"读取缓存文件失败: {e}，将重新获取数据")
         
-        # 获取货币供应量数据（增速）
-        money_supply_df = ak.macro_china_supply_of_money()
+        # 获取货币供应量数据（统一接口包含所有数据）
+        money_supply_df = ak.macro_china_money_supply()
         
-        # 获取货币供应量总量数据
-        money_supply_total_df = ak.macro_china_money_supply()
+        # 使用同一个DataFrame，因为新接口包含了所有数据
+        money_supply_total_df = money_supply_df.copy()
         
         # 根据实际列名确定日期列和数据列
         # 尝试可能的日期列名
@@ -56,35 +56,27 @@ def fetch_macro_china_money_supply():
             # 如果找不到预期的日期列，使用第一列作为日期列
             date_col = money_supply_df.columns[0]
         
-        # 尝试可能的增长率列名
-        m2_growth_col = None
-        m1_growth_col = None
-        m0_growth_col = None
+        # 根据新接口的列名设置增长率列名
+        m2_growth_col = '货币和准货币(M2)-同比增长'
+        m1_growth_col = '货币(M1)-同比增长'
+        m0_growth_col = '流通中的现金(M0)-同比增长'
         
-        for col in money_supply_df.columns:
-            if 'M2' in col and '同比' in col:
-                m2_growth_col = col
-            elif 'M1' in col and '同比' in col:
-                m1_growth_col = col
-            elif 'M0' in col and '同比' in col:
-                m0_growth_col = col
-        
-        # 如果找不到特定的列，尝试使用可能的替代列
-        if m2_growth_col is None:
+        # 验证列名是否存在，如果不存在则尝试查找
+        if m2_growth_col not in money_supply_df.columns:
             for col in money_supply_df.columns:
-                if 'M2' in col or ('货币' in col and '广义' in col and '同比' in col):
+                if 'M2' in col and '同比' in col:
                     m2_growth_col = col
                     break
         
-        if m1_growth_col is None:
+        if m1_growth_col not in money_supply_df.columns:
             for col in money_supply_df.columns:
-                if 'M1' in col or ('货币' in col and '狭义' in col and '同比' in col):
+                if 'M1' in col and '同比' in col:
                     m1_growth_col = col
                     break
         
-        if m0_growth_col is None:
+        if m0_growth_col not in money_supply_df.columns:
             for col in money_supply_df.columns:
-                if 'M0' in col or ('流通中现金' in col and '同比' in col):
+                if 'M0' in col and '同比' in col:
                     m0_growth_col = col
                     break
         
@@ -598,12 +590,21 @@ def fetch_macro_china_money_supply():
                 date_str = str(row[date_col])
                 
                 # 处理日期格式
-                if '-' in date_str:
-                    # 如果日期格式为 "2023-01"，保持原样
-                    formatted_date = date_str
-                    # 提取年份和月份
-                    year = int(formatted_date.split('-')[0])
-                    month = int(formatted_date.split('-')[1])
+                if '年' in date_str and '月' in date_str:
+                    # 处理格式如 "2025年07月份"
+                    import re
+                    match = re.search(r'(\d{4})年(\d{1,2})月', date_str)
+                    if match:
+                        year = int(match.group(1))
+                        month = int(match.group(2))
+                        formatted_date = f"{year}.{month}"
+                    else:
+                        continue
+                elif '-' in date_str:
+                    # 如果日期格式为 "2023-01"，转换为点格式
+                    year = int(date_str.split('-')[0])
+                    month = int(date_str.split('-')[1])
+                    formatted_date = f"{year}.{month}"
                 else:
                     # 处理格式如 "2023.01" 或 "2023.1"
                     formatted_date = date_str
