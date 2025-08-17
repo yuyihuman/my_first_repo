@@ -108,6 +108,36 @@ def tap_screen(x, y):
     adb_command(f"adb shell input tap {x} {y}")
     time.sleep(1)  # 等待点击操作完成
 
+def clear_search_box():
+    """完全清空搜索框内容"""
+    logger.info("开始清空搜索框...")
+    
+    # 方法1: 全选并删除
+    adb_command("adb shell input keyevent 124")  # Ctrl+A (全选)
+    time.sleep(0.3)
+    adb_command("adb shell input keyevent 67")   # 删除键
+    time.sleep(0.3)
+    
+    # 方法2: 移动到行尾，然后多次删除
+    adb_command("adb shell input keyevent 123")  # 移动光标到行尾
+    time.sleep(0.3)
+    
+    # 连续按删除键多次，确保清空
+    for i in range(20):  # 增加删除次数，确保清空
+        adb_command("adb shell input keyevent 67")  # 删除键
+        time.sleep(0.1)
+    
+    # 方法3: 移动到行首，然后向前删除
+    adb_command("adb shell input keyevent 122")  # 移动光标到行首
+    time.sleep(0.3)
+    
+    # 连续按向前删除键
+    for i in range(20):
+        adb_command("adb shell input keyevent 112")  # 向前删除键
+        time.sleep(0.1)
+    
+    logger.info("搜索框清空完成")
+
 def input_text(text):
     """根据按键坐标表点击拼音输入，每输入一个字母就检查候选词区域"""
     logger.info(f"输入文本: {text}")
@@ -464,9 +494,7 @@ def input_text(text):
                     # 如果仍未找到，清空输入并标记失败，但不立即返回
                     logger.warning(f"在全屏区域中仍未识别到目标汉字'{char}'，放弃当前搜索词的输入")
                     # 清空当前输入
-                    adb_command("adb shell input keyevent 123")  # 移动光标到行尾
-                    adb_command("adb shell input keyevent --longpress 67 67 67 67 67")  # 长按删除键
-                    time.sleep(0.5)
+                    clear_search_box()
                     # 标记有字符输入失败
                     any_char_failed = True
                     # 不再继续尝试后续字符，直接跳出循环
@@ -614,6 +642,9 @@ def click_first_search_result(search_term):
     if not found:
         logger.warning(f"OCR未识别到包含 '{search_term}' 的搜索结果")
         return False
+    else:
+        logger.info(f"成功点击包含 '{search_term}' 的搜索结果")
+        return True
 
 def preprocess_image_for_ocr(image):
     """图像预处理以提高OCR识别准确性"""
@@ -901,7 +932,7 @@ def verify_search_results(search_term):
     
     return final_count
 
-def search_for_location(location_name, max_retries=5):
+def search_for_location(location_name, max_retries=3):
     """在搜索框中搜索指定位置"""
     logger.info(f"开始搜索位置: {location_name}")
     
@@ -934,10 +965,7 @@ def search_for_location(location_name, max_retries=5):
         capture_screenshot(f"02_after_tap_search_{location_name}_{timestamp}.png")
         
         # 3. 清空搜索框
-        logger.info("清空搜索框...")
-        adb_command("adb shell input keyevent 123")  # 移动光标到行尾
-        adb_command("adb shell input keyevent --longpress 67 67 67 67 67")  # 长按删除键
-        time.sleep(1)
+        clear_search_box()
         
         # 4. 输入搜索文本
         logger.info(f"输入搜索文本: {location_name}")
