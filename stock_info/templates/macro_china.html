@@ -145,6 +145,17 @@
                 <canvas id="m1CcidxChart"></canvas>
             </div>
             
+            <!-- 新增：M1同比增幅与非银行滚动4Q净利润对比图表 -->
+            <div class="chart-container">
+                <div id="m1NonBankProfitChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="m1NonBankProfitChart"></canvas>
+            </div>
+            
             <!-- 新增：沪深300指数和TTM市盈率图表 -->
             <div class="chart-container">
                 <div id="hs300PeChartLoading" class="loading-overlay">
@@ -224,6 +235,7 @@
         let indexComparisonChart = null;
         let m1Hs300Chart = null;
         let m1CcidxChart = null;
+        let m1NonBankProfitChart = null;
         let hs300PeChart = null;
         let hs300ProfitChart = null;
         let nonBankProfitCommodityChart = null;
@@ -244,6 +256,7 @@
             document.getElementById('indexComparisonChartLoading').style.display = 'flex';
             document.getElementById('m1Hs300ChartLoading').style.display = 'flex';
             document.getElementById('m1CcidxChartLoading').style.display = 'flex';
+            document.getElementById('m1NonBankProfitChartLoading').style.display = 'flex';
             document.getElementById('hs300PeChartLoading').style.display = 'flex';
             document.getElementById('hs300ProfitChartLoading').style.display = 'flex';
             document.getElementById('nonBankProfitPmiChartLoading').style.display = 'flex';
@@ -273,6 +286,7 @@
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
                         document.getElementById('m1Hs300ChartLoading').style.display = 'none';
                         document.getElementById('m1CcidxChartLoading').style.display = 'none';
+                        document.getElementById('m1NonBankProfitChartLoading').style.display = 'none';
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
                         document.getElementById('nonBankProfitPmiChartLoading').style.display = 'none';
@@ -290,15 +304,16 @@
                     logApiResponse({status: 'error', message: error.message});
                     
                     // 隐藏加载状态
-                    document.getElementById('moneySupplyChartLoading').style.display = 'none';
-                    document.getElementById('indexComparisonChartLoading').style.display = 'none';
-                    document.getElementById('m1Hs300ChartLoading').style.display = 'none';
-                    document.getElementById('m1CcidxChartLoading').style.display = 'none';
-                    document.getElementById('hs300PeChartLoading').style.display = 'none';
-                    document.getElementById('hs300ProfitChartLoading').style.display = 'none';
-                    document.getElementById('nonBankProfitCommodityChartLoading').style.display = 'none';
-                    document.getElementById('nonBankProfitPmiChartLoading').style.display = 'none';
-                    document.getElementById('priceIndexChartLoading').style.display = 'none';
+                        document.getElementById('moneySupplyChartLoading').style.display = 'none';
+                        document.getElementById('indexComparisonChartLoading').style.display = 'none';
+                        document.getElementById('m1Hs300ChartLoading').style.display = 'none';
+                        document.getElementById('m1CcidxChartLoading').style.display = 'none';
+                        document.getElementById('m1NonBankProfitChartLoading').style.display = 'none';
+                        document.getElementById('hs300PeChartLoading').style.display = 'none';
+                        document.getElementById('hs300ProfitChartLoading').style.display = 'none';
+                        document.getElementById('nonBankProfitCommodityChartLoading').style.display = 'none';
+                        document.getElementById('nonBankProfitPmiChartLoading').style.display = 'none';
+                        document.getElementById('priceIndexChartLoading').style.display = 'none';
                 });
         }
         
@@ -340,6 +355,9 @@
                         // 创建M1同比增幅和中证商品期货指数图表
                         createM1CcidxChart(sortedData);
                         
+                        // 创建M1同比增幅与非银行滚动4Q净利润对比图表
+                        createM1NonBankProfitChart(sortedData);
+                        
                         // 创建沪深300指数和TTM市盈率图表
                         createHs300PeChart(sortedData);
                         
@@ -360,6 +378,7 @@
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
                         document.getElementById('m1Hs300ChartLoading').style.display = 'none';
                         document.getElementById('m1CcidxChartLoading').style.display = 'none';
+                        document.getElementById('m1NonBankProfitChartLoading').style.display = 'none';
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
                         document.getElementById('nonBankProfitCommodityChartLoading').style.display = 'none';
@@ -892,6 +911,172 @@
                             },
                             ticks: {
                                 color: 'rgba(255, 165, 0, 1)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 创建M1同比增幅与非银行滚动4Q净利润对比图表
+        function createM1NonBankProfitChart(data) {
+            const ctx = document.getElementById('m1NonBankProfitChart').getContext('2d');
+            
+            // 提取数据
+            const labels = data.map(item => item.月份);
+            const m1Data = data.map(item => item.货币_狭义货币M1_同比);
+            const nonBankProfitData = data.map(item => item.非银行滚动4Q净利润);
+            
+            // 定义重要时间节点
+            const timePoints = ['2002.2', '2005.5', '2008.12', '2012.1', '2015.3', '2019.1', '2021.11', '2024.9'];
+            
+            // 计算相邻时间点间的月数
+            function calculateMonthsBetween(date1, date2) {
+                const [year1, month1] = date1.split('.').map(Number);
+                const [year2, month2] = date2.split('.').map(Number);
+                return (year2 - year1) * 12 + (month2 - month1);
+            }
+            
+            // 创建注释配置
+            const annotations = {};
+            
+            // 添加垂直线
+            timePoints.forEach((point, index) => {
+                annotations[`line${index}`] = {
+                    type: 'line',
+                    xMin: point,
+                    xMax: point,
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 2,
+                    borderDash: [5, 5]
+                };
+            });
+            
+            // 添加月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = timePoints[i]; // 在起始点附近显示
+                
+                annotations[`label${i}`] = {
+                    type: 'label',
+                    xValue: midPoint,
+                    yValue: 'max',
+                    content: `${months}个月`,
+                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10
+                    },
+                    position: 'start',
+                    yAdjust: -20
+                };
+            }
+            
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'M1同比增幅 (%)',
+                            data: m1Data,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 1,
+                            tension: 0.1,
+                            spanGaps: true,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '非银行滚动4Q净利润 (亿元)',
+                            data: nonBankProfitData,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderWidth: 2,
+                            pointRadius: 1,
+                            tension: 0.1,
+                            spanGaps: true,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'M1同比增幅与非银行滚动4Q净利润对比',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        annotation: {
+                            annotations: annotations
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'M1同比增幅 (%)',
+                                color: 'rgba(54, 162, 235, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(54, 162, 235, 1)'
+                            },
+                            grid: {
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.8)';
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)';
+                                },
+                                lineWidth: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 2;
+                                    }
+                                    return 1;
+                                }
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '非银行滚动4Q净利润 (亿元)',
+                                color: 'rgba(75, 192, 192, 1)'
+                            },
+                            ticks: {
+                                color: 'rgba(75, 192, 192, 1)'
                             },
                             grid: {
                                 drawOnChartArea: false
