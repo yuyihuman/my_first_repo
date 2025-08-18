@@ -206,6 +206,91 @@ def serve_house_price_image(image_name):
     
     return "图片未找到", 404
 
+# 获取上海房价数据API
+@app.route('/api/sh_house_price/data')
+def sh_house_price_data():
+    try:
+        import json
+        # 读取上海房价数据文件
+        data_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                'cache', 'outsource', 'shanghai_house_price_index.json')
+        
+        if not os.path.exists(data_file):
+            return jsonify({
+                'status': 'error',
+                'message': '数据文件不存在'
+            })
+        
+        with open(data_file, 'r', encoding='utf-8') as f:
+            house_data = json.load(f)
+        
+        # 获取最新数据日期
+        latest_data_date = house_data.get('latest_data_date', '')
+        
+        # 提取数据用于图表
+        chart_data = []
+        for date_key, data_item in house_data['data'].items():
+            chart_data.append({
+                'date': date_key,
+                'year': data_item['year'],
+                'month': data_item['month'],
+                'price_index': data_item['price_index'],
+                'total_area': data_item['total_area'],
+                'avg_price': data_item['avg_price'],
+                'yoy_change': data_item['yoy_change']
+            })
+        
+        # 按日期排序
+        chart_data.sort(key=lambda x: (x['year'], x['month']))
+        
+        # 对最新月份的成交量进行估算（如果是当月数据且不完整）
+        if chart_data and latest_data_date:
+            latest_item = chart_data[-1]
+            latest_year = latest_item['year']
+            latest_month = latest_item['month']
+            
+            # 解析最新数据日期
+            try:
+                from datetime import datetime
+                latest_date = datetime.strptime(latest_data_date, '%Y.%m.%d')
+                
+                # 如果最新数据是当月的，进行估算
+                if latest_date.year == latest_year and latest_date.month == latest_month:
+                    # 计算当月总天数
+                    import calendar
+                    days_in_month = calendar.monthrange(latest_year, latest_month)[1]
+                    
+                    # 计算已过天数
+                    days_passed = latest_date.day
+                    
+                    # 估算全月成交量（按比例放大）
+                    if days_passed > 0 and days_passed < days_in_month:
+                        actual_area = latest_item['total_area']  # 保存实际值
+                        estimated_total_area = actual_area * (days_in_month / days_passed)
+                        latest_item['actual_value'] = actual_area  # 实际值
+                        latest_item['total_area'] = round(estimated_total_area, 2)  # 估算总值
+                        latest_item['is_estimated'] = True
+                    else:
+                        latest_item['is_estimated'] = False
+                else:
+                    latest_item['is_estimated'] = False
+            except:
+                latest_item['is_estimated'] = False
+        
+        return jsonify({
+            'status': 'success',
+            'data': chart_data,
+            'base_period': house_data['base_period'],
+            'base_index': house_data['base_index'],
+            'description': house_data['description'],
+            'latest_data_date': latest_data_date
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
+
 
 
 # 提供图片文件

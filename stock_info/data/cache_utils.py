@@ -29,6 +29,9 @@ def ensure_cache_directories():
     # 宏观数据缓存目录
     if not os.path.exists(os.path.join(CACHE_DIR, 'macro')):
         os.makedirs(os.path.join(CACHE_DIR, 'macro'))
+    # 外部文件缓存目录
+    if not os.path.exists(os.path.join(CACHE_DIR, 'outsource')):
+        os.makedirs(os.path.join(CACHE_DIR, 'outsource'))
 
 def read_cache(cache_file):
     """读取缓存文件"""
