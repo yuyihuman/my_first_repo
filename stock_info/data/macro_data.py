@@ -7,7 +7,10 @@ import time
 import akshare as ak
 import pandas as pd
 from datetime import datetime, timedelta
-from .cache_utils import CACHE_DIR
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from cache_utils import CACHE_DIR
 
 def fetch_macro_china_money_supply():
     """
@@ -216,9 +219,9 @@ def fetch_macro_china_money_supply():
             date = item.pop('date')
             money_total_dict[date] = item
         
-        # 新增：计算从2011年1月开始的指数值
-        # 首先找到2011年1月的数据作为基准点
-        base_date = "2011.1"
+        # 新增：计算从2016年1月开始的指数值
+        # 首先找到2016年1月的数据作为基准点
+        base_date = "2016.1"
         base_data = None
         
         # 创建一个按日期排序的数据列表，用于计算指数
@@ -245,11 +248,11 @@ def fetch_macro_china_money_supply():
         if base_date in money_total_dict:
             base_data = money_total_dict[base_date]
         else:
-            # 如果找不到精确的2011.1，尝试找最接近的日期
+            # 如果找不到精确的2016.1，尝试找最接近的日期
             for date_str in sorted_date_strings:
                 if '.' in date_str:
                     year, month = date_str.split('.')
-                    if int(year) == 2011 and int(month) == 1:
+                    if int(year) == 2016 and int(month) == 1:
                         base_date = date_str
                         base_data = money_total_dict[date_str]
                         break
@@ -269,27 +272,27 @@ def fetch_macro_china_money_supply():
                     # 计算M2指数
                     if base_m2 is not None and current_data.get('M2总量(亿元)') is not None:
                         m2_index = (current_data['M2总量(亿元)'] / base_m2) * 100
-                        current_data['M2指数(2011.1=100)'] = round(m2_index, 2)
+                        current_data['M2指数(2016.1=100)'] = round(m2_index, 2)
                     else:
-                        current_data['M2指数(2011.1=100)'] = None
+                        current_data['M2指数(2016.1=100)'] = None
                     
                     # 特殊处理M1指数
                     if date_str == '2023.12' and base_m1 is not None and current_data.get('M1总量(亿元)') is not None:
                         # 记录2023年12月的M1指数值
                         m1_index = (current_data['M1总量(亿元)'] / base_m1) * 100
                         dec_2023_m1_index = round(m1_index, 2)
-                        current_data['M1指数(2011.1=100)'] = dec_2023_m1_index
+                        current_data['M1指数(2016.1=100)'] = dec_2023_m1_index
                     elif date_str == '2024.1':
                         # 2024年1月的M1指数与2023年12月保持一致
                         if dec_2023_m1_index is not None:
-                            current_data['M1指数(2011.1=100)'] = dec_2023_m1_index
+                            current_data['M1指数(2016.1=100)'] = dec_2023_m1_index
                         else:
                             # 如果没有找到2023年12月的数据，仍然使用常规计算方法
                             if base_m1 is not None and current_data.get('M1总量(亿元)') is not None:
                                 m1_index = (current_data['M1总量(亿元)'] / base_m1) * 100
-                                current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                                current_data['M1指数(2016.1=100)'] = round(m1_index, 2)
                             else:
-                                current_data['M1指数(2011.1=100)'] = None
+                                current_data['M1指数(2016.1=100)'] = None
                     elif date_str > '2024.1' and base_m1 is not None:
                         # 2024年1月之后的月份，基于2024年1月的指数值和总量变化计算
                         # 查找2024年1月的数据
@@ -299,31 +302,31 @@ def fetch_macro_china_money_supply():
                                 jan_2024_data = money_total_dict[d]
                                 break
                         
-                        if jan_2024_data and 'M1指数(2011.1=100)' in jan_2024_data and jan_2024_data['M1指数(2011.1=100)'] is not None and jan_2024_data.get('M1总量(亿元)') is not None and current_data.get('M1总量(亿元)') is not None:
+                        if jan_2024_data and 'M1指数(2016.1=100)' in jan_2024_data and jan_2024_data['M1指数(2016.1=100)'] is not None and jan_2024_data.get('M1总量(亿元)') is not None and current_data.get('M1总量(亿元)') is not None:
                             # 基于2024年1月的指数和总量变化计算
-                            m1_index = jan_2024_data['M1指数(2011.1=100)'] * (current_data['M1总量(亿元)'] / jan_2024_data['M1总量(亿元)'])
-                            current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                            m1_index = jan_2024_data['M1指数(2016.1=100)'] * (current_data['M1总量(亿元)'] / jan_2024_data['M1总量(亿元)'])
+                            current_data['M1指数(2016.1=100)'] = round(m1_index, 2)
                         else:
                             # 如果没有找到2024年1月的数据，使用常规计算方法
                             if current_data.get('M1总量(亿元)') is not None:
                                 m1_index = (current_data['M1总量(亿元)'] / base_m1) * 100
-                                current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                                current_data['M1指数(2016.1=100)'] = round(m1_index, 2)
                             else:
-                                current_data['M1指数(2011.1=100)'] = None
+                                current_data['M1指数(2016.1=100)'] = None
                     else:
                         # 2024年1月之前的月份，使用常规计算方法
                         if base_m1 is not None and current_data.get('M1总量(亿元)') is not None:
                             m1_index = (current_data['M1总量(亿元)'] / base_m1) * 100
-                            current_data['M1指数(2011.1=100)'] = round(m1_index, 2)
+                            current_data['M1指数(2016.1=100)'] = round(m1_index, 2)
                         else:
-                            current_data['M1指数(2011.1=100)'] = None
+                            current_data['M1指数(2016.1=100)'] = None
                     
                     # 计算M0指数
                     if base_m0 is not None and current_data.get('M0总量(亿元)') is not None:
                         m0_index = (current_data['M0总量(亿元)'] / base_m0) * 100
-                        current_data['M0指数(2011.1=100)'] = round(m0_index, 2)
+                        current_data['M0指数(2016.1=100)'] = round(m0_index, 2)
                     else:
-                        current_data['M0指数(2011.1=100)'] = None
+                        current_data['M0指数(2016.1=100)'] = None
         
         
         # 获取沪深300指数数据
@@ -418,11 +421,15 @@ def fetch_macro_china_money_supply():
         # 获取上海新房价格数据
         house_price_dict = {}  # 初始化为空字典
         try:
+            print("DEBUG: 开始获取上海房价数据...")
             # 获取上海房价数据
             house_price_df = ak.macro_china_new_house_price(city_first="上海")
+            print(f"DEBUG: 成功获取房价数据，共{len(house_price_df)}条记录")
             
             # 确保日期列是字符串类型
             house_price_df['日期'] = house_price_df['日期'].astype(str)
+            print(f"DEBUG: 房价数据列名: {list(house_price_df.columns)}")
+            print(f"DEBUG: 房价数据前3行: {house_price_df.head(3).to_dict('records')}")
             
             # 创建日期到房价数据的映射
             house_price_dict = {}
@@ -479,20 +486,26 @@ def fetch_macro_china_money_supply():
         
         except Exception as e:
             print(f"获取上海房价数据失败: {e}")
+            import traceback
+            print(f"详细错误信息: {traceback.format_exc()}")
             house_price_dict = {}
+        
+        print(f"房价数据获取完成，house_price_dict长度: {len(house_price_dict)}")
+        if house_price_dict:
+            print(f"房价数据样本: {list(house_price_dict.items())[:3]}")
 
         # 新增：计算上海住宅价格指数
-        # 找到基准日期（2011.1）的房价数据
+        # 找到基准日期（2016.1）的房价数据
         base_house_price_data = None
         for date_str in sorted_date_strings:
             if date_str in house_price_dict and '.' in date_str:
                 year, month = date_str.split('.')
-                if int(year) == 2011 and int(month) == 1:
+                if int(year) == 2016 and int(month) == 1:
                     base_date_house = date_str
                     base_house_price_data = house_price_dict[date_str]
                     break
         
-        # 如果找不到2011.1的数据，使用最早的数据作为基准
+        # 如果找不到2016.1的数据，使用最早的数据作为基准
         if base_house_price_data is None and house_price_dict:
             earliest_date = sorted_date_strings[0]
             for date_str in sorted_date_strings:
@@ -500,39 +513,92 @@ def fetch_macro_china_money_supply():
                     earliest_date = date_str
                     base_house_price_data = house_price_dict[date_str]
                     break
-            print(f"未找到2011.1的房价数据，使用{earliest_date}作为基准")
+            print(f"未找到2016.1的房价数据，使用{earliest_date}作为基准")
         
         # 如果找到了基准日期的房价数据，计算指数
         if base_house_price_data:
-            # 初始化基准指数值为100
-            new_house_index_base = 100.0
-            second_house_index_base = 100.0
-            
-            # 为每个日期计算房价指数
-            for date_str in sorted_date_strings:
-                if date_str in house_price_dict:
-                    # 计算从基准日期到当前日期的累积变化
-                    new_house_index = new_house_index_base
-                    second_house_index = second_house_index_base
+            # 使用累积环比方法计算以2016.1=100为基准的指数
+            try:
+                house_price_df_full = ak.macro_china_new_house_price(city_first="上海")
+                house_price_df_full['日期'] = house_price_df_full['日期'].astype(str)
+                
+                # 按日期排序
+                house_price_df_full = house_price_df_full.sort_values(by='日期')
+                
+                # 找到2016年1月的数据作为基准
+                base_date = None
+                base_new_mom = None
+                base_second_mom = None
+                
+                for _, row in house_price_df_full.iterrows():
+                    date_str = row['日期']
+                    if '2016-01' in date_str:
+                        base_date = date_str
+                        base_new_mom = row.get('新建商品住宅价格指数-环比', 100.0)
+                        base_second_mom = row.get('二手住宅价格指数-环比', 100.0)
+                        break
+                
+                if base_date is None:
+                    print("警告：未找到2016年1月数据，无法计算基准指数")
+                else:
+                    print(f"DEBUG: 找到基准日期 {base_date}，开始计算累积指数")
                     
-                    # 使用环比数据累积计算
-                    for i, curr_date in enumerate(sorted_date_strings):
-                        if curr_date == date_str:
-                            break
+                    # 初始化累积指数
+                    new_house_index = 100.0  # 2016年1月设为100
+                    second_house_index = 100.0
+                    
+                    for _, row in house_price_df_full.iterrows():
+                        date_str = row['日期']
                         
-                        if curr_date in house_price_dict:
-                            mom_new = house_price_dict[curr_date].get('新建商品住宅价格指数_环比')
-                            mom_second = house_price_dict[curr_date].get('二手住宅价格指数_环比')
+                        # 转换日期格式
+                        if '-' in date_str:
+                            year_month = '-'.join(date_str.split('-')[:2])
+                            year, month = year_month.split('-')
+                            month = month.lstrip('0')
+                            year_month_dot = f"{year}.{month}"
+                        else:
+                            year_month_dot = date_str
+                            year_month = date_str.replace('.', '-')
+                        
+                        if date_str == base_date:
+                            # 2016年1月设为基准100
+                            calculated_new_index = 100.0
+                            calculated_second_index = 100.0
+                        elif date_str < base_date:
+                            # 2016年1月之前的数据，向前推算
+                            continue  # 暂时跳过，先处理2016年1月之后的数据
+                        else:
+                            # 2016年1月之后的数据，使用环比累积计算
+                            new_mom = row.get('新建商品住宅价格指数-环比')
+                            second_mom = row.get('二手住宅价格指数-环比')
                             
-                            if mom_new is not None:
-                                new_house_index *= (1 + mom_new / 100)
-                            
-                            if mom_second is not None:
-                                second_house_index *= (1 + mom_second / 100)
-                    
-                    # 保存计算结果
-                    house_price_dict[date_str]['新建商品住宅价格指数(2011.1=100)'] = round(new_house_index, 2)
-                    house_price_dict[date_str]['二手住宅价格指数(2011.1=100)'] = round(second_house_index, 2)
+                            if new_mom is not None:
+                                new_house_index = new_house_index * (new_mom / 100.0)
+                                calculated_new_index = new_house_index
+                            else:
+                                calculated_new_index = None
+                                
+                            if second_mom is not None:
+                                second_house_index = second_house_index * (second_mom / 100.0)
+                                calculated_second_index = second_house_index
+                            else:
+                                calculated_second_index = None
+                        
+                        # 更新house_price_dict中的数据
+                        if year_month_dot in house_price_dict:
+                            house_price_dict[year_month_dot]['新建商品住宅价格指数(2016.1=100)'] = round(calculated_new_index, 2) if calculated_new_index is not None else None
+                            house_price_dict[year_month_dot]['二手住宅价格指数(2016.1=100)'] = round(calculated_second_index, 2) if calculated_second_index is not None else None
+                        
+                        if year_month in house_price_dict:
+                            house_price_dict[year_month]['新建商品住宅价格指数(2016.1=100)'] = round(calculated_new_index, 2) if calculated_new_index is not None else None
+                            house_price_dict[year_month]['二手住宅价格指数(2016.1=100)'] = round(calculated_second_index, 2) if calculated_second_index is not None else None
+                        
+                        print(f"DEBUG: 计算 {year_month_dot} 指数 - 新建: {calculated_new_index}, 二手: {calculated_second_index}")
+                        
+            except Exception as e:
+                print(f"计算房价指数失败: {e}")
+                import traceback
+                print(f"详细错误: {traceback.format_exc()}")
 
         # 确保数据框不为空
         if money_supply_df.empty:
@@ -661,9 +727,9 @@ def fetch_macro_china_money_supply():
                     item['M1总量环比(%)'] = money_total_dict[formatted_date].get('M1总量环比(%)')
                     item['M0总量环比(%)'] = money_total_dict[formatted_date].get('M0总量环比(%)')
                     # 添加指数数据
-                    item['M2指数(2011.1=100)'] = money_total_dict[formatted_date].get('M2指数(2011.1=100)')
-                    item['M1指数(2011.1=100)'] = money_total_dict[formatted_date].get('M1指数(2011.1=100)')
-                    item['M0指数(2011.1=100)'] = money_total_dict[formatted_date].get('M0指数(2011.1=100)')
+                    item['M2指数(2016.1=100)'] = money_total_dict[formatted_date].get('M2指数(2016.1=100)')
+                    item['M1指数(2016.1=100)'] = money_total_dict[formatted_date].get('M1指数(2016.1=100)')
+                    item['M0指数(2016.1=100)'] = money_total_dict[formatted_date].get('M0指数(2016.1=100)')
                     matched_with_total += 1
                 else:
                     # 尝试其他可能的日期格式
@@ -680,9 +746,9 @@ def fetch_macro_china_money_supply():
                                 item['M1总量环比(%)'] = money_total_dict[key].get('M1总量环比(%)')
                                 item['M0总量环比(%)'] = money_total_dict[key].get('M0总量环比(%)')
                                 # 添加指数数据
-                                item['M2指数(2011.1=100)'] = money_total_dict[key].get('M2指数(2011.1=100)')
-                                item['M1指数(2011.1=100)'] = money_total_dict[key].get('M1指数(2011.1=100)')
-                                item['M0指数(2011.1=100)'] = money_total_dict[key].get('M0指数(2011.1=100)')
+                                item['M2指数(2016.1=100)'] = money_total_dict[key].get('M2指数(2016.1=100)')
+                                item['M1指数(2016.1=100)'] = money_total_dict[key].get('M1指数(2016.1=100)')
+                                item['M0指数(2016.1=100)'] = money_total_dict[key].get('M0指数(2016.1=100)')
                                 found = True
                                 matched_with_total += 1
                                 break
@@ -694,9 +760,9 @@ def fetch_macro_china_money_supply():
                         item['M2总量环比(%)'] = None
                         item['M1总量环比(%)'] = None
                         item['M0总量环比(%)'] = None
-                        item['M2指数(2011.1=100)'] = None
-                        item['M1指数(2011.1=100)'] = None
-                        item['M0指数(2011.1=100)'] = None
+                        item['M2指数(2016.1=100)'] = None
+                        item['M1指数(2016.1=100)'] = None
+                        item['M0指数(2016.1=100)'] = None
                 
                 # 添加沪深300指数数据（如果存在）
                 if formatted_date in hs300_dict:
@@ -858,8 +924,8 @@ def fetch_macro_china_money_supply():
                     item['上海二手住宅价格指数_同比'] = house_price_dict[formatted_date]['二手住宅价格指数_同比']
                     item['上海新建商品住宅价格指数_环比'] = house_price_dict[formatted_date]['新建商品住宅价格指数_环比']
                     item['上海二手住宅价格指数_环比'] = house_price_dict[formatted_date]['二手住宅价格指数_环比']
-                    item['上海新建商品住宅价格指数(2011.1=100)'] = house_price_dict[formatted_date].get('新建商品住宅价格指数(2011.1=100)')
-                    item['上海二手住宅价格指数(2011.1=100)'] = house_price_dict[formatted_date].get('二手住宅价格指数(2011.1=100)')
+                    item['上海新建商品住宅价格指数(2016.1=100)'] = house_price_dict[formatted_date].get('新建商品住宅价格指数(2016.1=100)')
+                    item['上海二手住宅价格指数(2016.1=100)'] = house_price_dict[formatted_date].get('二手住宅价格指数(2016.1=100)')
                 else:
                     # 尝试其他可能的日期格式
                     found = False
@@ -871,8 +937,8 @@ def fetch_macro_china_money_supply():
                                 item['上海二手住宅价格指数_同比'] = house_price_dict[key]['二手住宅价格指数_同比']
                                 item['上海新建商品住宅价格指数_环比'] = house_price_dict[key]['新建商品住宅价格指数_环比']
                                 item['上海二手住宅价格指数_环比'] = house_price_dict[key]['二手住宅价格指数_环比']
-                                item['上海新建商品住宅价格指数(2011.1=100)'] = house_price_dict[key].get('新建商品住宅价格指数(2011.1=100)')
-                                item['上海二手住宅价格指数(2011.1=100)'] = house_price_dict[key].get('二手住宅价格指数(2011.1=100)')
+                                item['上海新建商品住宅价格指数(2016.1=100)'] = house_price_dict[key].get('新建商品住宅价格指数(2016.1=100)')
+                                item['上海二手住宅价格指数(2016.1=100)'] = house_price_dict[key].get('二手住宅价格指数(2016.1=100)')
                                 found = True
                                 break
                         elif '.' in formatted_date and '.' in key:
@@ -881,8 +947,8 @@ def fetch_macro_china_money_supply():
                                 item['上海二手住宅价格指数_同比'] = house_price_dict[key]['二手住宅价格指数_同比']
                                 item['上海新建商品住宅价格指数_环比'] = house_price_dict[key]['新建商品住宅价格指数_环比']
                                 item['上海二手住宅价格指数_环比'] = house_price_dict[key]['二手住宅价格指数_环比']
-                                item['上海新建商品住宅价格指数(2011.1=100)'] = house_price_dict[key].get('新建商品住宅价格指数(2011.1=100)')
-                                item['上海二手住宅价格指数(2011.1=100)'] = house_price_dict[key].get('二手住宅价格指数(2011.1=100)')
+                                item['上海新建商品住宅价格指数(2016.1=100)'] = house_price_dict[key].get('新建商品住宅价格指数(2016.1=100)')
+                                item['上海二手住宅价格指数(2016.1=100)'] = house_price_dict[key].get('二手住宅价格指数(2016.1=100)')
                                 found = True
                                 break
                     
@@ -891,8 +957,8 @@ def fetch_macro_china_money_supply():
                         item['上海二手住宅价格指数_同比'] = None
                         item['上海新建商品住宅价格指数_环比'] = None
                         item['上海二手住宅价格指数_环比'] = None
-                        item['上海新建商品住宅价格指数(2011.1=100)'] = None
-                        item['上海二手住宅价格指数(2011.1=100)'] = None
+                        item['上海新建商品住宅价格指数(2016.1=100)'] = None
+                        item['上海二手住宅价格指数(2016.1=100)'] = None
                 
                 # 添加商品价格指数数据（如果存在）
                 # 商品价格指数数据现在使用日期格式（YYYY-MM-DD）作为键
@@ -981,9 +1047,9 @@ def fetch_macro_china_money_supply():
                                 'M2总量环比(%)': None,
                                 'M1总量环比(%)': None,
                                 'M0总量环比(%)': None,
-                                'M2指数(2011.1=100)': None,
-                                'M1指数(2011.1=100)': None,
-                                'M0指数(2011.1=100)': None
+                                'M2指数(2016.1=100)': None,
+                                'M1指数(2016.1=100)': None,
+                                'M0指数(2016.1=100)': None
                             }
                             
                             # 添加沪深300指数数据
@@ -1094,15 +1160,15 @@ def fetch_macro_china_money_supply():
                                 item['上海二手住宅价格指数_同比'] = house_price_dict[hs300_month]['二手住宅价格指数_同比']
                                 item['上海新建商品住宅价格指数_环比'] = house_price_dict[hs300_month]['新建商品住宅价格指数_环比']
                                 item['上海二手住宅价格指数_环比'] = house_price_dict[hs300_month]['二手住宅价格指数_环比']
-                                item['上海新建商品住宅价格指数(2011.1=100)'] = house_price_dict[hs300_month].get('新建商品住宅价格指数(2011.1=100)')
-                                item['上海二手住宅价格指数(2011.1=100)'] = house_price_dict[hs300_month].get('二手住宅价格指数(2011.1=100)')
+                                item['上海新建商品住宅价格指数(2016.1=100)'] = house_price_dict[hs300_month].get('新建商品住宅价格指数(2016.1=100)')
+                                item['上海二手住宅价格指数(2016.1=100)'] = house_price_dict[hs300_month].get('二手住宅价格指数(2016.1=100)')
                             else:
                                 item['上海新建商品住宅价格指数_同比'] = None
                                 item['上海二手住宅价格指数_同比'] = None
                                 item['上海新建商品住宅价格指数_环比'] = None
                                 item['上海二手住宅价格指数_环比'] = None
-                                item['上海新建商品住宅价格指数(2011.1=100)'] = None
-                                item['上海二手住宅价格指数(2011.1=100)'] = None
+                                item['上海新建商品住宅价格指数(2016.1=100)'] = None
+                                item['上海二手住宅价格指数(2016.1=100)'] = None
                             
                             # 添加商品价格指数数据（如果存在）
                             commodity_value = None
@@ -1459,3 +1525,9 @@ def get_commodity_price_index_data():
     except Exception as e:
         print(f"获取商品价格指数数据失败: {e}")
         return {}
+
+if __name__ == '__main__':
+    # 执行数据获取
+    print("开始获取宏观经济数据...")
+    data = fetch_macro_china_money_supply()
+    print("宏观经济数据获取完成！")

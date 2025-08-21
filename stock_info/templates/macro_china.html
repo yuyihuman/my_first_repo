@@ -481,18 +481,18 @@
             const filteredData = data.filter(item => {
                 if (item['月份'].includes('.')) {
                     const [year, month] = item['月份'].split('.');
-                    return parseInt(year) >= 2011;
+                    return parseInt(year) >= 2016;
                 } else if (item['月份'].includes('-')) {
                     const [year, month] = item['月份'].split('-');
-                    return parseInt(year) >= 2011;
+                    return parseInt(year) >= 2016;
                 }
                 return false;
             });
             
             const labels = filteredData.map(item => item['月份']);
-            const m2IndexData = filteredData.map(item => item['M2指数(2011.1=100)']);
-            const m1IndexData = filteredData.map(item => item['M1指数(2011.1=100)']);
-            const houseIndexData = filteredData.map(item => item['上海二手住宅价格指数(2011.1=100)']);
+            const m2IndexData = filteredData.map(item => item['M2指数(2016.1=100)']);
+            const m1IndexData = filteredData.map(item => item['M1指数(2016.1=100)']);
+            const houseIndexData = filteredData.map(item => item['上海二手住宅价格指数(2016.1=100)']);
             
             const ctx = document.getElementById('indexComparisonChart').getContext('2d');
             
@@ -508,7 +508,7 @@
                     labels: labels,
                     datasets: [
                         {
-                            label: 'M2指数(2011.1=100)',
+                            label: 'M2指数(2016.1=100)',
                             data: m2IndexData,
                             borderColor: 'rgba(255, 99, 132, 1)',
                             backgroundColor: 'rgba(255, 99, 132, 0.1)',
@@ -518,7 +518,7 @@
                             spanGaps: true
                         },
                         {
-                            label: 'M1指数(2011.1=100)',
+                            label: 'M1指数(2016.1=100)',
                             data: m1IndexData,
                             borderColor: 'rgba(54, 162, 235, 1)',
                             backgroundColor: 'rgba(54, 162, 235, 0.1)',
@@ -528,7 +528,7 @@
                             spanGaps: true
                         },
                         {
-                            label: '上海二手住宅价格指数(2011.1=100)',
+                            label: '上海二手住宅价格指数(2016.1=100)',
                             data: houseIndexData,
                             borderColor: 'rgba(75, 192, 192, 1)',
                             backgroundColor: 'rgba(75, 192, 192, 0.1)',
@@ -573,7 +573,7 @@
                             beginAtZero: false,
                             title: {
                                 display: true,
-                                text: '指数值(2011.1=100)'
+                                text: '指数值(2016.1=100)'
                             }
                         }
                     }
