@@ -913,7 +913,57 @@
                                 color: 'rgba(255, 165, 0, 1)'
                             },
                             grid: {
-                                drawOnChartArea: false
+                                drawOnChartArea: false,
+                                color: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 'rgba(0, 0, 0, 0.8)';
+                                    }
+                                    return 'rgba(0, 0, 0, 0.1)';
+                                },
+                                lineWidth: function(context) {
+                                    if (context.tick.value === 0) {
+                                        return 2;
+                                    }
+                                    return 1;
+                                }
+                            },
+                            // 使用afterBuildTicks来确保0点对齐
+                            afterBuildTicks: function(scale) {
+                                const chart = scale.chart;
+                                const leftScale = chart.scales.y;
+                                
+                                if (leftScale && leftScale.min !== undefined && leftScale.max !== undefined) {
+                                    // 获取右轴数据范围
+                                    const rightData = chart.data.datasets.find(d => d.yAxisID === 'y1').data.filter(v => v !== null && v !== undefined);
+                                    if (rightData.length > 0) {
+                                        const rightDataMax = Math.max(...rightData);
+                                        const rightDataMin = Math.min(...rightData);
+                                        
+                                        // 计算左轴的0点位置比例（从底部算起）
+                                        const leftRange = leftScale.max - leftScale.min;
+                                        const leftZeroPosition = leftScale.min < 0 ? (-leftScale.min) / leftRange : 0;
+                                        
+                                        // 根据左轴0点位置计算右轴范围
+                                        if (leftZeroPosition > 0) {
+                                            // 左轴有负值区域
+                                            const rightRange = rightDataMax - rightDataMin;
+                                            const paddingFactor = 0.1; // 10%的边距
+                                            const expandedRightRange = rightRange * (1 + 2 * paddingFactor);
+                                            
+                                            // 根据左轴0点位置计算右轴的min和max
+                                            const rightNegativeRange = expandedRightRange * leftZeroPosition;
+                                            const rightPositiveRange = expandedRightRange * (1 - leftZeroPosition);
+                                            
+                                            scale.min = -rightNegativeRange;
+                                            scale.max = rightPositiveRange;
+                                        } else {
+                                            // 左轴没有负值，两轴都从0开始
+                                            scale.min = 0;
+                                            const rightRange = rightDataMax - Math.min(0, rightDataMin);
+                                            scale.max = rightRange * 1.1; // 添加10%边距
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1985,5 +2035,7 @@
             }
         }
     </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
