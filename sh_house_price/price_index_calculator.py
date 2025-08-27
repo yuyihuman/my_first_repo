@@ -29,9 +29,10 @@ def parse_date(date_str):
 def calculate_monthly_stats(data_files_dir):
     """计算每月统计数据"""
     monthly_data = defaultdict(lambda: defaultdict(lambda: {'total_price': 0, 'total_area': 0, 'count': 0}))  # {(year, month): {day: {total_price, total_area, count}}}
+    latest_date = None  # 记录最新的具体日期
     
     # 指定要处理的文件列表
-    target_files = ['jdxc', 'sjxc', 'xjh', 'at', 'tz', 'wjc']
+    target_files = ['jdxc', 'sjxc', 'tz', 'wjc']
     
     # 遍历指定的数据文件
     for filename in target_files:
@@ -44,6 +45,11 @@ def calculate_monthly_stats(data_files_dir):
                 year, month, day = parse_date(record['date'])
                 # 添加面积限制：只计算70-140平米之间的数据
                 if year and month and day and 70 <= record['area'] <= 140 and record['price'] > 0:
+                    # 更新最新日期
+                    current_date = record['date']
+                    if latest_date is None or current_date > latest_date:
+                        latest_date = current_date
+                    
                     # 计算总价 = 面积 × 单价
                     total_price = record['area'] * record['price']
                     monthly_data[(year, month)][day]['total_price'] += total_price
@@ -52,7 +58,7 @@ def calculate_monthly_stats(data_files_dir):
         else:
             print(f"警告: 文件 {filename} 不存在，跳过处理")
     
-    return monthly_data
+    return monthly_data, latest_date
 
 def calculate_4month_avg_index(monthly_stats, base_avg_price, target_year, target_month):
     """计算指定月份的4个月移动平均价格指数"""
@@ -87,10 +93,10 @@ def calculate_price_index(monthly_data, base_year=2016, base_month=1):
     for (year, month), daily_data in monthly_data.items():
 
             
-        # 检查有效天数是否大于15天
+        # 计算有效天数
         valid_days = len([day for day, data in daily_data.items() if data['count'] > 0])
         
-        if valid_days > 15:
+        if valid_days > 0:
             # 汇总当月所有数据
             month_total_price = 0
             month_total_area = 0
@@ -161,11 +167,12 @@ def main():
     print("开始计算上海房价指数...")
     print(f"数据目录: {data_files_dir}")
     print("基准: 2016年1月 = 100")
-    print("条件: 月份有效天数 > 15天\n")
+    print("条件: 包含所有有效数据的月份\n")
     
     # 计算月度统计数据
-    monthly_data = calculate_monthly_stats(data_files_dir)
+    monthly_data, latest_date = calculate_monthly_stats(data_files_dir)
     print(f"\n共处理 {len(monthly_data)} 个月份的数据")
+    print(f"最新数据日期: {latest_date}" if latest_date else "未找到有效数据日期")
     
     # 计算价格指数
     price_index = calculate_price_index(monthly_data, base_year=2016, base_month=1)
@@ -176,10 +183,10 @@ def main():
         
         # 输出到JSON文件
         output_data = {
+            'latest_data_date': latest_date,
             'base_period': '2016-01',
             'base_index': 100,
             'description': '上海房价指数 (以2016年1月为基数100)',
-            'calculation_rule': '只有当月有效天数大于15天才计算指数',
             'data': sorted_index
         }
         
