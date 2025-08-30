@@ -1272,13 +1272,13 @@
     "2025-08": {
       "year": 2025,
       "month": 8,
-      "price_index": 168.52,
-      "yoy_change": -2.79,
-      "total_price": 941948660,
-      "total_area": 22140,
-      "avg_price": 42545.11,
+      "price_index": 169.42,
+      "yoy_change": -2.67,
+      "total_price": 956512108,
+      "total_area": 22363,
+      "avg_price": 42772.08,
       "valid_days": 24,
-      "total_records": 224
+      "total_records": 226
     }
   }
 }
