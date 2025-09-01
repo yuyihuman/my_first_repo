@@ -13,9 +13,8 @@ print(f"数据包含 {len(stock_zh_a_spot_em_df.columns)} 个字段")
 print("\n前5只股票预览:")
 print(stock_zh_a_spot_em_df.head())
 
-# 生成带时间戳的文件名
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-filename = f"stock_data_{timestamp}.csv"
+# 生成固定的文件名
+filename = "stock_data.csv"
 
 # 保存到CSV文件
 stock_zh_a_spot_em_df.to_csv(filename, index=False, encoding='utf-8-sig')

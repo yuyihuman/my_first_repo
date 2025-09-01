@@ -1,201 +1,261 @@
-import akshare as ak
+from xtquant import xtdata
 import pandas as pd
 import os
 from datetime import datetime
 import time
+import logging
 
-def get_stock_data(stock_code, stock_name, base_folder="all_stocks_data"):
+def get_stock_data(stock_code, stock_name, base_folder="all_stocks_data", save_to_csv=False):
     """
-    获取单个股票的所有数据
-    """
-    print(f"\n开始获取股票 {stock_code} ({stock_name}) 的数据...")
+    获取单个股票的1分钟和日线数据
     
-    # 创建股票专用数据文件夹
+    Args:
+        stock_code: 股票代码
+        stock_name: 股票名称
+        base_folder: 数据保存的基础文件夹
+        save_to_csv: 是否保存数据到CSV文件，默认False（只下载数据）
+    """
+    logging.info(f"开始获取股票 {stock_code} ({stock_name}) 的1分钟和日线数据...")
+    
+    # 创建股票专用数据文件夹（仅在需要保存文件时创建）
     stock_folder = os.path.join(base_folder, f"stock_{stock_code}_data")
-    if not os.path.exists(stock_folder):
+    if save_to_csv and not os.path.exists(stock_folder):
         os.makedirs(stock_folder)
     
     success_count = 0
-    total_attempts = 6  # 总共尝试获取6种数据
+    total_attempts = 2  # 1分钟数据 + 日线数据
+    
+    # 构造股票代码格式（需要添加交易所后缀）
+    if stock_code.startswith('6'):
+        full_code = f"{stock_code}.SH"  # 上海交易所（包括主板和科创板）
+    elif stock_code.startswith('0') or stock_code.startswith('3'):
+        full_code = f"{stock_code}.SZ"  # 深圳交易所
+    else:
+        logging.warning(f"  跳过不支持的股票代码: {stock_code}")
+        return 0, 0
     
     try:
-        # 1. 获取历史日线数据
-        print(f"  1. 获取历史日线数据...")
-        stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", start_date="20100101", end_date="20241231", adjust="")
+        # 先下载日线数据到本地
+        logging.info(f"  下载日线数据到本地（从1990年开始）...")
+        download_result = xtdata.download_history_data(full_code, period='1d', start_time='19900101')
+        logging.info(f"  日线数据下载结果: {download_result}")
         
-        # 保存日线数据
-        daily_filename = os.path.join(stock_folder, f"{stock_code}_daily_history.csv")
-        stock_zh_a_hist_df.to_csv(daily_filename, index=False, encoding='utf-8-sig')
-        print(f"    日线数据已保存: {len(stock_zh_a_hist_df)} 条")
-        success_count += 1
-        
-    except Exception as e:
-        print(f"    获取日线数据失败: {e}")
-
-    try:
-        # 2. 获取财务摘要数据
-        print(f"  2. 获取财务摘要数据...")
-        financial_abstract = ak.stock_financial_abstract(symbol=stock_code)
-        if financial_abstract is not None and not financial_abstract.empty:
-            financial_abstract_filename = os.path.join(stock_folder, f"{stock_code}_financial_abstract.csv")
-            financial_abstract.to_csv(financial_abstract_filename, index=False, encoding='utf-8-sig')
-            print(f"    财务摘要数据已保存: {len(financial_abstract)} 条")
-            success_count += 1
-        else:
-            print(f"    获取财务摘要数据失败")
-    except Exception as e:
-        print(f"    获取财务摘要数据时出错: {e}")
-
-    try:
-        # 3. 获取财务分析指标数据
-        print(f"  3. 获取财务分析指标数据...")
-        financial_indicator = ak.stock_financial_analysis_indicator(symbol=stock_code)
-        if financial_indicator is not None and not financial_indicator.empty:
-            financial_indicator_filename = os.path.join(stock_folder, f"{stock_code}_financial_indicator.csv")
-            financial_indicator.to_csv(financial_indicator_filename, index=False, encoding='utf-8-sig')
-            print(f"    财务分析指标数据已保存: {len(financial_indicator)} 条")
-            success_count += 1
-        else:
-            print(f"    获取财务分析指标数据失败")
-    except Exception as e:
-        print(f"    获取财务分析指标数据时出错: {e}")
-
-    try:
-        # 4. 获取同花顺财务摘要数据
-        print(f"  4. 获取同花顺财务摘要数据...")
-        financial_abstract_ths = ak.stock_financial_abstract_ths(symbol=stock_code)
-        if financial_abstract_ths is not None and not financial_abstract_ths.empty:
-            financial_abstract_ths_filename = os.path.join(stock_folder, f"{stock_code}_financial_abstract_ths.csv")
-            financial_abstract_ths.to_csv(financial_abstract_ths_filename, index=False, encoding='utf-8-sig')
-            print(f"    同花顺财务摘要数据已保存: {len(financial_abstract_ths)} 条")
-            success_count += 1
-        else:
-            print(f"    获取同花顺财务摘要数据失败")
-    except Exception as e:
-        print(f"    获取同花顺财务摘要数据时出错: {e}")
-
-    try:
-        # 5. 获取东方财富详细财务报表数据
-        print(f"  5. 获取东方财富详细财务报表数据...")
-        
-        # 测试最近几个季度的数据
-        test_dates = ["20241231", "20240930", "20240630", "20240331", "20231231"]
-        
-        all_profit_data = []
-        all_balance_data = []
-        all_cashflow_data = []
-        
-        for date in test_dates:
-            # 获取利润表数据
-            try:
-                lrb_data = ak.stock_lrb_em(date=date)
-                stock_lrb = lrb_data[lrb_data['股票代码'] == stock_code]
-                if not stock_lrb.empty:
-                    stock_lrb = stock_lrb.copy()
-                    stock_lrb['报告期'] = date
-                    all_profit_data.append(stock_lrb)
-            except Exception as e:
-                pass
+        if save_to_csv:
+            # 获取从1990年开始的全部日线数据
+            logging.info(f"  获取日线数据（从1990年开始）...")
+            daily_data = xtdata.get_market_data([], [full_code], period='1d', start_time='19900101')
             
-            # 获取资产负债表数据
-            try:
-                zcfz_data = ak.stock_zcfz_em(date=date)
-                stock_zcfz = zcfz_data[zcfz_data['股票代码'] == stock_code]
-                if not stock_zcfz.empty:
-                    stock_zcfz = stock_zcfz.copy()
-                    stock_zcfz['报告期'] = date
-                    all_balance_data.append(stock_zcfz)
-            except Exception as e:
-                pass
-            
-            # 获取现金流量表数据
-            try:
-                xjll_data = ak.stock_xjll_em(date=date)
-                stock_xjll = xjll_data[xjll_data['股票代码'] == stock_code]
-                if not stock_xjll.empty:
-                    stock_xjll = stock_xjll.copy()
-                    stock_xjll['报告期'] = date
-                    all_cashflow_data.append(stock_xjll)
-            except Exception as e:
-                pass
-        
-        # 保存合并后的财务报表数据
-        if all_profit_data:
-            profit_df = pd.concat(all_profit_data, ignore_index=True)
-            profit_filename = os.path.join(stock_folder, f"{stock_code}_profit_statements_em.csv")
-            profit_df.to_csv(profit_filename, index=False, encoding='utf-8-sig')
-            print(f"    利润表数据已保存: {len(profit_df)} 条记录")
+            if daily_data and isinstance(daily_data, dict):
+                # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为日期
+                # 需要重新组织数据结构
+                try:
+                    # 获取时间序列（日期）
+                    time_df = daily_data.get('time')
+                    if time_df is not None and not time_df.empty:
+                        # 获取股票在DataFrame中的数据
+                        if full_code in time_df.index:
+                            dates = time_df.loc[full_code].values
+                            
+                            # 构建新的DataFrame，行为日期，列为各个指标
+                            df_data = {'date': dates}
+                            
+                            # 提取各个字段的数据
+                            for field_name, field_df in daily_data.items():
+                                if field_name != 'time' and field_df is not None and not field_df.empty:
+                                    if full_code in field_df.index:
+                                        df_data[field_name] = field_df.loc[full_code].values
+                            
+                            # 创建最终的DataFrame
+                            daily_df = pd.DataFrame(df_data)
+                            daily_filename = os.path.join(stock_folder, f"{stock_code}_daily_history.csv")
+                            daily_df.to_csv(daily_filename, encoding='utf-8-sig', index=False)
+                            logging.info(f"    日线数据已保存到CSV: {len(daily_df)} 条")
+                            success_count += 1
+                        else:
+                            logging.error(f"    股票代码 {full_code} 不在返回数据中")
+                    else:
+                        logging.error(f"    时间数据为空")
+                except Exception as e:
+                    logging.error(f"    日线数据处理失败: {e}")
+            else:
+                logging.error(f"    日线数据获取失败: 无数据返回")
+        else:
+            # 默认模式：只下载，不读取数据内容
+            logging.info(f"    日线数据已下载到本地缓存")
             success_count += 1
         
-        if all_balance_data:
-            balance_df = pd.concat(all_balance_data, ignore_index=True)
-            balance_filename = os.path.join(stock_folder, f"{stock_code}_balance_sheets_em.csv")
-            balance_df.to_csv(balance_filename, index=False, encoding='utf-8-sig')
-            print(f"    资产负债表数据已保存: {len(balance_df)} 条记录")
-            success_count += 1
-        
-        if all_cashflow_data:
-            cashflow_df = pd.concat(all_cashflow_data, ignore_index=True)
-            cashflow_filename = os.path.join(stock_folder, f"{stock_code}_cashflow_statements_em.csv")
-            cashflow_df.to_csv(cashflow_filename, index=False, encoding='utf-8-sig')
-            print(f"    现金流量表数据已保存: {len(cashflow_df)} 条记录")
+        # 尝试获取1分钟数据（从1990年开始，如果支持的话）
+        logging.info(f"  下载1分钟数据到本地（从1990年开始）...")
+        try:
+            download_result_1m = xtdata.download_history_data(full_code, period='1m', start_time='19900101')
+            logging.info(f"  1分钟数据下载结果: {download_result_1m}")
             
+            if save_to_csv:
+                logging.info(f"  获取1分钟数据（从1990年开始）...")
+                minute_data = xtdata.get_market_data([], [full_code], period='1m', start_time='19900101')
+                
+                if minute_data and isinstance(minute_data, dict):
+                    # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为时间
+                    # 需要重新组织数据结构
+                    try:
+                        # 获取时间序列
+                        time_df = minute_data.get('time')
+                        if time_df is not None and not time_df.empty:
+                            # 获取股票在DataFrame中的数据
+                            if full_code in time_df.index:
+                                times = time_df.loc[full_code].values
+                                
+                                # 构建新的DataFrame，行为时间，列为各个指标
+                                df_data = {'time': times}
+                                
+                                # 提取各个字段的数据
+                                for field_name, field_df in minute_data.items():
+                                    if field_name != 'time' and field_df is not None and not field_df.empty:
+                                        if full_code in field_df.index:
+                                            df_data[field_name] = field_df.loc[full_code].values
+                                
+                                # 创建最终的DataFrame
+                                minute_df = pd.DataFrame(df_data)
+                                minute_filename = os.path.join(stock_folder, f"{stock_code}_1minute_history.csv")
+                                minute_df.to_csv(minute_filename, encoding='utf-8-sig', index=False)
+                                logging.info(f"    1分钟数据已保存到CSV: {len(minute_df)} 条")
+                                success_count += 1
+                            else:
+                                logging.info(f"    股票代码 {full_code} 不在返回数据中，跳过")
+                        else:
+                            logging.info(f"    时间数据为空，跳过")
+                    except Exception as e:
+                        logging.info(f"    1分钟数据处理失败，跳过: {e}")
+                else:
+                    logging.info(f"    1分钟数据不可用，跳过")
+            else:
+                # 默认模式：只下载，不读取数据内容
+                logging.info(f"    1分钟数据已下载到本地缓存")
+                success_count += 1
+        except Exception as e:
+            logging.info(f"    1分钟数据获取失败，跳过: {e}")
+        
     except Exception as e:
-        print(f"    获取东方财富财务报表数据时出错: {e}")
+        logging.error(f"    数据获取失败: {e}")
     
-    # 生成单个股票的数据报告
-    summary_content = f"""股票代码: {stock_code}
+    # 生成单个股票的数据报告（仅在保存CSV时生成）
+    if save_to_csv:
+        data_files_info = f"""获取的数据文件:
+1. {stock_code}_1minute_history.csv - 1分钟历史数据 (xtquant)
+2. {stock_code}_daily_history.csv - 日线历史数据 (xtquant)"""
+        encoding_info = "- 文件编码：UTF-8-BOM，支持中文显示"
+        
+        summary_content = f"""股票代码: {stock_code}
 股票名称: {stock_name}
+完整代码: {full_code}
 数据获取时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 成功获取数据类型: {success_count}/{total_attempts}
 
-获取的数据文件:
-1. {stock_code}_daily_history.csv - 历史日线数据 (akshare)
-2. {stock_code}_financial_abstract.csv - 财务摘要数据 (新浪财经)
-3. {stock_code}_financial_abstract_ths.csv - 同花顺财务摘要数据
-4. {stock_code}_profit_statements_em.csv - 东方财富利润表数据
-5. {stock_code}_balance_sheets_em.csv - 东方财富资产负债表数据
-6. {stock_code}_cashflow_statements_em.csv - 东方财富现金流量表数据
-7. {stock_code}_financial_indicator.csv - 财务分析指标数据
+{data_files_info}
 
 数据来源说明:
-- 历史价格数据：akshare (东方财富)
-- 财务摘要：新浪财经 (ak.stock_financial_abstract)
-- 同花顺财务摘要：同花顺 (ak.stock_financial_abstract_ths)
-- 详细财务报表：东方财富 (ak.stock_lrb_em, ak.stock_zcfz_em, ak.stock_xjll_em)
-- 文件编码：UTF-8-BOM，支持中文显示
+- 历史价格数据：xtquant (迅投量化)
+{encoding_info}
+- 数据周期：1分钟K线 + 日线K线
 """
+        
+        report_filename = os.path.join(stock_folder, "data_summary.txt")
+        with open(report_filename, 'w', encoding='utf-8') as f:
+            f.write(summary_content)
     
-    report_filename = os.path.join(stock_folder, "data_summary.txt")
-    with open(report_filename, 'w', encoding='utf-8') as f:
-        f.write(summary_content)
-    
-    print(f"  股票 {stock_code} 数据获取完成，成功率: {success_count}/{total_attempts}")
+    logging.info(f"  股票 {stock_code} 数据获取完成，成功率: {success_count}/{total_attempts}")
     return success_count, total_attempts
 
-def main():
-    """
-    主函数：批量获取所有股票数据
-    """
-    # 读取股票列表CSV文件
-    csv_file = "stock_data_20250821_000413.csv"
+def clean_old_logs(logs_dir="logs", keep_days=7):
+    """清理旧的日志文件
     
-    if not os.path.exists(csv_file):
-        print(f"错误：找不到文件 {csv_file}")
+    Args:
+        logs_dir: 日志文件夹路径
+        keep_days: 保留最近几天的日志，默认7天
+    """
+    if not os.path.exists(logs_dir):
         return
     
-    print(f"读取股票列表文件: {csv_file}")
+    current_time = time.time()
+    cutoff_time = current_time - (keep_days * 24 * 60 * 60)  # 转换为秒
+    
+    deleted_count = 0
+    for filename in os.listdir(logs_dir):
+        if filename.endswith('.log'):
+            file_path = os.path.join(logs_dir, filename)
+            file_time = os.path.getmtime(file_path)
+            
+            if file_time < cutoff_time:
+                try:
+                    os.remove(file_path)
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"删除日志文件 {filename} 失败: {e}")
+    
+    if deleted_count > 0:
+        print(f"已清理 {deleted_count} 个旧日志文件")
+
+def setup_logging():
+    """
+    设置日志配置
+    """
+    # 创建logs文件夹
+    logs_dir = "logs"
+    if not os.path.exists(logs_dir):
+        os.makedirs(logs_dir)
+    
+    # 清理旧日志文件
+    clean_old_logs(logs_dir)
+    
+    # 生成带时间戳的日志文件名
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = os.path.join(logs_dir, f"stock_data_{timestamp}.log")
+    
+    # 配置日志
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filename, encoding='utf-8')
+        ]
+    )
+    
+    return log_filename
+
+def main(save_to_csv=False):
+    """
+    主函数：批量获取所有股票数据
+    
+    Args:
+        save_to_csv: 是否保存数据到CSV文件，默认False（只下载数据）
+    """
+    # 设置日志
+    log_filename = setup_logging()
+    logging.info(f"日志文件: {log_filename}")
+    
+    # 读取股票列表CSV文件
+    csv_file = "stock_data.csv"
+    
+    if not os.path.exists(csv_file):
+        logging.error(f"错误：找不到文件 {csv_file}")
+        return
+    
+    logging.info(f"读取股票列表文件: {csv_file}")
     
     try:
         # 读取CSV文件
         df = pd.read_csv(csv_file, encoding='utf-8')
-        print(f"共找到 {len(df)} 只股票")
+        logging.info(f"共找到 {len(df)} 只股票")
+        
+        # 过滤掉8开头的股票（北交所）
+        df = df[~df['代码'].astype(str).str.startswith('8')]
+        logging.info(f"过滤8开头股票后剩余 {len(df)} 只股票")
         
         # 创建总的数据文件夹
         base_folder = "all_stocks_data"
         if not os.path.exists(base_folder):
             os.makedirs(base_folder)
-            print(f"创建总文件夹: {base_folder}")
+            logging.info(f"创建总文件夹: {base_folder}")
         
         # 统计信息
         total_stocks = len(df)
@@ -204,18 +264,18 @@ def main():
         total_success_count = 0
         total_attempts = 0
         
-        # 批量处理股票
+        # 批量处理所有股票
         for index, row in df.iterrows():
             stock_code = str(row['代码']).zfill(6)  # 确保股票代码是6位数字
             stock_name = row['名称']
             
             processed_stocks += 1
-            print(f"\n{'='*60}")
-            print(f"处理进度: {processed_stocks}/{total_stocks} ({processed_stocks/total_stocks*100:.1f}%)")
-            print(f"当前股票: {stock_code} - {stock_name}")
+            logging.info(f"{'='*60}")
+            logging.info(f"处理进度: {processed_stocks}/{total_stocks} ({processed_stocks/total_stocks*100:.1f}%)")
+            logging.info(f"当前股票: {stock_code} - {stock_name}")
             
             try:
-                success_count, attempt_count = get_stock_data(stock_code, stock_name, base_folder)
+                success_count, attempt_count = get_stock_data(stock_code, stock_name, base_folder, save_to_csv)
                 total_success_count += success_count
                 total_attempts += attempt_count
                 
@@ -226,52 +286,69 @@ def main():
                 time.sleep(1)
                 
             except Exception as e:
-                print(f"处理股票 {stock_code} 时发生错误: {e}")
+                logging.error(f"处理股票 {stock_code} 时发生错误: {e}")
                 continue
         
-        # 生成总体报告
-        print(f"\n{'='*60}")
-        print("批量数据获取完成！")
-        print(f"总共处理股票: {total_stocks}")
-        print(f"成功获取数据的股票: {successful_stocks}")
-        print(f"总体成功率: {successful_stocks/total_stocks*100:.1f}%")
-        print(f"数据获取成功率: {total_success_count/total_attempts*100:.1f}%")
+        # 计算失败数量
+        failed_stocks = total_stocks - successful_stocks
         
-        # 保存总体报告
-        overall_report = f"""批量股票数据获取报告
+        # 生成总体报告
+        logging.info(f"{'='*60}")
+        logging.info("批量数据获取完成！")
+        logging.info(f"总共处理股票: {total_stocks}")
+        logging.info(f"成功获取数据的股票: {successful_stocks}")
+        logging.info(f"总体成功率: {successful_stocks/total_stocks*100:.1f}%")
+        logging.info(f"数据获取成功率: {total_success_count/total_attempts*100:.1f}%")
+        
+        # 保存总体报告（仅在保存CSV时生成）
+        if save_to_csv:
+            storage_info = f"数据存储位置: {base_folder}/\n每个股票的数据存储在独立的子文件夹中"
+            file_info = "- 所有文件使用UTF-8-BOM编码"
+            process_info = "- 需要先下载数据到本地，然后读取保存为CSV文件"
+            
+            overall_report = f"""批量股票1分钟和日线数据获取报告
 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 统计信息:
 - 总共处理股票: {total_stocks}
 - 成功获取数据的股票: {successful_stocks}
+- 失败数量: {failed_stocks}
 - 股票处理成功率: {successful_stocks/total_stocks*100:.1f}%
 - 数据获取成功率: {total_success_count/total_attempts*100:.1f}%
 
-数据存储位置: {base_folder}/
-每个股票的数据存储在独立的子文件夹中
+{storage_info}
 
 数据来源:
-- akshare库
-- 新浪财经
-- 同花顺
-- 东方财富
+- xtquant库 (迅投量化)
+
+数据类型:
+- 1分钟K线数据
+- 日线K线数据
 
 注意事项:
-- 所有文件使用UTF-8-BOM编码
+{file_info}
 - 部分股票可能因为数据源限制无法获取完整数据
 - 建议定期更新数据
+{process_info}
 """
-        
-        report_filename = os.path.join(base_folder, "batch_processing_report.txt")
-        with open(report_filename, 'w', encoding='utf-8') as f:
-            f.write(overall_report)
-        
-        print(f"\n总体报告已保存: {report_filename}")
-        print(f"所有数据文件保存在: {base_folder}/")
+            
+            report_filename = os.path.join(base_folder, "batch_processing_report.txt")
+            with open(report_filename, 'w', encoding='utf-8') as f:
+                f.write(overall_report)
+            logging.info(f"\n批量处理完成!")
+            logging.info(f"总共处理 {total_stocks} 只股票，成功 {successful_stocks} 只，失败 {failed_stocks} 只")
+            logging.info(f"详细报告已保存到: {report_filename}")
+        else:
+            logging.info(f"\n批量下载完成!")
+            logging.info(f"总共下载 {total_stocks} 只股票数据到本地缓存，成功 {successful_stocks} 只，失败 {failed_stocks} 只")
         
     except Exception as e:
-        print(f"读取CSV文件时发生错误: {e}")
+        logging.error(f"读取CSV文件时发生错误: {e}")
         return
 
 if __name__ == "__main__":
-    main()
+    # 默认只下载数据，不保存到CSV
+    main(save_to_csv=False)
+    
+    # 如果需要保存到CSV文件，可以使用：
+    # main(save_to_csv=True)
