@@ -60,6 +60,25 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
                         
                         # 创建最终的DataFrame
                         daily_df = pd.DataFrame(df_data)
+                        
+                        # 按时间排序（确保数据按时间顺序排列）
+                        daily_df = daily_df.sort_values('date').reset_index(drop=True)
+                        
+                        # 计算移动平均值（如果有收盘价数据）
+                        if 'close' in daily_df.columns:
+                            data_count = len(daily_df)
+                            # 只有在数据量足够时才计算相应的移动平均值
+                            if data_count >= 5:
+                                daily_df['close_5d_avg'] = daily_df['close'].rolling(window=5, min_periods=5).mean()
+                            if data_count >= 10:
+                                daily_df['close_10d_avg'] = daily_df['close'].rolling(window=10, min_periods=10).mean()
+                            if data_count >= 20:
+                                daily_df['close_20d_avg'] = daily_df['close'].rolling(window=20, min_periods=20).mean()
+                            if data_count >= 30:
+                                daily_df['close_30d_avg'] = daily_df['close'].rolling(window=30, min_periods=30).mean()
+                            if data_count >= 60:
+                                daily_df['close_60d_avg'] = daily_df['close'].rolling(window=60, min_periods=60).mean()
+                        
                         daily_filename = os.path.join(stock_folder, f"{stock_code}_daily_history.csv")
                         daily_df.to_csv(daily_filename, encoding='utf-8-sig', index=False)
                         logging.info(f"    日线数据已保存到CSV: {len(daily_df)} 条")
@@ -240,8 +259,8 @@ def main():
         total_success_count = 0
         total_attempts = 0
         
-        # 批量处理所有股票
-        for index, row in df.iterrows():
+        # 批量处理前5只股票
+        for index, row in df.head(5).iterrows():
             stock_code = str(row['代码']).zfill(6)  # 确保股票代码是6位数字
             stock_name = row['名称']
             
