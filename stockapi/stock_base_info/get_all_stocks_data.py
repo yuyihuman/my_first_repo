@@ -5,22 +5,16 @@ from datetime import datetime
 import time
 import logging
 
-def get_stock_data(stock_code, stock_name, base_folder="all_stocks_data", save_to_csv=False):
+def get_stock_data(stock_code, stock_name, base_folder="all_stocks_data"):
     """
-    获取单个股票的1分钟和日线数据
+    下载单个股票的1分钟和日线数据到本地缓存
     
     Args:
         stock_code: 股票代码
         stock_name: 股票名称
-        base_folder: 数据保存的基础文件夹
-        save_to_csv: 是否保存数据到CSV文件，默认False（只下载数据）
+        base_folder: 数据缓存的基础文件夹（仅用于日志记录）
     """
-    logging.info(f"开始获取股票 {stock_code} ({stock_name}) 的1分钟和日线数据...")
-    
-    # 创建股票专用数据文件夹（仅在需要保存文件时创建）
-    stock_folder = os.path.join(base_folder, f"stock_{stock_code}_data")
-    if save_to_csv and not os.path.exists(stock_folder):
-        os.makedirs(stock_folder)
+    logging.info(f"开始下载股票 {stock_code} ({stock_name}) 的1分钟和日线数据到本地缓存...")
     
     success_count = 0
     total_attempts = 2  # 1分钟数据 + 日线数据
@@ -32,139 +26,33 @@ def get_stock_data(stock_code, stock_name, base_folder="all_stocks_data", save_t
         full_code = f"{stock_code}.SZ"  # 深圳交易所
     else:
         logging.warning(f"  跳过不支持的股票代码: {stock_code}")
-        return 0, 0
+        return False
     
     try:
-        # 先下载日线数据到本地
+        # 下载日线数据到本地
         logging.info(f"  下载日线数据到本地（从1990年开始）...")
         download_result = xtdata.download_history_data(full_code, period='1d', start_time='19900101')
         logging.info(f"  日线数据下载结果: {download_result}")
+        logging.info(f"    日线数据已下载到本地缓存")
+        success_count += 1
         
-        if save_to_csv:
-            # 获取从1990年开始的全部日线数据
-            logging.info(f"  获取日线数据（从1990年开始）...")
-            daily_data = xtdata.get_market_data([], [full_code], period='1d', start_time='19900101')
-            
-            if daily_data and isinstance(daily_data, dict):
-                # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为日期
-                # 需要重新组织数据结构
-                try:
-                    # 获取时间序列（日期）
-                    time_df = daily_data.get('time')
-                    if time_df is not None and not time_df.empty:
-                        # 获取股票在DataFrame中的数据
-                        if full_code in time_df.index:
-                            dates = time_df.loc[full_code].values
-                            
-                            # 构建新的DataFrame，行为日期，列为各个指标
-                            df_data = {'date': dates}
-                            
-                            # 提取各个字段的数据
-                            for field_name, field_df in daily_data.items():
-                                if field_name != 'time' and field_df is not None and not field_df.empty:
-                                    if full_code in field_df.index:
-                                        df_data[field_name] = field_df.loc[full_code].values
-                            
-                            # 创建最终的DataFrame
-                            daily_df = pd.DataFrame(df_data)
-                            daily_filename = os.path.join(stock_folder, f"{stock_code}_daily_history.csv")
-                            daily_df.to_csv(daily_filename, encoding='utf-8-sig', index=False)
-                            logging.info(f"    日线数据已保存到CSV: {len(daily_df)} 条")
-                            success_count += 1
-                        else:
-                            logging.error(f"    股票代码 {full_code} 不在返回数据中")
-                    else:
-                        logging.error(f"    时间数据为空")
-                except Exception as e:
-                    logging.error(f"    日线数据处理失败: {e}")
-            else:
-                logging.error(f"    日线数据获取失败: 无数据返回")
-        else:
-            # 默认模式：只下载，不读取数据内容
-            logging.info(f"    日线数据已下载到本地缓存")
-            success_count += 1
-        
-        # 尝试获取1分钟数据（从1990年开始，如果支持的话）
+        # 尝试下载1分钟数据（从1990年开始，如果支持的话）
         logging.info(f"  下载1分钟数据到本地（从1990年开始）...")
         try:
             download_result_1m = xtdata.download_history_data(full_code, period='1m', start_time='19900101')
             logging.info(f"  1分钟数据下载结果: {download_result_1m}")
-            
-            if save_to_csv:
-                logging.info(f"  获取1分钟数据（从1990年开始）...")
-                minute_data = xtdata.get_market_data([], [full_code], period='1m', start_time='19900101')
-                
-                if minute_data and isinstance(minute_data, dict):
-                    # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为时间
-                    # 需要重新组织数据结构
-                    try:
-                        # 获取时间序列
-                        time_df = minute_data.get('time')
-                        if time_df is not None and not time_df.empty:
-                            # 获取股票在DataFrame中的数据
-                            if full_code in time_df.index:
-                                times = time_df.loc[full_code].values
-                                
-                                # 构建新的DataFrame，行为时间，列为各个指标
-                                df_data = {'time': times}
-                                
-                                # 提取各个字段的数据
-                                for field_name, field_df in minute_data.items():
-                                    if field_name != 'time' and field_df is not None and not field_df.empty:
-                                        if full_code in field_df.index:
-                                            df_data[field_name] = field_df.loc[full_code].values
-                                
-                                # 创建最终的DataFrame
-                                minute_df = pd.DataFrame(df_data)
-                                minute_filename = os.path.join(stock_folder, f"{stock_code}_1minute_history.csv")
-                                minute_df.to_csv(minute_filename, encoding='utf-8-sig', index=False)
-                                logging.info(f"    1分钟数据已保存到CSV: {len(minute_df)} 条")
-                                success_count += 1
-                            else:
-                                logging.info(f"    股票代码 {full_code} 不在返回数据中，跳过")
-                        else:
-                            logging.info(f"    时间数据为空，跳过")
-                    except Exception as e:
-                        logging.info(f"    1分钟数据处理失败，跳过: {e}")
-                else:
-                    logging.info(f"    1分钟数据不可用，跳过")
-            else:
-                # 默认模式：只下载，不读取数据内容
-                logging.info(f"    1分钟数据已下载到本地缓存")
-                success_count += 1
+            logging.info(f"    1分钟数据已下载到本地缓存")
+            success_count += 1
         except Exception as e:
-            logging.info(f"    1分钟数据获取失败，跳过: {e}")
+            logging.info(f"    1分钟数据下载失败，跳过: {e}")
         
     except Exception as e:
         logging.error(f"    数据获取失败: {e}")
     
-    # 生成单个股票的数据报告（仅在保存CSV时生成）
-    if save_to_csv:
-        data_files_info = f"""获取的数据文件:
-1. {stock_code}_1minute_history.csv - 1分钟历史数据 (xtquant)
-2. {stock_code}_daily_history.csv - 日线历史数据 (xtquant)"""
-        encoding_info = "- 文件编码：UTF-8-BOM，支持中文显示"
-        
-        summary_content = f"""股票代码: {stock_code}
-股票名称: {stock_name}
-完整代码: {full_code}
-数据获取时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-成功获取数据类型: {success_count}/{total_attempts}
 
-{data_files_info}
-
-数据来源说明:
-- 历史价格数据：xtquant (迅投量化)
-{encoding_info}
-- 数据周期：1分钟K线 + 日线K线
-"""
-        
-        report_filename = os.path.join(stock_folder, "data_summary.txt")
-        with open(report_filename, 'w', encoding='utf-8') as f:
-            f.write(summary_content)
     
-    logging.info(f"  股票 {stock_code} 数据获取完成，成功率: {success_count}/{total_attempts}")
-    return success_count, total_attempts
+    logging.info(f"  股票 {stock_code} 数据下载完成，成功率: {success_count}/{total_attempts}")
+    return success_count > 0
 
 def clean_old_logs(logs_dir="logs", keep_days=7):
     """清理旧的日志文件
@@ -222,12 +110,9 @@ def setup_logging():
     
     return log_filename
 
-def main(save_to_csv=False):
+def main():
     """
-    主函数：批量获取所有股票数据
-    
-    Args:
-        save_to_csv: 是否保存数据到CSV文件，默认False（只下载数据）
+    主函数：批量下载所有股票的历史数据到本地缓存
     """
     # 设置日志
     log_filename = setup_logging()
@@ -261,8 +146,6 @@ def main(save_to_csv=False):
         total_stocks = len(df)
         processed_stocks = 0
         successful_stocks = 0
-        total_success_count = 0
-        total_attempts = 0
         
         # 批量处理所有股票
         for index, row in df.iterrows():
@@ -275,22 +158,20 @@ def main(save_to_csv=False):
             logging.info(f"当前股票: {stock_code} - {stock_name}")
             
             try:
-                success_count, attempt_count = get_stock_data(stock_code, stock_name, base_folder, save_to_csv)
-                total_success_count += success_count
-                total_attempts += attempt_count
-                
-                if success_count > 0:
+                result = get_stock_data(stock_code, stock_name)
+                if result:
                     successful_stocks += 1
+                else:
+                    failed_stocks += 1
                 
                 # 添加延时，避免请求过于频繁
                 time.sleep(1)
                 
             except Exception as e:
                 logging.error(f"处理股票 {stock_code} 时发生错误: {e}")
-                continue
+                failed_stocks += 1
         
-        # 计算失败数量
-        failed_stocks = total_stocks - successful_stocks
+        # 统计完成
         
         # 生成总体报告
         logging.info(f"{'='*60}")
@@ -298,57 +179,14 @@ def main(save_to_csv=False):
         logging.info(f"总共处理股票: {total_stocks}")
         logging.info(f"成功获取数据的股票: {successful_stocks}")
         logging.info(f"总体成功率: {successful_stocks/total_stocks*100:.1f}%")
-        logging.info(f"数据获取成功率: {total_success_count/total_attempts*100:.1f}%")
+        logging.info(f"失败股票数量: {failed_stocks}")
         
-        # 保存总体报告（仅在保存CSV时生成）
-        if save_to_csv:
-            storage_info = f"数据存储位置: {base_folder}/\n每个股票的数据存储在独立的子文件夹中"
-            file_info = "- 所有文件使用UTF-8-BOM编码"
-            process_info = "- 需要先下载数据到本地，然后读取保存为CSV文件"
-            
-            overall_report = f"""批量股票1分钟和日线数据获取报告
-生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-统计信息:
-- 总共处理股票: {total_stocks}
-- 成功获取数据的股票: {successful_stocks}
-- 失败数量: {failed_stocks}
-- 股票处理成功率: {successful_stocks/total_stocks*100:.1f}%
-- 数据获取成功率: {total_success_count/total_attempts*100:.1f}%
-
-{storage_info}
-
-数据来源:
-- xtquant库 (迅投量化)
-
-数据类型:
-- 1分钟K线数据
-- 日线K线数据
-
-注意事项:
-{file_info}
-- 部分股票可能因为数据源限制无法获取完整数据
-- 建议定期更新数据
-{process_info}
-"""
-            
-            report_filename = os.path.join(base_folder, "batch_processing_report.txt")
-            with open(report_filename, 'w', encoding='utf-8') as f:
-                f.write(overall_report)
-            logging.info(f"\n批量处理完成!")
-            logging.info(f"总共处理 {total_stocks} 只股票，成功 {successful_stocks} 只，失败 {failed_stocks} 只")
-            logging.info(f"详细报告已保存到: {report_filename}")
-        else:
-            logging.info(f"\n批量下载完成!")
-            logging.info(f"总共下载 {total_stocks} 只股票数据到本地缓存，成功 {successful_stocks} 只，失败 {failed_stocks} 只")
+        logging.info(f"\n批量下载完成!")
+        logging.info(f"总共下载 {total_stocks} 只股票数据到本地缓存，成功 {successful_stocks} 只，失败 {failed_stocks} 只")
         
     except Exception as e:
         logging.error(f"读取CSV文件时发生错误: {e}")
         return
 
 if __name__ == "__main__":
-    # 默认只下载数据，不保存到CSV
-    main(save_to_csv=False)
-    
-    # 如果需要保存到CSV文件，可以使用：
-    # main(save_to_csv=True)
+    main()
