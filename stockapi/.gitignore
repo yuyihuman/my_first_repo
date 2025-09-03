@@ -36,4 +36,5 @@ Thumbs.db
 # 股票数据文件夹和CSV文件
 stock_base_info/all_stocks_data/
 stock_base_info/test_stocks_data/
+stock_base_info/financial_data/
 *.csv
