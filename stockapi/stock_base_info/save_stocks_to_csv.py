@@ -218,8 +218,11 @@ def setup_logging():
     """
     设置日志配置
     """
-    # 创建logs文件夹
-    logs_dir = "logs"
+    # 获取脚本所在目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 创建logs文件夹（在脚本所在目录下）
+    logs_dir = os.path.join(script_dir, "logs")
     if not os.path.exists(logs_dir):
         os.makedirs(logs_dir)
     
@@ -249,8 +252,11 @@ def main():
     log_filename = setup_logging()
     logging.info(f"日志文件: {log_filename}")
     
-    # 读取股票列表CSV文件
-    csv_file = "stock_data.csv"
+    # 获取脚本所在目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 读取股票列表CSV文件（在脚本所在目录下）
+    csv_file = os.path.join(script_dir, "stock_data.csv")
     
     if not os.path.exists(csv_file):
         logging.error(f"错误：找不到文件 {csv_file}")
@@ -267,8 +273,8 @@ def main():
         df = df[~df['代码'].astype(str).str.startswith('8')]
         logging.info(f"过滤8开头股票后剩余 {len(df)} 只股票")
         
-        # 创建总的数据文件夹
-        base_folder = "all_stocks_data"
+        # 创建总的数据文件夹（在脚本所在目录下）
+        base_folder = os.path.join(script_dir, "all_stocks_data")
         if not os.path.exists(base_folder):
             os.makedirs(base_folder)
             logging.info(f"创建总文件夹: {base_folder}")
