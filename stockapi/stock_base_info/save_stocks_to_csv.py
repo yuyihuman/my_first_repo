@@ -64,6 +64,16 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
                         # 按时间排序（确保数据按时间顺序排列）
                         daily_df = daily_df.sort_values('date').reset_index(drop=True)
                         
+                        # 添加可读的日期时间列（紧跟在date列后面）
+                        if 'date' in daily_df.columns:
+                            datetime_col = pd.to_datetime(daily_df['date'], unit='ms').dt.tz_localize('UTC').dt.tz_convert('Asia/Shanghai').dt.strftime('%Y-%m-%d %H:%M:%S')
+                            # 重新排列列顺序，将datetime放在date后面
+                            cols = list(daily_df.columns)
+                            date_idx = cols.index('date')
+                            cols.insert(date_idx + 1, 'datetime')
+                            daily_df['datetime'] = datetime_col
+                            daily_df = daily_df[cols]
+                        
                         # 计算移动平均值（如果有收盘价数据）
                         if 'close' in daily_df.columns:
                             data_count = len(daily_df)
@@ -119,6 +129,17 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
                             
                             # 创建最终的DataFrame
                             minute_df = pd.DataFrame(df_data)
+                            
+                            # 添加可读的日期时间列（紧跟在time列后面）
+                            if 'time' in minute_df.columns:
+                                datetime_col = pd.to_datetime(minute_df['time'], unit='ms').dt.tz_localize('UTC').dt.tz_convert('Asia/Shanghai').dt.strftime('%Y-%m-%d %H:%M:%S')
+                                # 重新排列列顺序，将datetime放在time后面
+                                cols = list(minute_df.columns)
+                                time_idx = cols.index('time')
+                                cols.insert(time_idx + 1, 'datetime')
+                                minute_df['datetime'] = datetime_col
+                                minute_df = minute_df[cols]
+                            
                             minute_filename = os.path.join(stock_folder, f"{stock_code}_1minute_history.csv")
                             minute_df.to_csv(minute_filename, encoding='utf-8-sig', index=False)
                             logging.info(f"    1分钟数据已保存到CSV: {len(minute_df)} 条")
@@ -259,8 +280,8 @@ def main():
         total_success_count = 0
         total_attempts = 0
         
-        # 批量处理前5只股票
-        for index, row in df.head(5).iterrows():
+        # 批量处理所有股票
+        for index, row in df.iterrows():
             stock_code = str(row['代码']).zfill(6)  # 确保股票代码是6位数字
             stock_name = row['名称']
             

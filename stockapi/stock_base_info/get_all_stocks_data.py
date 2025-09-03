@@ -146,6 +146,7 @@ def main():
         total_stocks = len(df)
         processed_stocks = 0
         successful_stocks = 0
+        failed_stocks = 0
         
         # 批量处理所有股票
         for index, row in df.iterrows():
