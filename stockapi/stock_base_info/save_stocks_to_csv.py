@@ -89,6 +89,21 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
                             if data_count >= 60:
                                 daily_df['close_60d_avg'] = daily_df['close'].rolling(window=60, min_periods=60).mean()
                         
+                        # 计算开盘价移动平均值（如果有开盘价数据）
+                        if 'open' in daily_df.columns:
+                            data_count = len(daily_df)
+                            # 只有在数据量足够时才计算相应的移动平均值
+                            if data_count >= 5:
+                                daily_df['open_5d_avg'] = daily_df['open'].rolling(window=5, min_periods=5).mean()
+                            if data_count >= 10:
+                                daily_df['open_10d_avg'] = daily_df['open'].rolling(window=10, min_periods=10).mean()
+                            if data_count >= 20:
+                                daily_df['open_20d_avg'] = daily_df['open'].rolling(window=20, min_periods=20).mean()
+                            if data_count >= 30:
+                                daily_df['open_30d_avg'] = daily_df['open'].rolling(window=30, min_periods=30).mean()
+                            if data_count >= 60:
+                                daily_df['open_60d_avg'] = daily_df['open'].rolling(window=60, min_periods=60).mean()
+                        
                         daily_filename = os.path.join(stock_folder, f"{stock_code}_daily_history.csv")
                         daily_df.to_csv(daily_filename, encoding='utf-8-sig', index=False)
                         logging.info(f"    日线数据已保存到CSV: {len(daily_df)} 条")
