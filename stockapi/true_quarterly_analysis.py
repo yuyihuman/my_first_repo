@@ -721,6 +721,10 @@ def calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_dat
                 total_shares = shares_data[stock_code]
                 
                 # 找到季度最后一天或之前最近的交易日
+                # 确保索引是DatetimeIndex
+                if not isinstance(daily_data.index, pd.DatetimeIndex):
+                    daily_data.index = pd.to_datetime(daily_data.index)
+                
                 available_dates = daily_data.index[daily_data.index <= quarter_end_datetime]
                 if len(available_dates) == 0:
                     failed_count += 1
