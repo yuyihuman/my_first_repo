@@ -154,7 +154,15 @@ def setup_logging():
 
 def callback_func(data):
     """财务数据下载回调函数"""
-    logging.info(f"财务数据下载回调: {data}")
+    # 获取当前进程ID
+    process_id = multiprocessing.current_process().name
+    
+    # 使用进程特定的日志记录器记录回调信息
+    if process_id in process_loggers:
+        safe_log(f"财务数据下载回调: {data}")
+    else:
+        # 如果是主进程调用，使用主进程日志记录器
+        logging.info(f"财务数据下载回调: {data}")
 
 def process_stock_batch(stock_batch):
     """
@@ -205,18 +213,41 @@ def process_stock_batch(stock_batch):
     try:
         # 下载财务数据
         safe_log(f"进程 {process_id} 正在下载财务数据...")
+        safe_log(f"进程 {process_id} 下载参数: 股票数量={len(stock_codes)}, 开始时间=19900101")
+        
+        # 记录下载开始时间
+        download_start_time = datetime.now()
+        safe_log(f"进程 {process_id} 下载开始时间: {download_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # 下载财务数据
         xtdata.download_financial_data2(stock_codes, table_list=[], start_time='19900101', end_time='', callback=callback_func)
+        
+        # 记录下载结束时间
+        download_end_time = datetime.now()
+        download_duration = (download_end_time - download_start_time).total_seconds()
+        safe_log(f"进程 {process_id} 下载结束时间: {download_end_time.strftime('%Y-%m-%d %H:%M:%S')}, 耗时: {download_duration:.2f}秒")
         
         # 获取财务数据
         safe_log(f"进程 {process_id} 正在获取财务数据...")
+        get_data_start_time = datetime.now()
         data = xtdata.get_financial_data(stock_codes, table_list=[], start_time='', end_time='', report_type='report_time')
+        get_data_end_time = datetime.now()
+        get_data_duration = (get_data_end_time - get_data_start_time).total_seconds()
+        safe_log(f"进程 {process_id} 获取财务数据完成，耗时: {get_data_duration:.2f}秒")
         
         if data is not None and isinstance(data, dict):
             safe_log(f"进程 {process_id} 成功获取到 {len(data)} 个股票的财务数据")
             
             # 为每个股票代码分别保存数据
-            for stock_code, stock_data in data.items():
+            safe_log(f"进程 {process_id} 开始保存 {len(data)} 只股票的财务数据...")
+            save_start_time = datetime.now()
+            
+            for i, (stock_code, stock_data) in enumerate(data.items(), 1):
                 try:
+                    # 记录处理进度
+                    if i % 10 == 0 or i == 1 or i == len(data):
+                        safe_log(f"进程 {process_id} 正在保存第 {i}/{len(data)} 只股票 ({stock_code}) 的财务数据...")
+                    
                     # 为每个股票创建单独的文件夹
                     stock_dir = os.path.join(base_output_dir, stock_code)
                     if not os.path.exists(stock_dir):
@@ -225,16 +256,24 @@ def process_stock_batch(stock_batch):
                     if isinstance(stock_data, dict):
                         # 如果股票数据也是字典（包含多个报表类型）
                         table_count = 0
+                        table_rows_total = 0
+                        
                         for table_name, table_data in stock_data.items():
                             if hasattr(table_data, 'to_csv') and not table_data.empty:
                                 csv_filename = os.path.join(stock_dir, f"{table_name}.csv")
                                 table_data.to_csv(csv_filename, index=True, encoding='utf-8-sig')
-                                safe_log(f"进程 {process_id} 已保存 {stock_code} 的 {table_name} 数据，形状: {table_data.shape}")
+                                
+                                # 获取文件大小
+                                file_size = os.path.getsize(csv_filename)
+                                file_size_kb = file_size / 1024
+                                
+                                safe_log(f"进程 {process_id} 已保存 {stock_code} 的 {table_name} 数据，形状: {table_data.shape}，文件大小: {file_size_kb:.2f}KB")
                                 table_count += 1
+                                table_rows_total += len(table_data)
                         
                         if table_count > 0:
                             success_count += 1
-                            safe_log(f"进程 {process_id} 股票 {stock_code} 成功保存 {table_count} 个财务报表")
+                            safe_log(f"进程 {process_id} 股票 {stock_code} 成功保存 {table_count} 个财务报表，总行数: {table_rows_total}")
                         else:
                             safe_log(f"进程 {process_id} 股票 {stock_code} 没有有效的财务数据", "warning")
                             
@@ -242,13 +281,23 @@ def process_stock_batch(stock_batch):
                         # 如果股票数据直接是DataFrame
                         csv_filename = os.path.join(stock_dir, "financial_data.csv")
                         stock_data.to_csv(csv_filename, index=True, encoding='utf-8-sig')
-                        safe_log(f"进程 {process_id} 已保存 {stock_code} 的财务数据，形状: {stock_data.shape}")
+                        
+                        # 获取文件大小
+                        file_size = os.path.getsize(csv_filename)
+                        file_size_kb = file_size / 1024
+                        
+                        safe_log(f"进程 {process_id} 已保存 {stock_code} 的财务数据，形状: {stock_data.shape}，文件大小: {file_size_kb:.2f}KB")
                         success_count += 1
                     else:
                         safe_log(f"进程 {process_id} 股票 {stock_code} 的数据格式不支持或为空", "warning")
                         
                 except Exception as e:
                     safe_log(f"进程 {process_id} 保存股票 {stock_code} 财务数据时发生错误: {e}", "error")
+            
+            # 记录保存完成时间和耗时
+            save_end_time = datetime.now()
+            save_duration = (save_end_time - save_start_time).total_seconds()
+            safe_log(f"进程 {process_id} 完成保存 {len(data)} 只股票的财务数据，成功: {success_count}，耗时: {save_duration:.2f}秒")
                     
         else:
             safe_log(f"进程 {process_id} 没有获取到有效的财务数据", "warning")
