@@ -7,18 +7,18 @@
 import os
 import json
 import time
-import pickle
 import logging
 import akshare as ak
 import pandas as pd
+import shutil
 from datetime import datetime, timedelta
 
 # 缓存配置
-CACHE_FILE = 'stock_data_cache.pkl'
+CACHE_FILE = 'stock_data_cache.json'
 CACHE_DURATION_HOURS = 2  # 缓存有效期2小时
 
 # 缓存功能说明:
-# 1. 日线数据和总股本数据会自动缓存到 stock_data_cache.pkl 文件
+# 1. 日线数据和总股本数据会自动缓存到 stock_data_cache.json 文件
 # 2. 缓存有效期为2小时，过期后会重新获取数据
 # 3. 缓存可以显著提高重复运行的速度
 # 4. 如需强制刷新数据，可删除缓存文件
@@ -112,18 +112,31 @@ def save_cache(data, cache_type):
     cache_data = {}
     if os.path.exists(CACHE_FILE):
         try:
-            with open(CACHE_FILE, 'rb') as f:
-                cache_data = pickle.load(f)
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
         except:
             cache_data = {}
     
+    # 处理pandas DataFrame的序列化
+    serialized_data = data
+    if isinstance(data, pd.DataFrame):
+        serialized_data = data.to_dict('records')
+    elif isinstance(data, dict):
+        # 递归处理字典中的DataFrame
+        serialized_data = {}
+        for key, value in data.items():
+            if isinstance(value, pd.DataFrame):
+                serialized_data[key] = value.to_dict('records')
+            else:
+                serialized_data[key] = value
+    
     cache_data[cache_type] = {
-        'data': data,
+        'data': serialized_data,
         'timestamp': time.time()
     }
     
-    with open(CACHE_FILE, 'wb') as f:
-        pickle.dump(cache_data, f)
+    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cache_data, f, ensure_ascii=False, indent=2)
     logger.info(f"💾 {cache_type} 数据已缓存")
 
 def load_cache(cache_type):
@@ -141,8 +154,8 @@ def load_cache(cache_type):
         return None
     
     try:
-        with open(CACHE_FILE, 'rb') as f:
-            cache_data = pickle.load(f)
+        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+            cache_data = json.load(f)
         
         if cache_type not in cache_data:
             return None
@@ -157,7 +170,23 @@ def load_cache(cache_type):
             return None
         
         logger.info(f"📂 使用 {cache_type} 缓存数据")
-        return cached_item['data']
+        
+        # 处理DataFrame的反序列化
+        data = cached_item['data']
+        if cache_type == 'daily_data' and isinstance(data, dict):
+            # 将字典中的记录列表转换回DataFrame
+            deserialized_data = {}
+            for key, value in data.items():
+                if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                    deserialized_data[key] = pd.DataFrame(value)
+                else:
+                    deserialized_data[key] = value
+            return deserialized_data
+        elif cache_type == 'shares_data' and isinstance(data, list):
+            # 将记录列表转换回DataFrame
+            return pd.DataFrame(data)
+        
+        return data
     
     except Exception as e:
         logger.error(f"❌ 加载 {cache_type} 缓存失败: {e}")
@@ -1009,6 +1038,18 @@ def analyze_all_stocks_true_quarterly(start_year=2010):
     
     logger.info(f"清理后的分析结果已保存到: {output_file}")
     logger.info(f"数据结构: metadata + {len(cleaned_data['quarterly_data'])} 个季度数据")
+    
+    # 备份JSON文件到指定目录
+    backup_dir = r'C:\Users\17701\github\my_first_repo\stock_info\cache\outsource'
+    try:
+        # 确保备份目录存在
+        os.makedirs(backup_dir, exist_ok=True)
+        # 复制文件到备份目录
+        backup_path = os.path.join(backup_dir, output_file)
+        shutil.copy2(output_file, backup_path)
+        logger.info(f"季度分析结果已备份到: {backup_path}")
+    except Exception as e:
+        logger.error(f"备份文件失败: {e}")
     
     # 返回包含详细股票数据的完整结果
     return {

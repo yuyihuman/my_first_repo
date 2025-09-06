@@ -5,6 +5,7 @@ from datetime import datetime
 import logging
 import glob
 import os
+import shutil
 
 # 设置日志配置
 current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -204,6 +205,19 @@ with open('pmi_data.json', 'w', encoding='utf-8') as f:
     json.dump(reshaped_data_list, f, ensure_ascii=False, indent=4)
 
 logger.info(f"数据已重新组织并保存，共{len(reshaped_data_list)}个月份的记录")
+
+# 备份JSON文件到指定目录
+backup_dir = r'C:\Users\17701\github\my_first_repo\stock_info\cache\outsource'
+try:
+    # 确保备份目录存在
+    os.makedirs(backup_dir, exist_ok=True)
+    # 复制文件到备份目录
+    backup_path = os.path.join(backup_dir, 'pmi_data.json')
+    shutil.copy2('pmi_data.json', backup_path)
+    logger.info(f"PMI数据已备份到: {backup_path}")
+except Exception as e:
+    logger.error(f"备份文件失败: {e}")
+
 logger.info(f"日期范围：{reshaped_data_list[0]['date']} 至 {reshaped_data_list[-1]['date']}")
 logger.info(f"每个月份包含{len(reshaped_data_list[0]['indicators'])}个指标")
 logger.info("PMI数据获取和处理完成！")

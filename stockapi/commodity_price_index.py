@@ -7,6 +7,7 @@ import pandas as pd
 import logging
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import shutil
 from matplotlib import rcParams
 
 # 设置中文字体
@@ -215,6 +216,18 @@ if all_hist_data:
                 json.dump(index_json, f, ensure_ascii=False, indent=2)
             
             logger.info("商品价格指数已保存到: commodity_price_index.json")
+            
+            # 备份JSON文件到指定目录
+            backup_dir = r'C:\Users\17701\github\my_first_repo\stock_info\cache\outsource'
+            try:
+                # 确保备份目录存在
+                os.makedirs(backup_dir, exist_ok=True)
+                # 复制文件到备份目录
+                backup_path = os.path.join(backup_dir, 'commodity_price_index.json')
+                shutil.copy2('commodity_price_index.json', backup_path)
+                logger.info(f"商品价格指数已备份到: {backup_path}")
+            except Exception as e:
+                logger.error(f"备份文件失败: {e}")
             logger.info(f"指数包含 {len(index_json['包含品种'])} 个品种")
             logger.info(f"指数数据包含 {len(index_json['指数数据'])} 个交易日")
             if len(index_data) > 0:
