@@ -1217,7 +1217,7 @@ def fetch_macro_china_money_supply():
         
         # 合并PMI数据中的新订单指数和新出口订单指数
         try:
-            pmi_file_path = r'C:\Users\17701\github\my_first_repo\stockapi\pmi_data.json'
+            pmi_file_path = r'C:\Users\17701\github\my_first_repo\stock_info\cache\outsource\pmi_data.json'
             if os.path.exists(pmi_file_path):
                 with open(pmi_file_path, 'r', encoding='utf-8') as f:
                     pmi_data = json.load(f)
@@ -1387,7 +1387,7 @@ def get_rolling_4q_profit_data():
     """
     try:
         # 读取JSON文件
-        json_file_path = r'C:\Users\17701\github\my_first_repo\stockapi\true_quarterly_analysis.json'
+        json_file_path = r'C:\Users\17701\github\my_first_repo\stock_info\cache\outsource\true_quarterly_analysis.json'
         
         if not os.path.exists(json_file_path):
             print(f"TTM市盈率数据文件不存在: {json_file_path}")
@@ -1466,10 +1466,8 @@ def get_commodity_price_index_data():
         dict: 包含日期和商品价格指数的字典
     """
     try:
-        # 读取JSON文件 - 使用相对路径
-        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        json_file_path = os.path.join(current_dir, '..', 'stockapi', 'commodity_price_index.json')
-        json_file_path = os.path.abspath(json_file_path)
+        # 读取JSON文件 - 使用新的指定路径
+        json_file_path = r'C:\Users\17701\github\my_first_repo\stock_info\cache\outsource\commodity_price_index.json'
         
         print(f"DEBUG: 尝试读取商品价格指数文件: {json_file_path}")
         
