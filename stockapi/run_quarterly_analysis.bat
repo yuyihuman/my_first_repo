@@ -7,6 +7,7 @@ if exist "stock_base_info\logs" (
     echo 日志文件夹内容已清除
 )
 
+python stock_base_info\stock_data_fetcher.py
 python stock_base_info\get_all_stocks_data.py
 python stock_base_info\save_stocks_to_csv.py
 python commodity_price_index.py

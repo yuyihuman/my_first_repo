@@ -13,13 +13,17 @@ print(f"数据包含 {len(stock_zh_a_spot_em_df.columns)} 个字段")
 print("\n前5只股票预览:")
 print(stock_zh_a_spot_em_df.head())
 
-# 生成固定的文件名
+# 获取脚本所在目录
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# 生成固定的文件名（保存在脚本所在目录）
 filename = "stock_data.csv"
+full_path = os.path.join(script_dir, filename)
 
 # 保存到CSV文件
-stock_zh_a_spot_em_df.to_csv(filename, index=False, encoding='utf-8-sig')
-print(f"\n数据已保存到文件: {filename}")
-print(f"文件大小: {os.path.getsize(filename) / 1024:.2f} KB")
+stock_zh_a_spot_em_df.to_csv(full_path, index=False, encoding='utf-8-sig')
+print(f"\n数据已保存到文件: {full_path}")
+print(f"文件大小: {os.path.getsize(full_path) / 1024:.2f} KB")
 
 # 显示列名信息
 print("\n数据字段列表:")
