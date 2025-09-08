@@ -7,14 +7,17 @@ import glob
 import os
 import shutil
 
+# 获取脚本所在目录
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
 # 设置日志配置
 current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
-log_filename = f'pmi_fetcher_{current_time}.log'
+log_filename = os.path.join(script_dir, f'pmi_fetcher_{current_time}.log')
 
 # 清理历史日志文件
 logger = logging.getLogger()
 logger.info("清理历史日志文件...")
-for old_log in glob.glob('pmi_fetcher_*.log'):
+for old_log in glob.glob(os.path.join(script_dir, 'pmi_fetcher_*.log')):
     if old_log != log_filename:  # 跳过当前日志文件
         try:
             os.remove(old_log)
@@ -201,10 +204,11 @@ reshaped_data_list.sort(key=lambda x: x['date'])
 
 # 保存重新组织的数据
 logger.info("保存重新组织的数据到JSON文件...")
-with open('pmi_data.json', 'w', encoding='utf-8') as f:
+json_file_path = os.path.join(script_dir, 'pmi_data.json')
+with open(json_file_path, 'w', encoding='utf-8') as f:
     json.dump(reshaped_data_list, f, ensure_ascii=False, indent=4)
 
-logger.info(f"数据已重新组织并保存，共{len(reshaped_data_list)}个月份的记录")
+logger.info(f"数据已重新组织并保存到: {json_file_path}，共{len(reshaped_data_list)}个月份的记录")
 
 # 备份JSON文件到指定目录
 backup_dir = r'C:\Users\17701\github\my_first_repo\stock_info\cache\outsource'
@@ -213,7 +217,7 @@ try:
     os.makedirs(backup_dir, exist_ok=True)
     # 复制文件到备份目录
     backup_path = os.path.join(backup_dir, 'pmi_data.json')
-    shutil.copy2('pmi_data.json', backup_path)
+    shutil.copy2(json_file_path, backup_path)
     logger.info(f"PMI数据已备份到: {backup_path}")
 except Exception as e:
     logger.error(f"备份文件失败: {e}")

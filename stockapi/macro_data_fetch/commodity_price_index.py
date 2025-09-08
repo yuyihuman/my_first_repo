@@ -14,15 +14,18 @@ from matplotlib import rcParams
 rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
 rcParams['axes.unicode_minus'] = False
 
+# 获取脚本所在目录
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
 # 清理历史日志文件
-for log_file in glob.glob('commodity_index_*.log'):
+for log_file in glob.glob(os.path.join(script_dir, 'commodity_index_*.log')):
     try:
         os.remove(log_file)
     except Exception as e:
         pass
 
 # 清理历史图片文件
-for chart_file in glob.glob('commodity_price_chart_*.png'):
+for chart_file in glob.glob(os.path.join(script_dir, 'commodity_price_chart_*.png')):
     try:
         os.remove(chart_file)
     except Exception as e:
@@ -30,7 +33,7 @@ for chart_file in glob.glob('commodity_price_chart_*.png'):
 
 # 初始化日志
 current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-current_log_file = f'commodity_index_{current_time}.log'
+current_log_file = os.path.join(script_dir, f'commodity_index_{current_time}.log')
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -42,7 +45,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 logger.info("开始清理历史日志文件...")
-for log_file in glob.glob('commodity_index_*.log'):
+for log_file in glob.glob(os.path.join(script_dir, 'commodity_index_*.log')):
     if log_file != current_log_file:
         try:
             os.remove(log_file)
@@ -51,7 +54,7 @@ for log_file in glob.glob('commodity_index_*.log'):
             logger.error(f"删除日志文件{log_file}失败: {e}")
 
 logger.info("开始清理历史图片文件...")
-for chart_file in glob.glob('commodity_price_chart_*.png'):
+for chart_file in glob.glob(os.path.join(script_dir, 'commodity_price_chart_*.png')):
     try:
         os.remove(chart_file)
         logger.info(f"已删除历史图片文件: {chart_file}")
@@ -212,10 +215,11 @@ if all_hist_data:
             }
             
             # 保存指数到JSON文件
-            with open('commodity_price_index.json', 'w', encoding='utf-8') as f:
+            json_file_path = os.path.join(script_dir, 'commodity_price_index.json')
+            with open(json_file_path, 'w', encoding='utf-8') as f:
                 json.dump(index_json, f, ensure_ascii=False, indent=2)
             
-            logger.info("商品价格指数已保存到: commodity_price_index.json")
+            logger.info(f"商品价格指数已保存到: {json_file_path}")
             
             # 备份JSON文件到指定目录
             backup_dir = r'C:\Users\17701\github\my_first_repo\stock_info\cache\outsource'
@@ -224,7 +228,7 @@ if all_hist_data:
                 os.makedirs(backup_dir, exist_ok=True)
                 # 复制文件到备份目录
                 backup_path = os.path.join(backup_dir, 'commodity_price_index.json')
-                shutil.copy2('commodity_price_index.json', backup_path)
+                shutil.copy2(json_file_path, backup_path)
                 logger.info(f"商品价格指数已备份到: {backup_path}")
             except Exception as e:
                 logger.error(f"备份文件失败: {e}")
@@ -320,8 +324,9 @@ if all_hist_data:
             
             # 保存图表
             chart_filename = f'commodity_price_chart_{current_time}.png'
-            plt.savefig(chart_filename, dpi=300, bbox_inches='tight')
-            logger.info(f"价格趋势图已保存到: {chart_filename}")
+            chart_file_path = os.path.join(script_dir, chart_filename)
+            plt.savefig(chart_file_path, dpi=300, bbox_inches='tight')
+            logger.info(f"价格趋势图已保存到: {chart_file_path}")
             
             # 关闭图表以释放内存
             plt.close()

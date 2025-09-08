@@ -14,7 +14,9 @@ import shutil
 from datetime import datetime, timedelta
 
 # 缓存配置
-CACHE_FILE = 'stock_data_cache.json'
+# 获取脚本所在目录
+script_dir = os.path.dirname(os.path.abspath(__file__))
+CACHE_FILE = os.path.join(script_dir, 'stock_data_cache.json')
 CACHE_DURATION_HOURS = 2  # 缓存有效期2小时
 
 # 缓存功能说明:
@@ -74,9 +76,12 @@ def setup_logging():
     """
     设置日志系统
     """
+    # 获取脚本所在目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
     # 删除所有历史日志文件
     import glob
-    log_pattern = "quarterly_analysis_*.log"
+    log_pattern = os.path.join(script_dir, "quarterly_analysis_*.log")
     old_log_files = glob.glob(log_pattern)
     for old_log in old_log_files:
         try:
@@ -85,7 +90,7 @@ def setup_logging():
         except Exception as e:
             print(f"删除日志文件 {old_log} 失败: {e}")
     
-    log_filename = f"quarterly_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_filename = os.path.join(script_dir, f"quarterly_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
     
     # 配置日志格式，只输出到文件
     logging.basicConfig(
@@ -1036,11 +1041,13 @@ def analyze_all_stocks_true_quarterly(start_year=2010):
     logger.info(f"获取失败: {len(failed_stocks)}")
     
     # 保存清理后的简洁结果到JSON文件
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     output_file = 'true_quarterly_analysis.json'
-    with open(output_file, 'w', encoding='utf-8') as f:
+    output_file_path = os.path.join(script_dir, output_file)
+    with open(output_file_path, 'w', encoding='utf-8') as f:
         json.dump(cleaned_data, f, ensure_ascii=False, indent=2)
     
-    logger.info(f"清理后的分析结果已保存到: {output_file}")
+    logger.info(f"清理后的分析结果已保存到: {output_file_path}")
     logger.info(f"数据结构: metadata + {len(cleaned_data['quarterly_data'])} 个季度数据")
     
     # 备份JSON文件到指定目录
@@ -1050,7 +1057,7 @@ def analyze_all_stocks_true_quarterly(start_year=2010):
         os.makedirs(backup_dir, exist_ok=True)
         # 复制文件到备份目录
         backup_path = os.path.join(backup_dir, output_file)
-        shutil.copy2(output_file, backup_path)
+        shutil.copy2(output_file_path, backup_path)
         logger.info(f"季度分析结果已备份到: {backup_path}")
     except Exception as e:
         logger.error(f"备份文件失败: {e}")
