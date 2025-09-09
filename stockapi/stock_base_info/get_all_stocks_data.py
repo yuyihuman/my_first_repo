@@ -36,17 +36,17 @@ def safe_log(msg, level="info"):
 
 def get_stock_data(stock_code, stock_name, base_folder="all_stocks_data"):
     """
-    下载单个股票的1分钟和日线数据到本地缓存
+    下载单个股票的1分钟、30分钟和日线数据到本地缓存
     
     Args:
         stock_code: 股票代码
         stock_name: 股票名称
         base_folder: 数据缓存的基础文件夹（仅用于日志记录）
     """
-    safe_log(f"开始下载股票 {stock_code} ({stock_name}) 的1分钟和日线数据到本地缓存...")
+    safe_log(f"开始下载股票 {stock_code} ({stock_name}) 的1分钟、30分钟和日线数据到本地缓存...")
     
     success_count = 0
-    total_attempts = 2  # 1分钟数据 + 日线数据
+    total_attempts = 3  # 1分钟数据 + 30分钟数据 + 日线数据
     
     # 构造股票代码格式（需要添加交易所后缀）
     if stock_code.startswith('6'):
@@ -98,6 +98,25 @@ def get_stock_data(stock_code, stock_name, base_folder="all_stocks_data"):
                 success_count += 1
             except Exception as retry_e:
                 safe_log(f"    1分钟数据重试下载仍然失败，跳过: {retry_e}")
+        
+        # 尝试下载30分钟数据（从1990年开始，如果支持的话）
+        safe_log(f"  下载30分钟数据到本地（从1990年开始）...")
+        try:
+            download_result_30m = xtdata.download_history_data(full_code, period='30m', start_time='19900101')
+            safe_log(f"  30分钟数据下载结果: {download_result_30m}")
+            safe_log(f"    30分钟数据已下载到本地缓存")
+            success_count += 1
+        except Exception as e:
+            safe_log(f"    30分钟数据首次下载失败: {e}，准备重试...", "warning")
+            try:
+                # 重试一次
+                time.sleep(2)  # 等待2秒后重试
+                download_result_30m = xtdata.download_history_data(full_code, period='30m', start_time='19900101')
+                safe_log(f"  30分钟数据重试下载结果: {download_result_30m}")
+                safe_log(f"    30分钟数据重试成功，已下载到本地缓存")
+                success_count += 1
+            except Exception as retry_e:
+                safe_log(f"    30分钟数据重试下载仍然失败，跳过: {retry_e}")
         
     except Exception as e:
         safe_log(f"    数据获取过程中发生未预期错误: {e}", "error")
@@ -350,7 +369,7 @@ def main():
         logging.info(f"失败股票数量: {failed_stocks}")  # 主进程日志，不需要使用safe_log
         
         logging.info(f"\n批量下载完成!")  # 主进程日志，不需要使用safe_log
-        logging.info(f"总共下载 {total_stocks} 只股票数据到本地缓存，成功 {successful_stocks} 只，失败 {failed_stocks} 只")  # 主进程日志，不需要使用safe_log
+        logging.info(f"总共下载 {total_stocks} 只股票的1分钟、30分钟和日线数据到本地缓存，成功 {successful_stocks} 只，失败 {failed_stocks} 只")  # 主进程日志，不需要使用safe_log
         
     except Exception as e:
         logging.error(f"读取CSV文件时发生错误: {e}")
