@@ -51,7 +51,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
         os.makedirs(stock_folder)
     
     success_count = 0
-    total_attempts = 2  # 1分钟数据 + 日线数据
+    total_attempts = 4  # 1分钟数据 + 5分钟数据 + 30分钟数据 + 日线数据
     
     # 构造股票代码格式（需要添加交易所后缀）
     if stock_code.startswith('6'):
@@ -199,6 +199,112 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
         except Exception as e:
             safe_log(f"    1分钟数据获取失败，跳过: {e}")
         
+        # 尝试获取5分钟数据（从1990年开始，如果支持的话）
+        safe_log(f"  获取5分钟数据（从1990年开始）...")
+        try:
+            minute_5_data = xtdata.get_market_data([], [full_code], period='5m', start_time='19900101')
+            
+            if minute_5_data and isinstance(minute_5_data, dict):
+                # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为时间
+                # 需要重新组织数据结构
+                try:
+                    # 获取时间序列
+                    time_df = minute_5_data.get('time')
+                    if time_df is not None and not time_df.empty:
+                        # 获取股票在DataFrame中的数据
+                        if full_code in time_df.index:
+                            times = time_df.loc[full_code].values
+                            
+                            # 构建新的DataFrame，行为时间，列为各个指标
+                            df_data = {'time': times}
+                            
+                            # 提取各个字段的数据
+                            for field_name, field_df in minute_5_data.items():
+                                if field_name != 'time' and field_df is not None and not field_df.empty:
+                                    if full_code in field_df.index:
+                                        df_data[field_name] = field_df.loc[full_code].values
+                            
+                            # 创建最终的DataFrame
+                            minute_5_df = pd.DataFrame(df_data)
+                            
+                            # 添加可读的日期时间列（紧跟在time列后面）
+                            if 'time' in minute_5_df.columns:
+                                datetime_col = pd.to_datetime(minute_5_df['time'], unit='ms').dt.tz_localize('UTC').dt.tz_convert('Asia/Shanghai').dt.strftime('%Y-%m-%d %H:%M:%S')
+                                # 重新排列列顺序，将datetime放在time后面
+                                cols = list(minute_5_df.columns)
+                                time_idx = cols.index('time')
+                                cols.insert(time_idx + 1, 'datetime')
+                                minute_5_df['datetime'] = datetime_col
+                                minute_5_df = minute_5_df[cols]
+                            
+                            minute_5_filename = os.path.join(stock_folder, f"{stock_code}_5minute_history.csv")
+                            minute_5_df.to_csv(minute_5_filename, encoding='utf-8-sig', index=False)
+                            safe_log(f"    5分钟数据已保存到CSV: {len(minute_5_df)} 条")
+                            success_count += 1
+                        else:
+                            safe_log(f"    股票代码 {full_code} 不在返回数据中，跳过")
+                    else:
+                        safe_log(f"    时间数据为空，跳过")
+                except Exception as e:
+                    safe_log(f"    5分钟数据处理失败，跳过: {e}")
+            else:
+                safe_log(f"    5分钟数据不可用，跳过")
+        except Exception as e:
+            safe_log(f"    5分钟数据获取失败，跳过: {e}")
+        
+        # 尝试获取30分钟数据（从1990年开始，如果支持的话）
+        safe_log(f"  获取30分钟数据（从1990年开始）...")
+        try:
+            minute_30_data = xtdata.get_market_data([], [full_code], period='30m', start_time='19900101')
+            
+            if minute_30_data and isinstance(minute_30_data, dict):
+                # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为时间
+                # 需要重新组织数据结构
+                try:
+                    # 获取时间序列
+                    time_df = minute_30_data.get('time')
+                    if time_df is not None and not time_df.empty:
+                        # 获取股票在DataFrame中的数据
+                        if full_code in time_df.index:
+                            times = time_df.loc[full_code].values
+                            
+                            # 构建新的DataFrame，行为时间，列为各个指标
+                            df_data = {'time': times}
+                            
+                            # 提取各个字段的数据
+                            for field_name, field_df in minute_30_data.items():
+                                if field_name != 'time' and field_df is not None and not field_df.empty:
+                                    if full_code in field_df.index:
+                                        df_data[field_name] = field_df.loc[full_code].values
+                            
+                            # 创建最终的DataFrame
+                            minute_30_df = pd.DataFrame(df_data)
+                            
+                            # 添加可读的日期时间列（紧跟在time列后面）
+                            if 'time' in minute_30_df.columns:
+                                datetime_col = pd.to_datetime(minute_30_df['time'], unit='ms').dt.tz_localize('UTC').dt.tz_convert('Asia/Shanghai').dt.strftime('%Y-%m-%d %H:%M:%S')
+                                # 重新排列列顺序，将datetime放在time后面
+                                cols = list(minute_30_df.columns)
+                                time_idx = cols.index('time')
+                                cols.insert(time_idx + 1, 'datetime')
+                                minute_30_df['datetime'] = datetime_col
+                                minute_30_df = minute_30_df[cols]
+                            
+                            minute_30_filename = os.path.join(stock_folder, f"{stock_code}_30minute_history.csv")
+                            minute_30_df.to_csv(minute_30_filename, encoding='utf-8-sig', index=False)
+                            safe_log(f"    30分钟数据已保存到CSV: {len(minute_30_df)} 条")
+                            success_count += 1
+                        else:
+                            safe_log(f"    股票代码 {full_code} 不在返回数据中，跳过")
+                    else:
+                        safe_log(f"    时间数据为空，跳过")
+                except Exception as e:
+                    safe_log(f"    30分钟数据处理失败，跳过: {e}")
+            else:
+                safe_log(f"    30分钟数据不可用，跳过")
+        except Exception as e:
+            safe_log(f"    30分钟数据获取失败，跳过: {e}")
+        
 
         
     except Exception as e:
@@ -207,7 +313,9 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
     # 生成单个股票的数据报告
     data_files_info = f"""获取的数据文件:
 1. {stock_code}_1minute_history.csv - 1分钟历史数据 (xtquant)
-2. {stock_code}_daily_history.csv - 日线历史数据 (xtquant)"""
+2. {stock_code}_5minute_history.csv - 5分钟历史数据 (xtquant)
+3. {stock_code}_30minute_history.csv - 30分钟历史数据 (xtquant)
+4. {stock_code}_daily_history.csv - 日线历史数据 (xtquant)"""
     encoding_info = "- 文件编码：UTF-8-BOM，支持中文显示"
     
     summary_content = f"""股票代码: {stock_code}
@@ -221,7 +329,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
 数据来源说明:
 - 历史价格数据：xtquant (迅投量化)
 {encoding_info}
-- 数据周期：1分钟K线 + 日线K线
+- 数据周期：1分钟K线 + 5分钟K线 + 30分钟K线 + 日线K线
 """
     
     report_filename = os.path.join(stock_folder, "data_summary.txt")
