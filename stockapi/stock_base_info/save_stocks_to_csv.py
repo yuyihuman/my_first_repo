@@ -199,6 +199,8 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
         except Exception as e:
             safe_log(f"    1分钟数据获取失败，跳过: {e}")
         
+
+        
     except Exception as e:
         safe_log(f"    数据获取失败: {e}", "error")
     
