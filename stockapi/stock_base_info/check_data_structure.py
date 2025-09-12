@@ -12,7 +12,8 @@ from datetime import datetime
 import json
 
 # 配置日志
-log_filename = "logs/data_structure_check.log"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+log_filename = os.path.join(script_dir, "logs", "data_structure_check.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
