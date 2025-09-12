@@ -35,6 +35,7 @@ def load_stock_data(csv_file_path):
         # 首先读取基本列
         basic_cols = ['datetime', 'open', 'close', 'volume']
         ma_cols = ['close_5d_avg', 'close_10d_avg', 'close_20d_avg', 'close_30d_avg', 'close_60d_avg']
+        vol_ma_cols = ['volume_5d_avg', 'volume_10d_avg', 'volume_20d_avg', 'volume_30d_avg', 'volume_60d_avg']
         
         # 检查文件中存在哪些列
         try:
@@ -45,7 +46,9 @@ def load_stock_data(csv_file_path):
             # 确定要读取的列
             cols_to_read = basic_cols.copy()
             available_ma_cols = [col for col in ma_cols if col in available_cols]
+            available_vol_ma_cols = [col for col in vol_ma_cols if col in available_cols]
             cols_to_read.extend(available_ma_cols)
+            cols_to_read.extend(available_vol_ma_cols)
             
             # 读取CSV文件
             df = pd.read_csv(csv_file_path, usecols=cols_to_read)
@@ -54,6 +57,7 @@ def load_stock_data(csv_file_path):
             # 如果列检查失败，回退到只读取基本列
             df = pd.read_csv(csv_file_path, usecols=basic_cols)
             available_ma_cols = []
+            available_vol_ma_cols = []
         
         # 转换日期列
         df['datetime'] = pd.to_datetime(df['datetime'])
@@ -61,7 +65,7 @@ def load_stock_data(csv_file_path):
         # 按日期排序
         df = df.sort_values('datetime').reset_index(drop=True)
         
-        # 处理均线数据：优先使用预计算的，缺失的则计算
+        # 处理收盘价均线数据：优先使用预计算的，缺失的则计算
         if 'close_5d_avg' in available_ma_cols:
             df['ma5'] = df['close_5d_avg']
         else:
@@ -87,8 +91,27 @@ def load_stock_data(csv_file_path):
         else:
             df['ma60'] = df['close'].rolling(window=60).mean()
         
+        # 处理成交量均线数据：只使用预计算的，如果不存在则跳过该股票
+        required_vol_ma_cols = ['volume_5d_avg', 'volume_10d_avg', 'volume_20d_avg', 'volume_30d_avg', 'volume_60d_avg']
+        missing_vol_ma_cols = [col for col in required_vol_ma_cols if col not in available_vol_ma_cols]
+        
+        if missing_vol_ma_cols:
+            logging.warning(f"股票数据缺少预计算的成交量均线字段: {missing_vol_ma_cols}，跳过该股票")
+            return None
+            
+        # 所有成交量均线字段都存在，直接使用预计算的数据
+        df['vol_ma5'] = df['volume_5d_avg']
+        df['vol_ma10'] = df['volume_10d_avg']
+        df['vol_ma20'] = df['volume_20d_avg']
+        df['vol_ma30'] = df['volume_30d_avg']
+        df['vol_ma60'] = df['volume_60d_avg']
+        
         # 删除不再需要的原始均线列以节省内存
         for col in available_ma_cols:
+            if col in df.columns:
+                df.drop(col, axis=1, inplace=True)
+        
+        for col in available_vol_ma_cols:
             if col in df.columns:
                 df.drop(col, axis=1, inplace=True)
         
@@ -234,7 +257,7 @@ def process_single_stock(stock_folder_name, data_folder, process_index=1, log_to
     
     try:
         # 预先计算所有需要的数据，避免在循环中重复计算
-        df_values = df[['datetime', 'open', 'close', 'ma5', 'ma10', 'ma20', 'ma30', 'ma60']].values
+        df_values = df[['datetime', 'open', 'close', 'ma5', 'ma10', 'ma20', 'ma30', 'ma60', 'vol_ma5', 'vol_ma10', 'vol_ma20', 'vol_ma30', 'vol_ma60']].values
         
         # 遍历每一个日期（从第60天开始到倒数第11天，确保有足够历史数据和未来10个交易日数据）
         for i in range(60, len(df) - 10):
@@ -268,6 +291,11 @@ def process_single_stock(stock_folder_name, data_folder, process_index=1, log_to
                     'ma20': round(current_row[5], 2),  # ma20
                     'ma30': round(current_row[6], 2),  # ma30
                     'ma60': round(current_row[7], 2),  # ma60
+                    'vol_ma5': round(current_row[8], 2),  # vol_ma5
+                    'vol_ma10': round(current_row[9], 2),  # vol_ma10
+                    'vol_ma20': round(current_row[10], 2),  # vol_ma20
+                    'vol_ma30': round(current_row[11], 2),  # vol_ma30
+                    'vol_ma60': round(current_row[12], 2),  # vol_ma60
                     'next_open': next_open,
                     'next_close': next_close,
                     'next_open_change_pct': round(next_open_change, 2),
