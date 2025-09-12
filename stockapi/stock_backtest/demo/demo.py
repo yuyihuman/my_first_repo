@@ -7,19 +7,21 @@
 - 如需查找新数据或验证数据完整性，请查看上述日志文件
 
 策略条件：
-1. 5日线、10日线、20日线、30日线、60日线在周一到周三都必须逐渐上升
-2. 当天5日线、10日线、20日线、30日线、60日线中最大值和最小值的差距不能超过6%
-3. 当天5日线上穿10日线
+1. 包括当日在内的前10个交易日中，前5个交易日60日收盘均值逐渐下降，后5个交易日60日收盘均值逐渐上升
+2. 后5个交易日30日收盘均值逐渐上升
+3. 后5个交易日20日收盘均值逐渐上升
 """
 
 import pandas as pd
 import os
 from datetime import datetime
 import multiprocessing as mp
+from multiprocessing import Queue, Process, JoinableQueue
 from functools import partial
 import logging
 import shutil
 import gc
+import argparse
 
 def load_stock_data(csv_file_path):
     """
@@ -131,75 +133,147 @@ def check_strategy_conditions(df, current_idx):
     Returns:
         bool: 是否符合条件
     """
-    # 需要至少3天的数据来检查周一到周三的条件
-    if current_idx < 3:
+    # 需要至少10天的数据来检查前10个交易日的条件
+    if current_idx < 9:
         return False
     
-    # 获取当前日期和前3个交易日的数据
-    current_day = df.iloc[current_idx]
-    
-    # 检查数据完整性
-    if pd.isna(current_day['open']) or pd.isna(current_day['close']):
-        return False
-    
-    # 获取前3个交易日的数据用于检查均线趋势
-    week_days = []
-    for i in range(3):
-        day_data = df.iloc[current_idx - 2 + i]  # 前天、昨天、今天
-        week_days.append(day_data)
-    
-    # 检查周一到周三的移动平均线数据完整性
-    for day in week_days:
-        if pd.isna(day['ma5']) or pd.isna(day['ma10']) or pd.isna(day['ma20']) or pd.isna(day['ma30']) or pd.isna(day['ma60']) or pd.isna(day['close']):
+    # 获取前10个交易日的均线数据（包括当日）
+    ma60_values = []
+    ma30_values = []
+    ma20_values = []
+    for i in range(10):
+        day_data = df.iloc[current_idx - 9 + i]  # 从第10天前到当天
+        if pd.isna(day_data['ma60']) or pd.isna(day_data['ma30']) or pd.isna(day_data['ma20']):
             return False
+        ma60_values.append(day_data['ma60'])
+        ma30_values.append(day_data['ma30'])
+        ma20_values.append(day_data['ma20'])
     
-    # 条件1: 5日线、10日线、20日线、30日线、60日线在前3个交易日都必须逐渐上升
-    ma5_rising = all(week_days[i]['ma5'] > week_days[i-1]['ma5'] for i in range(1, 3))
-    ma10_rising = all(week_days[i]['ma10'] > week_days[i-1]['ma10'] for i in range(1, 3))
-    ma20_rising = all(week_days[i]['ma20'] > week_days[i-1]['ma20'] for i in range(1, 3))
-    ma30_rising = all(week_days[i]['ma30'] > week_days[i-1]['ma30'] for i in range(1, 3))
-    ma60_rising = all(week_days[i]['ma60'] > week_days[i-1]['ma60'] for i in range(1, 3))
+    # 检查第1-5天（索引0-4）60日均线是否逐渐下降
+    first_5_days_declining = all(ma60_values[i] > ma60_values[i+1] for i in range(4))
     
-    ma_trend_ok = ma5_rising and ma10_rising and ma20_rising and ma30_rising and ma60_rising
+    # 检查第6-10天（索引5-9）60日均线是否逐渐上升
+    last_5_days_ma60_rising = all(ma60_values[i] < ma60_values[i+1] for i in range(5, 9))
     
-    # 条件2: 当天5日线、10日线、20日线、30日线、60日线中最大值和最小值的差距不能超过6%
-    current_ma5 = current_day['ma5']
-    current_ma10 = current_day['ma10']
-    current_ma20 = current_day['ma20']
-    current_ma30 = current_day['ma30']
-    current_ma60 = current_day['ma60']
+    # 检查第6-10天（索引5-9）30日均线是否逐渐上升
+    last_5_days_ma30_rising = all(ma30_values[i] < ma30_values[i+1] for i in range(5, 9))
     
-    if pd.isna(current_ma5) or pd.isna(current_ma10) or pd.isna(current_ma20) or pd.isna(current_ma30) or pd.isna(current_ma60):
-        return False
+    # 检查第6-10天（索引5-9）20日均线是否逐渐上升
+    last_5_days_ma20_rising = all(ma20_values[i] < ma20_values[i+1] for i in range(5, 9))
     
-    ma_values = [current_ma5, current_ma10, current_ma20, current_ma30, current_ma60]
-    ma_max = max(ma_values)
-    ma_min = min(ma_values)
-    
-    # 避免除零错误
-    if ma_min <= 0:
-        return False
-    
-    ma_spread_pct = (ma_max - ma_min) / ma_min * 100
-    ma_spread_ok = ma_spread_pct <= 6.0
-    
-    # 条件3: 当天5日线上穿10日线（前一天5日线小于10日线，当天5日线大于10日线）
-    if current_idx < 1:
-        return False
-    
-    prev_day = df.iloc[current_idx - 1]
-    prev_ma5 = prev_day['ma5']
-    prev_ma10 = prev_day['ma10']
-    
-    if pd.isna(prev_ma5) or pd.isna(prev_ma10):
-        return False
-    
-    ma5_cross_ma10 = (prev_ma5 < prev_ma10) and (current_ma5 > current_ma10)
-    
-    # 所有条件都满足
-    return ma_trend_ok and ma_spread_ok and ma5_cross_ma10
+    # 条件：前5个交易日60日均线逐渐下降，后5个交易日60日、30日、20日均线都逐渐上升
+    return first_5_days_declining and last_5_days_ma60_rising and last_5_days_ma30_rising and last_5_days_ma20_rising
 
-def process_single_stock(stock_folder_name, data_folder, process_index=1, log_to_file=None):
+def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False):
+    """
+    检查当前日期是否符合策略条件（详细版本，用于单股票测试）
+    
+    Args:
+        df: 股票数据DataFrame
+        current_idx: 当前日期的索引
+        stock_code: 股票代码
+        verbose: 是否打印详细信息
+    
+    Returns:
+        bool: 是否符合条件
+    """
+    # 需要至少10天的数据来检查前10个交易日的条件
+    if current_idx < 9:
+        if verbose:
+            logging.info(f"股票 {stock_code} 索引 {current_idx}: 数据不足，需要至少10天历史数据")
+        return False
+    
+    current_date = df.iloc[current_idx]['datetime'].strftime('%Y-%m-%d')
+    
+    # 获取前10个交易日的均线数据（包括当日）
+    ma60_values = []
+    ma30_values = []
+    ma20_values = []
+    dates = []
+    for i in range(10):
+        day_data = df.iloc[current_idx - 9 + i]  # 从第10天前到当天
+        if pd.isna(day_data['ma60']) or pd.isna(day_data['ma30']) or pd.isna(day_data['ma20']):
+            if verbose:
+                logging.info(f"股票 {stock_code} 日期 {current_date}: 均线数据缺失")
+            return False
+        ma60_values.append(day_data['ma60'])
+        ma30_values.append(day_data['ma30'])
+        ma20_values.append(day_data['ma20'])
+        dates.append(day_data['datetime'].strftime('%Y-%m-%d'))
+    
+    if verbose:
+        logging.info(f"\n=== 股票 {stock_code} 日期 {current_date} 策略条件检查 ===")
+        logging.info(f"前10个交易日均线数据:")
+        for i, (date, ma60, ma30, ma20) in enumerate(zip(dates, ma60_values, ma30_values, ma20_values)):
+            period = "前5天" if i < 5 else "后5天"
+            logging.info(f"  {i+1:2d}. {date}: MA60={ma60:.4f}, MA30={ma30:.4f}, MA20={ma20:.4f} ({period})")
+    
+    # 检查第1-5天（索引0-4）60日均线是否逐渐下降
+    first_5_days_declining = True
+    declining_details = []
+    for i in range(4):
+        is_declining = ma60_values[i] > ma60_values[i+1]
+        first_5_days_declining = first_5_days_declining and is_declining
+        declining_details.append(f"{ma60_values[i]:.4f} > {ma60_values[i+1]:.4f} = {is_declining}")
+    
+    # 检查第6-10天（索引5-9）各均线是否逐渐上升
+    last_5_days_ma60_rising = True
+    last_5_days_ma30_rising = True
+    last_5_days_ma20_rising = True
+    
+    ma60_rising_details = []
+    ma30_rising_details = []
+    ma20_rising_details = []
+    
+    for i in range(5, 9):
+        # 60日均线上升检查
+        is_ma60_rising = ma60_values[i] < ma60_values[i+1]
+        last_5_days_ma60_rising = last_5_days_ma60_rising and is_ma60_rising
+        ma60_rising_details.append(f"{ma60_values[i]:.4f} < {ma60_values[i+1]:.4f} = {is_ma60_rising}")
+        
+        # 30日均线上升检查
+        is_ma30_rising = ma30_values[i] < ma30_values[i+1]
+        last_5_days_ma30_rising = last_5_days_ma30_rising and is_ma30_rising
+        ma30_rising_details.append(f"{ma30_values[i]:.4f} < {ma30_values[i+1]:.4f} = {is_ma30_rising}")
+        
+        # 20日均线上升检查
+        is_ma20_rising = ma20_values[i] < ma20_values[i+1]
+        last_5_days_ma20_rising = last_5_days_ma20_rising and is_ma20_rising
+        ma20_rising_details.append(f"{ma20_values[i]:.4f} < {ma20_values[i+1]:.4f} = {is_ma20_rising}")
+    
+    if verbose:
+        logging.info(f"\n前5天MA60逐渐下降检查:")
+        for i, detail in enumerate(declining_details):
+            logging.info(f"  第{i+1}-{i+2}天: {detail}")
+        logging.info(f"前5天下降趋势: {first_5_days_declining}")
+        
+        logging.info(f"\n后5天MA60逐渐上升检查:")
+        for i, detail in enumerate(ma60_rising_details):
+            logging.info(f"  第{i+6}-{i+7}天: {detail}")
+        logging.info(f"后5天MA60上升趋势: {last_5_days_ma60_rising}")
+        
+        logging.info(f"\n后5天MA30逐渐上升检查:")
+        for i, detail in enumerate(ma30_rising_details):
+            logging.info(f"  第{i+6}-{i+7}天: {detail}")
+        logging.info(f"后5天MA30上升趋势: {last_5_days_ma30_rising}")
+        
+        logging.info(f"\n后5天MA20逐渐上升检查:")
+        for i, detail in enumerate(ma20_rising_details):
+            logging.info(f"  第{i+6}-{i+7}天: {detail}")
+        logging.info(f"后5天MA20上升趋势: {last_5_days_ma20_rising}")
+    
+    # 条件：前5个交易日60日均线逐渐下降，后5个交易日60日、30日、20日均线都逐渐上升
+    result = first_5_days_declining and last_5_days_ma60_rising and last_5_days_ma30_rising and last_5_days_ma20_rising
+    
+    if verbose:
+        logging.info(f"\n最终结果: {result} (前5天下降: {first_5_days_declining}, 后5天MA60上升: {last_5_days_ma60_rising}, 后5天MA30上升: {last_5_days_ma30_rising}, 后5天MA20上升: {last_5_days_ma20_rising})")
+        if result:
+            logging.info(f"*** 股票 {stock_code} 在 {current_date} 符合选股条件! ***")
+        logging.info("=" * 60)
+    
+    return result
+
+def process_single_stock(stock_folder_name, data_folder, process_index=1, log_to_file=None, verbose=False):
     """
     处理单个股票的数据，检查是否符合策略条件
     
@@ -207,6 +281,8 @@ def process_single_stock(stock_folder_name, data_folder, process_index=1, log_to
         stock_folder_name: 股票文件夹名称
         data_folder: 数据根目录路径
         process_index: 进程序号（1-20）
+        log_to_file: 日志记录函数
+        verbose: 是否打印详细的策略判断信息（用于单股票测试）
     
     Returns:
         list: 符合条件的日期列表，包含次日收盘价和涨跌比例
@@ -247,7 +323,7 @@ def process_single_stock(stock_folder_name, data_folder, process_index=1, log_to
     
     # 加载股票数据
     df = load_stock_data(csv_file_path)
-    if df is None or len(df) < 65:  # 至少需要65天数据（60天均线+5天条件检查）
+    if df is None or len(df) < 70:  # 至少需要70天数据（60天均线+10天条件检查）
         return []
     
     log_to_file(f"处理股票 {stock_code}，共 {len(df)} 条记录")
@@ -259,11 +335,17 @@ def process_single_stock(stock_folder_name, data_folder, process_index=1, log_to
         # 预先计算所有需要的数据，避免在循环中重复计算
         df_values = df[['datetime', 'open', 'close', 'ma5', 'ma10', 'ma20', 'ma30', 'ma60', 'vol_ma5', 'vol_ma10', 'vol_ma20', 'vol_ma30', 'vol_ma60']].values
         
-        # 遍历每一个日期（从第60天开始到倒数第11天，确保有足够历史数据和未来10个交易日数据）
-        for i in range(60, len(df) - 10):
+        # 遍历每一个日期（从第69天开始到倒数第11天，确保有足够历史数据和未来10个交易日数据）
+        for i in range(69, len(df) - 10):
             current_row = df_values[i]
             
-            if check_strategy_conditions(df, i):
+            # 根据verbose参数选择使用哪个条件检查函数
+            if verbose:
+                condition_met = check_strategy_conditions_verbose(df, i, stock_code, verbose=True)
+            else:
+                condition_met = check_strategy_conditions(df, i)
+            
+            if condition_met:
                 next_row = df_values[i + 1]
                 
                 # 计算涨跌比例
@@ -379,6 +461,253 @@ def process_stock_batch(stock_info_list, data_folder_path, process_index=1):
     log_to_file(f"进程 {process_index} 处理完成，共处理 {len(batch_results)} 个符合条件的日期")
     return batch_results
 
+def process_stock_dynamic(task_queue, result_queue, data_folder_path, process_index):
+    """
+    动态处理股票的选股策略（用于多进程动态任务分配）
+    
+    Args:
+        task_queue: 任务队列，包含股票文件夹名称
+        result_queue: 结果队列，用于收集处理结果
+        data_folder_path: 股票数据文件夹路径
+        process_index: 进程序号
+    """
+    # 确保每个进程都创建日志文件
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    logs_dir = os.path.join(script_dir, "process_logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    process_log_file = os.path.join(logs_dir, f"process_{process_index}.log")
+    
+    def log_to_file(message, level="info"):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_message = f"[{timestamp}] {message}\n"
+        with open(process_log_file, "a", encoding="utf-8") as f:
+            f.write(log_message)
+    
+    start_time = datetime.now()
+    log_to_file(f"进程 {process_index} 启动，开始动态处理任务，启动时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logging.info(f"进程 {process_index} 已启动，开始处理任务，启动时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    processed_count = 0
+    total_results = []
+    
+    while True:
+        try:
+            # 从队列中获取任务，设置超时避免无限等待
+            stock_folder = task_queue.get(timeout=5)
+            
+            # 检查是否是结束信号
+            if stock_folder is None:
+                end_signal_msg = f"进程 {process_index} 收到结束信号"
+                log_to_file(end_signal_msg)
+                logging.info(end_signal_msg)
+                task_queue.task_done()
+                break
+            
+            try:
+                # 处理单个股票
+                stock_results = process_single_stock(stock_folder, data_folder_path, process_index, log_to_file)
+                total_results.extend(stock_results)
+                
+                processed_count += 1
+                
+                # 每处理10个股票就进行一次垃圾回收和进度报告
+                if processed_count % 10 == 0:
+                    gc.collect()
+                    progress_msg = f"进程 {process_index} 已处理 {processed_count} 个股票，当前结果数: {len(total_results)}"
+                    log_to_file(progress_msg)
+                    logging.info(progress_msg)
+                
+            except Exception as process_error:
+                error_msg = f"进程 {process_index} 处理股票 {stock_folder} 时发生错误: {process_error}"
+                log_to_file(error_msg)
+                logging.warning(error_msg)
+            
+            # 无论处理成功还是失败，都要标记任务完成
+            task_queue.task_done()
+            
+        except Exception as e:
+            if "timeout" in str(e).lower():
+                # 队列为空，正常退出（此时没有获取到任务，不需要调用task_done）
+                timeout_msg = f"进程 {process_index} 队列为空，准备退出"
+                log_to_file(timeout_msg)
+                logging.info(timeout_msg)
+                break
+            else:
+                error_msg = f"进程 {process_index} 获取任务时发生错误: {e}"
+                log_to_file(error_msg)
+                logging.error(error_msg)
+                continue
+    
+    end_time = datetime.now()
+    duration = end_time - start_time
+    completion_msg = f"进程 {process_index} 完成，共处理 {processed_count} 个股票，找到 {len(total_results)} 个符合条件的日期，结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}，运行时长: {duration}"
+    log_to_file(completion_msg)
+    logging.info(completion_msg)
+    
+    # 将结果放入结果队列
+    result_queue.put(total_results)
+    logging.info(f"进程 {process_index} 已将结果放入队列，准备退出")
+
+def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num_processes=20):
+    """
+    动态批量运行选股策略，使用多进程和任务队列实现动态负载均衡
+    
+    Args:
+        data_folder_path: 股票数据文件夹路径
+        output_file_path: 输出结果CSV文件路径
+        num_processes: 进程数量，默认20
+    """
+    logging.info(f"开始动态批量运行选股策略，使用 {num_processes} 个进程...")
+    
+    # 获取所有股票文件夹
+    all_stock_folders = []
+    for item in os.listdir(data_folder_path):
+        item_path = os.path.join(data_folder_path, item)
+        if os.path.isdir(item_path) and item.startswith('stock_') and item.endswith('_data'):
+            all_stock_folders.append(item)
+    
+    logging.info(f"找到 {len(all_stock_folders)} 个股票文件夹")
+    
+    # 先过滤出符合条件的股票（以0、3、60开头）
+    filtered_stock_folders = []
+    for stock_folder in all_stock_folders:
+        stock_code = stock_folder.replace('stock_', '').replace('_data', '')
+        if stock_code.startswith('0') or stock_code.startswith('3') or stock_code.startswith('60'):
+            filtered_stock_folders.append(stock_folder)
+    
+    logging.info(f"过滤后符合条件的股票: {len(filtered_stock_folders)} 个")
+    
+    if not filtered_stock_folders:
+        logging.warning("没有找到符合条件的股票文件夹")
+        return
+    
+    # 创建任务队列和结果队列
+    task_queue = JoinableQueue()
+    result_queue = Queue()
+    
+    # 将所有股票任务放入队列
+    for stock_folder in filtered_stock_folders:
+        task_queue.put(stock_folder)
+    
+    logging.info(f"已将 {len(filtered_stock_folders)} 个股票任务放入队列")
+    
+    # 创建并启动进程
+    processes = []
+    for i in range(num_processes):
+        p = Process(target=process_stock_dynamic, 
+                   args=(task_queue, result_queue, data_folder_path, i+1))
+        p.start()
+        processes.append(p)
+        logging.info(f"进程 {i+1} (PID: {p.pid}) 已启动")
+    
+    logging.info(f"已启动 {num_processes} 个进程进行动态处理")
+    
+    # 等待所有任务完成
+    logging.info("等待所有任务完成...")
+    task_queue.join()
+    logging.info("所有任务已完成，开始发送结束信号")
+    
+    # 发送结束信号给所有进程
+    for i in range(num_processes):
+        task_queue.put(None)
+        logging.info(f"已向进程 {i+1} 发送结束信号")
+    
+    # 等待所有进程结束
+    logging.info("等待所有进程结束...")
+    for i, p in enumerate(processes):
+        logging.info(f"等待进程 {i+1} (PID: {p.pid}) 结束...")
+        p.join()
+        logging.info(f"进程 {i+1} (PID: {p.pid}) 已结束")
+    
+    logging.info("所有进程已完成")
+    
+    # 收集所有结果
+    logging.info("开始收集所有进程的处理结果...")
+    all_selected_dates = []
+    result_count = 0
+    while not result_queue.empty():
+        batch_result = result_queue.get()
+        all_selected_dates.extend(batch_result)
+        result_count += 1
+        logging.info(f"已收集第 {result_count} 个进程的结果，当前总结果数: {len(all_selected_dates)}")
+    
+    logging.info(f"结果收集完成！共收集了 {result_count} 个进程的结果")
+    logging.info(f"动态处理完成！总共找到 {len(all_selected_dates)} 个符合条件的日期")
+    
+    # 保存结果到CSV文件
+    if all_selected_dates:
+        result_df = pd.DataFrame(all_selected_dates)
+        
+        # 按日期排序
+        result_df = result_df.sort_values('date').reset_index(drop=True)
+        
+        # 确保输出目录存在
+        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        
+        result_df.to_csv(output_file_path, index=False, encoding='utf-8')
+        logging.info(f"结果已保存到: {output_file_path}")
+        
+        # 统计信息
+        logging.info("统计信息:")
+        logging.info(f"总共符合条件的交易日数: {len(all_selected_dates)}")
+        logging.info(f"涉及股票数: {result_df['stock_code'].nunique()}")
+        
+        # 计算关键比例统计
+        total_count = len(result_df)
+        next_open_up_count = len(result_df[result_df['next_open_change_pct'] > 0])
+        next_close_up_count = len(result_df[result_df['next_close_change_pct'] > 0])
+        day5_up_count = len(result_df[result_df['day5_change_pct'] > 0])
+        day10_up_count = len(result_df[result_df['day10_change_pct'] > 0])
+        
+        logging.info("关键比例统计:")
+        logging.info(f"次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_count/total_count*100:.2f}%)")
+        logging.info(f"次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_count/total_count*100:.2f}%)")
+        logging.info(f"5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_count/total_count*100:.2f}%)")
+        logging.info(f"10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_count/total_count*100:.2f}%)")
+        
+        # 计算平均涨跌幅
+        logging.info("平均涨跌幅统计:")
+        logging.info(f"次日开盘平均涨跌幅: {result_df['next_open_change_pct'].mean():.2f}%")
+        logging.info(f"次日收盘平均涨跌幅: {result_df['next_close_change_pct'].mean():.2f}%")
+        logging.info(f"5日收盘平均涨跌幅: {result_df['day5_change_pct'].mean():.2f}%")
+        logging.info(f"10日收盘平均涨跌幅: {result_df['day10_change_pct'].mean():.2f}%")
+        
+        # 筛选次日开盘价高于当日收盘价的最后10条数据
+        next_open_up_df = result_df[result_df['next_open_change_pct'] > 0].tail(10)
+        logging.info("次日开盘价高于当日收盘价的最后10条数据:")
+        if not next_open_up_df.empty:
+            for _, row in next_open_up_df.iterrows():
+                day5_str = f"{row['day5_change_pct']:.2f}%" if pd.notna(row['day5_change_pct']) else "N/A"
+                day10_str = f"{row['day10_change_pct']:.2f}%" if pd.notna(row['day10_change_pct']) else "N/A"
+                logging.info(f"{row['stock_code']} {row['date']} 次日开盘:{row['next_open_change_pct']:.2f}% 次日收盘:{row['next_close_change_pct']:.2f}% 5日:{day5_str} 10日:{day10_str}")
+        else:
+            logging.info("无符合条件的数据")
+        
+        # 筛选次日开盘价低于当日收盘价的最后10条数据
+        next_open_down_df = result_df[result_df['next_open_change_pct'] < 0].tail(10)
+        logging.info("次日开盘价低于当日收盘价的最后10条数据:")
+        if not next_open_down_df.empty:
+            for _, row in next_open_down_df.iterrows():
+                day5_str = f"{row['day5_change_pct']:.2f}%" if pd.notna(row['day5_change_pct']) else "N/A"
+                day10_str = f"{row['day10_change_pct']:.2f}%" if pd.notna(row['day10_change_pct']) else "N/A"
+                logging.info(f"{row['stock_code']} {row['date']} 次日开盘:{row['next_open_change_pct']:.2f}% 次日收盘:{row['next_close_change_pct']:.2f}% 5日:{day5_str} 10日:{day10_str}")
+        else:
+            logging.info("无符合条件的数据")
+    else:
+        logging.warning("没有找到符合条件的交易日")
+        # 创建空的CSV文件
+        empty_df = pd.DataFrame(columns=['stock_code', 'date', 'open', 'close', 'ma5', 'ma10', 'ma20', 'ma30', 'ma60',
+                                       'vol_ma5', 'vol_ma10', 'vol_ma20', 'vol_ma30', 'vol_ma60',
+                                       'next_open', 'next_close', 'next_open_change_pct', 'next_close_change_pct',
+                                       'day5_close', 'day5_change_pct', 'day10_close', 'day10_change_pct'])
+        
+        # 确保输出目录存在
+        os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        
+        empty_df.to_csv(output_file_path, index=False, encoding='utf-8')
+        logging.info(f"空结果文件已保存到: {output_file_path}")
+
 def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_processes=20):
     """
     批量运行选股策略，使用多进程遍历所有股票
@@ -412,11 +741,21 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
         logging.warning("没有找到符合条件的股票文件夹")
         return
     
-    # 将过滤后的股票文件夹分成多个批次
-    batch_size = len(filtered_stock_folders) // num_processes + 1
-    stock_batches = [filtered_stock_folders[i:i + batch_size] for i in range(0, len(filtered_stock_folders), batch_size)]
+    # 将过滤后的股票文件夹分成固定数量的批次（20组）
+    stock_batches = [[] for _ in range(num_processes)]
     
-    logging.info(f"将股票分成 {len(stock_batches)} 个批次进行处理")
+    # 将股票均匀分配到各个批次中
+    for i, stock_folder in enumerate(filtered_stock_folders):
+        batch_index = i % num_processes
+        stock_batches[batch_index].append(stock_folder)
+    
+    # 记录每个批次的股票数量
+    batch_info = []
+    for i, batch in enumerate(stock_batches):
+        batch_info.append(f"批次{i+1}: {len(batch)}个股票")
+    
+    logging.info(f"将 {len(filtered_stock_folders)} 只股票分成 {num_processes} 个批次进行处理")
+    logging.info(f"批次分配详情: {', '.join(batch_info)}")
     
     # 使用多进程处理
     with mp.Pool(processes=num_processes) as pool:
@@ -501,10 +840,130 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
         empty_df.to_csv(output_file_path, index=False, encoding='utf-8')
         logging.info(f"空结果文件已保存到: {output_file_path}")
 
+def test_single_stock(stock_code, data_folder_path, verbose=True):
+    """
+    测试单个股票的策略逻辑
+    
+    Args:
+        stock_code: 股票代码，如 '301379'
+        data_folder_path: 股票数据文件夹路径
+        verbose: 是否打印详细的策略判断信息
+    """
+    logging.info(f"开始测试单个股票: {stock_code}")
+    
+    # 构建股票文件夹名称
+    stock_folder_name = f"stock_{stock_code}_data"
+    
+    # 测试单个股票，启用详细模式
+    results = process_single_stock(stock_folder_name, data_folder_path, process_index=1, verbose=verbose)
+    
+    if results:
+        logging.info(f"股票 {stock_code} 找到 {len(results)} 个符合条件的交易日:")
+        
+        # 显示前10个结果的详细信息
+        for i, result in enumerate(results[:10]):
+            logging.info(f"  {i+1}. {result['date']} - 开盘:{result['open']:.2f} 收盘:{result['close']:.2f} MA60:{result['ma60']:.2f}")
+            logging.info(f"     次日开盘变化:{result['next_open_change_pct']:.2f}% 次日收盘变化:{result['next_close_change_pct']:.2f}%")
+            if result['day5_change_pct'] is not None:
+                logging.info(f"     5日变化:{result['day5_change_pct']:.2f}% 10日变化:{result['day10_change_pct']:.2f}%")
+        
+        if len(results) > 10:
+            logging.info(f"  ... 还有 {len(results) - 10} 个结果")
+        
+        # 保存单股票测试结果
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_file = os.path.join(script_dir, f"test_{stock_code}.csv")
+        
+        result_df = pd.DataFrame(results)
+        result_df.to_csv(output_file, index=False, encoding='utf-8')
+        logging.info(f"测试结果已保存到: {output_file}")
+        
+        # 统计信息
+        next_open_up = len([r for r in results if r['next_open_change_pct'] > 0])
+        next_close_up = len([r for r in results if r['next_close_change_pct'] > 0])
+        day5_up = len([r for r in results if r['day5_change_pct'] is not None and r['day5_change_pct'] > 0])
+        day10_up = len([r for r in results if r['day10_change_pct'] is not None and r['day10_change_pct'] > 0])
+        
+        logging.info(f"统计信息:")
+        logging.info(f"  次日高开比例: {next_open_up}/{len(results)} ({next_open_up/len(results)*100:.2f}%)")
+        logging.info(f"  次日收盘上涨比例: {next_close_up}/{len(results)} ({next_close_up/len(results)*100:.2f}%)")
+        logging.info(f"  5日上涨比例: {day5_up}/{len(results)} ({day5_up/len(results)*100:.2f}%)")
+        logging.info(f"  10日上涨比例: {day10_up}/{len(results)} ({day10_up/len(results)*100:.2f}%)")
+        
+        # 计算平均涨跌幅
+        avg_next_open = sum(r['next_open_change_pct'] for r in results) / len(results)
+        avg_next_close = sum(r['next_close_change_pct'] for r in results) / len(results)
+        logging.info(f"  次日开盘平均涨跌幅: {avg_next_open:.2f}%")
+        logging.info(f"  次日收盘平均涨跌幅: {avg_next_close:.2f}%")
+        
+        # 显示次日高开的最后10个记录
+        high_open_results = [r for r in results if r['next_open_change_pct'] > 0]
+        if high_open_results:
+            logging.info(f"\n次日高开的最后10个记录:")
+            for i, result in enumerate(high_open_results[-10:]):
+                day5_str = f"{result['day5_change_pct']:.2f}%" if result['day5_change_pct'] is not None else "N/A"
+                day10_str = f"{result['day10_change_pct']:.2f}%" if result['day10_change_pct'] is not None else "N/A"
+                logging.info(f"  {i+1}. {result['date']} - 开盘:{result['open']:.2f} 收盘:{result['close']:.2f} MA60:{result['ma60']:.2f}")
+                logging.info(f"     次日开盘变化:{result['next_open_change_pct']:.2f}% 次日收盘变化:{result['next_close_change_pct']:.2f}%")
+                logging.info(f"     5日变化:{day5_str} 10日变化:{day10_str}")
+        else:
+            logging.info(f"\n无次日高开的记录")
+        
+        # 显示次日低开的最后10个记录
+        low_open_results = [r for r in results if r['next_open_change_pct'] < 0]
+        if low_open_results:
+            logging.info(f"\n次日低开的最后10个记录:")
+            for i, result in enumerate(low_open_results[-10:]):
+                day5_str = f"{result['day5_change_pct']:.2f}%" if result['day5_change_pct'] is not None else "N/A"
+                day10_str = f"{result['day10_change_pct']:.2f}%" if result['day10_change_pct'] is not None else "N/A"
+                logging.info(f"  {i+1}. {result['date']} - 开盘:{result['open']:.2f} 收盘:{result['close']:.2f} MA60:{result['ma60']:.2f}")
+                logging.info(f"     次日开盘变化:{result['next_open_change_pct']:.2f}% 次日收盘变化:{result['next_close_change_pct']:.2f}%")
+                logging.info(f"     5日变化:{day5_str} 10日变化:{day10_str}")
+        else:
+            logging.info(f"\n无次日低开的记录")
+        
+        # 显示5日上涨的最后10个记录
+        day5_up_results = [r for r in results if r['day5_change_pct'] is not None and r['day5_change_pct'] > 0]
+        if day5_up_results:
+            logging.info(f"\n5日上涨的最后10个记录:")
+            for i, result in enumerate(day5_up_results[-10:]):
+                day5_str = f"{result['day5_change_pct']:.2f}%" if result['day5_change_pct'] is not None else "N/A"
+                day10_str = f"{result['day10_change_pct']:.2f}%" if result['day10_change_pct'] is not None else "N/A"
+                logging.info(f"  {i+1}. {result['date']} - 开盘:{result['open']:.2f} 收盘:{result['close']:.2f} MA60:{result['ma60']:.2f}")
+                logging.info(f"     次日开盘变化:{result['next_open_change_pct']:.2f}% 次日收盘变化:{result['next_close_change_pct']:.2f}%")
+                logging.info(f"     5日变化:{day5_str} 10日变化:{day10_str}")
+        else:
+            logging.info(f"\n无5日上涨的记录")
+        
+        # 显示5日下跌的最后10个记录
+        day5_down_results = [r for r in results if r['day5_change_pct'] is not None and r['day5_change_pct'] < 0]
+        if day5_down_results:
+            logging.info(f"\n5日下跌的最后10个记录:")
+            for i, result in enumerate(day5_down_results[-10:]):
+                day5_str = f"{result['day5_change_pct']:.2f}%" if result['day5_change_pct'] is not None else "N/A"
+                day10_str = f"{result['day10_change_pct']:.2f}%" if result['day10_change_pct'] is not None else "N/A"
+                logging.info(f"  {i+1}. {result['date']} - 开盘:{result['open']:.2f} 收盘:{result['close']:.2f} MA60:{result['ma60']:.2f}")
+                logging.info(f"     次日开盘变化:{result['next_open_change_pct']:.2f}% 次日收盘变化:{result['next_close_change_pct']:.2f}%")
+                logging.info(f"     5日变化:{day5_str} 10日变化:{day10_str}")
+        else:
+            logging.info(f"\n无5日下跌的记录")
+        
+    else:
+        logging.info(f"股票 {stock_code} 没有找到符合条件的交易日")
+
 def main():
     """
     主函数
     """
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='股票选股策略回测工具')
+    parser.add_argument('--single-stock', type=str, help='指定单个股票代码进行测试，如: 301379')
+    parser.add_argument('--data-folder', type=str, 
+                       default=r"c:\Users\17701\github\my_first_repo\stockapi\stock_base_info\all_stocks_data",
+                       help='股票数据文件夹路径')
+    parser.add_argument('--processes', type=int, default=20, help='多进程数量（仅全量测试模式）')
+    args = parser.parse_args()
+    
     # 配置日志
     script_dir = os.path.dirname(os.path.abspath(__file__))
     log_file = os.path.join(script_dir, "strategy_backtest.log")
@@ -520,31 +979,34 @@ def main():
     
     logging.info("开始运行选股策略回测")
     
-    # 清空进程日志目录
-    logs_dir = os.path.join(script_dir, "process_logs")
-    if os.path.exists(logs_dir):
-        try:
-            shutil.rmtree(logs_dir)
-            logging.info("已清空进程日志目录")
-        except Exception as e:
-            logging.error(f"清空进程日志目录失败: {e}")
-    
-    # 输入文件夹路径（包含所有股票数据）
-    input_folder = r"c:\Users\17701\github\my_first_repo\stockapi\stock_base_info\all_stocks_data"
-    
-    # 输出文件路径（保存在当前脚本所在目录）
-    output_file = os.path.join(script_dir, "demo.csv")
-    
-    logging.info(f"输入文件夹: {input_folder}")
-    logging.info(f"输出文件: {output_file}")
-    
     # 检查输入文件夹是否存在
-    if not os.path.exists(input_folder):
-        logging.error(f"输入文件夹不存在 - {input_folder}")
+    if not os.path.exists(args.data_folder):
+        logging.error(f"输入文件夹不存在 - {args.data_folder}")
         return
     
-    # 使用20个进程批量运行策略
-    run_stock_selection_strategy_batch(input_folder, output_file, num_processes=20)
+    if args.single_stock:
+        # 单股票测试模式
+        logging.info(f"=== 单股票测试模式: {args.single_stock} ===")
+        logging.info(f"数据文件夹: {args.data_folder}")
+        test_single_stock(args.single_stock, args.data_folder, verbose=True)
+    else:
+        # 全量测试模式
+        logging.info("=== 全量测试模式 ===")
+        
+        # 清空进程日志目录
+        logs_dir = os.path.join(script_dir, "process_logs")
+        if os.path.exists(logs_dir):
+            try:
+                shutil.rmtree(logs_dir)
+                logging.info("已清空进程日志目录")
+            except Exception as e:
+                logging.error(f"清空进程日志目录失败: {e}")
+        
+        output_file = os.path.join(script_dir, "demo.csv")
+        logging.info(f"输入文件夹: {args.data_folder}")
+        logging.info(f"输出文件: {output_file}")
+        logging.info(f"进程数量: {args.processes}")
+        run_stock_selection_strategy_batch(args.data_folder, output_file, num_processes=args.processes)
 
 
 if __name__ == "__main__":
