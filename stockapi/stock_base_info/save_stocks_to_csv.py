@@ -65,7 +65,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
     try:
         # 获取从1990年开始的全部日线数据
         safe_log(f"  获取日线数据（从1990年开始）...")
-        daily_data = xtdata.get_market_data([], [full_code], period='1d', start_time='19900101')
+        daily_data = xtdata.get_market_data([], [full_code], period='1d', start_time='19900101', dividend_type='front')
         
         if daily_data and isinstance(daily_data, dict):
             # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为日期
@@ -164,7 +164,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
         # 尝试获取1分钟数据（从1990年开始，如果支持的话）
         safe_log(f"  获取1分钟数据（从1990年开始）...")
         try:
-            minute_data = xtdata.get_market_data([], [full_code], period='1m', start_time='19900101')
+            minute_data = xtdata.get_market_data([], [full_code], period='1m', start_time='19900101', dividend_type='front')
             
             if minute_data and isinstance(minute_data, dict):
                 # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为时间
@@ -217,7 +217,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
         # 尝试获取5分钟数据（从1990年开始，如果支持的话）
         safe_log(f"  获取5分钟数据（从1990年开始）...")
         try:
-            minute_5_data = xtdata.get_market_data([], [full_code], period='5m', start_time='19900101')
+            minute_5_data = xtdata.get_market_data([], [full_code], period='5m', start_time='19900101', dividend_type='front')
             
             if minute_5_data and isinstance(minute_5_data, dict):
                 # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为时间
@@ -270,7 +270,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
         # 尝试获取30分钟数据（从1990年开始，如果支持的话）
         safe_log(f"  获取30分钟数据（从1990年开始）...")
         try:
-            minute_30_data = xtdata.get_market_data([], [full_code], period='30m', start_time='19900101')
+            minute_30_data = xtdata.get_market_data([], [full_code], period='30m', start_time='19900101', dividend_type='front')
             
             if minute_30_data and isinstance(minute_30_data, dict):
                 # xtquant返回的数据结构：每个字段都是DataFrame，行为股票代码，列为时间
