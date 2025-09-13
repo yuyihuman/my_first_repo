@@ -505,15 +505,13 @@ def process_stock_dynamic(task_queue, result_queue, data_folder_path, process_in
     while True:
         try:
             # 从队列中获取任务，设置超时避免无限等待
-            stock_folder = task_queue.get(timeout=5)
+            get_task_msg = f"进程 {process_index} 尝试获取任务..."
+            log_to_file(get_task_msg)
             
-            # 检查是否是结束信号
-            if stock_folder is None:
-                end_signal_msg = f"进程 {process_index} 收到结束信号"
-                log_to_file(end_signal_msg)
-                logging.info(end_signal_msg)
-                task_queue.task_done()
-                break
+            stock_folder = task_queue.get(timeout=2)
+            
+            task_received_msg = f"进程 {process_index} 获取到任务: {stock_folder}"
+            log_to_file(task_received_msg)
             
             try:
                 # 处理单个股票
@@ -535,18 +533,21 @@ def process_stock_dynamic(task_queue, result_queue, data_folder_path, process_in
                 logging.warning(error_msg)
             
             # 无论处理成功还是失败，都要标记任务完成
+            task_done_msg = f"进程 {process_index} 标记任务 {stock_folder} 完成"
+            log_to_file(task_done_msg)
             task_queue.task_done()
             
         except Exception as e:
-            if "timeout" in str(e).lower():
-                # 队列为空，正常退出（此时没有获取到任务，不需要调用task_done）
-                timeout_msg = f"进程 {process_index} 队列为空，准备退出"
+            error_msg = f"进程 {process_index} 获取任务时发生错误: {e}"
+            log_to_file(error_msg)
+            
+            if "timeout" in str(e).lower() or "Empty" in str(e) or "queue.Empty" in str(type(e)):
+                # 队列为空或超时，准备退出并提交结果
+                timeout_msg = f"进程 {process_index} 获取任务超时，可能所有任务已完成，准备退出"
                 log_to_file(timeout_msg)
                 logging.info(timeout_msg)
                 break
             else:
-                error_msg = f"进程 {process_index} 获取任务时发生错误: {e}"
-                log_to_file(error_msg)
                 logging.error(error_msg)
                 continue
     
@@ -556,9 +557,25 @@ def process_stock_dynamic(task_queue, result_queue, data_folder_path, process_in
     log_to_file(completion_msg)
     logging.info(completion_msg)
     
-    # 将结果放入结果队列
-    result_queue.put(total_results)
-    logging.info(f"进程 {process_index} 已将结果放入队列，准备退出")
+    # 将结果放入结果队列（使用非阻塞方式避免卡住）
+    put_start_msg = f"进程 {process_index} 开始将结果放入队列，结果数量: {len(total_results)}"
+    log_to_file(put_start_msg)
+    logging.info(put_start_msg)
+    
+    try:
+        result_queue.put(total_results, timeout=5)
+        exit_msg = f"进程 {process_index} 已将结果放入队列，准备退出"
+        log_to_file(exit_msg)
+        logging.info(exit_msg)
+    except Exception as e:
+        error_msg = f"进程 {process_index} 放入结果队列失败: {e}，但仍将退出"
+        log_to_file(error_msg)
+        logging.warning(error_msg)
+    
+    # 确保进程正常退出
+    final_msg = f"进程 {process_index} 函数执行完毕，即将退出"
+    log_to_file(final_msg)
+    logging.info(final_msg)
 
 def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num_processes=20):
     """
@@ -595,7 +612,7 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
     
     # 创建任务队列和结果队列
     task_queue = JoinableQueue()
-    result_queue = Queue()
+    result_queue = Queue(maxsize=num_processes * 2)  # 设置结果队列大小，避免无限制增长
     
     # 将所有股票任务放入队列
     for stock_folder in filtered_stock_folders:
@@ -617,32 +634,55 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
     # 等待所有任务完成
     logging.info("等待所有任务完成...")
     task_queue.join()
-    logging.info("所有任务已完成，开始发送结束信号")
+    logging.info("所有任务已完成，开始收集结果并终止进程")
     
-    # 发送结束信号给所有进程
-    for i in range(num_processes):
-        task_queue.put(None)
-        logging.info(f"已向进程 {i+1} 发送结束信号")
-    
-    # 等待所有进程结束
-    logging.info("等待所有进程结束...")
-    for i, p in enumerate(processes):
-        logging.info(f"等待进程 {i+1} (PID: {p.pid}) 结束...")
-        p.join()
-        logging.info(f"进程 {i+1} (PID: {p.pid}) 已结束")
-    
-    logging.info("所有进程已完成")
-    
-    # 收集所有结果
-    logging.info("开始收集所有进程的处理结果...")
+    # 等待进程完成结果提交
+    logging.info("等待进程完成结果提交...")
     all_selected_dates = []
     result_count = 0
-    while not result_queue.empty():
-        batch_result = result_queue.get()
-        all_selected_dates.extend(batch_result)
-        result_count += 1
-        logging.info(f"已收集第 {result_count} 个进程的结果，当前总结果数: {len(all_selected_dates)}")
     
+    # 给进程足够时间完成最后的结果提交
+    import time
+    time.sleep(3)
+    
+    # 收集所有可用的结果
+    logging.info("开始收集进程结果...")
+    while not result_queue.empty():
+        try:
+            batch_result = result_queue.get_nowait()
+            all_selected_dates.extend(batch_result)
+            result_count += 1
+            logging.info(f"收集到结果批次 {result_count}，当前总结果数: {len(all_selected_dates)}")
+        except:
+            break
+    
+    # 再等待一下，确保所有进程都有机会提交结果
+    if result_count == 0:
+        logging.info("第一次未收集到结果，再等待2秒...")
+        time.sleep(2)
+        while not result_queue.empty():
+            try:
+                batch_result = result_queue.get_nowait()
+                all_selected_dates.extend(batch_result)
+                result_count += 1
+                logging.info(f"延迟收集到结果批次 {result_count}，当前总结果数: {len(all_selected_dates)}")
+            except:
+                break
+    
+    # 现在强制终止所有进程
+    logging.info("开始强制终止所有进程...")
+    for i, p in enumerate(processes):
+        if p.is_alive():
+            logging.info(f"强制终止进程 {i+1} (PID: {p.pid})")
+            p.terminate()
+            p.join(timeout=3)  # 给一点时间让进程清理
+            if p.is_alive():
+                logging.warning(f"进程 {i+1} (PID: {p.pid}) 仍未结束，使用kill")
+                p.kill()
+        else:
+            logging.info(f"进程 {i+1} (PID: {p.pid}) 已自然结束")
+    
+    logging.info("所有进程已完成")
     logging.info(f"结果收集完成！共收集了 {result_count} 个进程的结果")
     logging.info(f"动态处理完成！总共找到 {len(all_selected_dates)} 个符合条件的日期")
     
@@ -989,7 +1029,7 @@ def main():
         logging.info(f"输入文件夹: {args.data_folder}")
         logging.info(f"输出文件: {output_file}")
         logging.info(f"进程数量: {args.processes}")
-        run_stock_selection_strategy_batch(args.data_folder, output_file, num_processes=args.processes)
+        run_stock_selection_strategy_dynamic(args.data_folder, output_file, num_processes=args.processes)
 
 
 if __name__ == "__main__":
