@@ -7,8 +7,9 @@
 - 如需查找新数据或验证数据完整性，请查看上述日志文件
 
 策略条件：
-1、当天股票最低价格低于5、10、20、30日均线，收盘价格高于5、10、20、30日均线至少1.5%
-2、前一个交易日5、10、20、30日均线中最大值和最小值之间的差距小于1%
+1、股票价格必须大于0（最低价和收盘价都必须大于0）
+2、当天股票最低价格低于5、10、20、30日均线，收盘价格高于5、10、20、30日均线至少1.5%
+3、前一个交易日5、10、20、30日均线中最大值和最小值之间的差距小于1%
 """
 
 import pandas as pd
@@ -125,6 +126,10 @@ def check_strategy_conditions(df, current_idx):
     low_price = current_data['low']
     close_price = current_data['close']
     
+    # 检查股票价格是否大于0
+    if low_price <= 0 or close_price <= 0:
+        return False
+    
     # 获取各均线值
     ma5 = current_data['ma5']
     ma10 = current_data['ma10']
@@ -188,6 +193,12 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
     # 获取当日最低价和收盘价
     low_price = current_data['low']
     close_price = current_data['close']
+    
+    # 检查股票价格是否大于0
+    if low_price <= 0 or close_price <= 0:
+        if verbose:
+            logging.info(f"股票 {stock_code} 日期 {current_date}: 股票价格小于等于0，跳过 (最低价:{low_price}, 收盘价:{close_price})")
+        return False
     
     # 获取各均线值
     ma5 = current_data['ma5']
@@ -673,22 +684,22 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
         logging.info(f"5日收盘平均涨跌幅: {result_df['day5_change_pct'].mean():.2f}%")
         logging.info(f"10日收盘平均涨跌幅: {result_df['day10_change_pct'].mean():.2f}%")
         
-        # 筛选次日开盘价高于当日收盘价的最后10条数据
-        next_open_up_df = result_df[result_df['next_open_change_pct'] > 0].tail(10)
-        logging.info("次日开盘价高于当日收盘价的最后10条数据:")
-        if not next_open_up_df.empty:
-            for _, row in next_open_up_df.iterrows():
+        # 筛选5日上涨的最后10条数据
+        day5_up_df = result_df[(result_df['day5_change_pct'] > 0) & pd.notna(result_df['day5_change_pct'])].tail(10)
+        logging.info("5日上涨的最后10条数据:")
+        if not day5_up_df.empty:
+            for _, row in day5_up_df.iterrows():
                 day5_str = f"{row['day5_change_pct']:.2f}%" if pd.notna(row['day5_change_pct']) else "N/A"
                 day10_str = f"{row['day10_change_pct']:.2f}%" if pd.notna(row['day10_change_pct']) else "N/A"
                 logging.info(f"{row['stock_code']} {row['date']} 次日开盘:{row['next_open_change_pct']:.2f}% 次日收盘:{row['next_close_change_pct']:.2f}% 5日:{day5_str} 10日:{day10_str}")
         else:
             logging.info("无符合条件的数据")
         
-        # 筛选次日开盘价低于当日收盘价的最后10条数据
-        next_open_down_df = result_df[result_df['next_open_change_pct'] < 0].tail(10)
-        logging.info("次日开盘价低于当日收盘价的最后10条数据:")
-        if not next_open_down_df.empty:
-            for _, row in next_open_down_df.iterrows():
+        # 筛选5日下跌的最后10条数据
+        day5_down_df = result_df[(result_df['day5_change_pct'] < 0) & pd.notna(result_df['day5_change_pct'])].tail(10)
+        logging.info("5日下跌的最后10条数据:")
+        if not day5_down_df.empty:
+            for _, row in day5_down_df.iterrows():
                 day5_str = f"{row['day5_change_pct']:.2f}%" if pd.notna(row['day5_change_pct']) else "N/A"
                 day10_str = f"{row['day10_change_pct']:.2f}%" if pd.notna(row['day10_change_pct']) else "N/A"
                 logging.info(f"{row['stock_code']} {row['date']} 次日开盘:{row['next_open_change_pct']:.2f}% 次日收盘:{row['next_close_change_pct']:.2f}% 5日:{day5_str} 10日:{day10_str}")
@@ -810,22 +821,22 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
         logging.info(f"5日收盘平均涨跌幅: {result_df['day5_change_pct'].mean():.2f}%")
         logging.info(f"10日收盘平均涨跌幅: {result_df['day10_change_pct'].mean():.2f}%")
         
-        # 筛选次日开盘价高于当日收盘价的最后10条数据
-        next_open_up_df = result_df[result_df['next_open_change_pct'] > 0].tail(10)
-        logging.info("次日开盘价高于当日收盘价的最后10条数据:")
-        if not next_open_up_df.empty:
-            for _, row in next_open_up_df.iterrows():
+        # 筛选5日上涨的最后10条数据
+        day5_up_df = result_df[(result_df['day5_change_pct'] > 0) & pd.notna(result_df['day5_change_pct'])].tail(10)
+        logging.info("5日上涨的最后10条数据:")
+        if not day5_up_df.empty:
+            for _, row in day5_up_df.iterrows():
                 day5_str = f"{row['day5_change_pct']:.2f}%" if pd.notna(row['day5_change_pct']) else "N/A"
                 day10_str = f"{row['day10_change_pct']:.2f}%" if pd.notna(row['day10_change_pct']) else "N/A"
                 logging.info(f"{row['stock_code']} {row['date']} 次日开盘:{row['next_open_change_pct']:.2f}% 次日收盘:{row['next_close_change_pct']:.2f}% 5日:{day5_str} 10日:{day10_str}")
         else:
             logging.info("无符合条件的数据")
         
-        # 筛选次日开盘价低于当日收盘价的最后10条数据
-        next_open_down_df = result_df[result_df['next_open_change_pct'] < 0].tail(10)
-        logging.info("次日开盘价低于当日收盘价的最后10条数据:")
-        if not next_open_down_df.empty:
-            for _, row in next_open_down_df.iterrows():
+        # 筛选5日下跌的最后10条数据
+        day5_down_df = result_df[(result_df['day5_change_pct'] < 0) & pd.notna(result_df['day5_change_pct'])].tail(10)
+        logging.info("5日下跌的最后10条数据:")
+        if not day5_down_df.empty:
+            for _, row in day5_down_df.iterrows():
                 day5_str = f"{row['day5_change_pct']:.2f}%" if pd.notna(row['day5_change_pct']) else "N/A"
                 day10_str = f"{row['day10_change_pct']:.2f}%" if pd.notna(row['day10_change_pct']) else "N/A"
                 logging.info(f"{row['stock_code']} {row['date']} 次日开盘:{row['next_open_change_pct']:.2f}% 次日收盘:{row['next_close_change_pct']:.2f}% 5日:{day5_str} 10日:{day10_str}")
