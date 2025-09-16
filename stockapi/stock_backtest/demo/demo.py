@@ -6,11 +6,6 @@
 - 数据结构检查日志：c:/Users/17701/github/my_first_repo/stockapi/stock_base_info/logs/data_structure_check.log
 - 如需查找新数据或验证数据完整性，请查看上述日志文件
 
-策略条件：
-1、股票价格必须大于1（最低价和收盘价都必须大于1）
-2、且当日开盘价高于20、30日均线，收盘价高于5、10均线至少1%，开盘价高于过去四天每天的开盘价
-3、前面两个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%
-4、当日成交量小于之前一个交易日10日成交量均值的10倍
 """
 
 import pandas as pd
@@ -23,6 +18,13 @@ import logging
 import shutil
 import gc
 import argparse
+
+# 策略条件定义（唯一权威来源）
+STRATEGY_CONDITIONS = """策略条件：
+1、股票价格必须大于1（最低价和收盘价都必须大于1）
+2、包括当日在内的近三个交易日开盘价逐渐上升，收盘价逐渐上升，当日收盘价高于开盘价至少2%
+3、前面两个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%
+4、当日成交量小于之前一个交易日10日成交量均值的10倍"""
 
 def load_stock_data(csv_file_path):
     """
@@ -135,8 +137,8 @@ def check_strategy_conditions(df, current_idx):
     Returns:
         bool: 是否符合条件
     """
-    # 需要至少30天的数据来计算30日均线，并且需要前三个交易日数据
-    if current_idx < 30 or current_idx < 3:
+    # 需要至少30天的数据来计算30日均线，并且需要前两个交易日数据
+    if current_idx < 30 or current_idx < 2:
         return False
     
     # 获取当日数据
@@ -163,26 +165,31 @@ def check_strategy_conditions(df, current_idx):
     ma20 = current_data['ma20']
     ma30 = current_data['ma30']
     
-    # 策略条件2：且当日开盘价高于20、30日均线，收盘价高于5、10均线至少1%，开盘价高于过去四天每天的开盘价
-    open_above_ma20_ma30 = open_price > ma20 and open_price > ma30
-    close_above_ma5_ma10_1_percent = close_price > ma5 * 1.01 and close_price > ma10 * 1.01
-    
-    # 检查开盘价是否高于过去四天每天的开盘价
-    open_above_past_4days = True
-    if current_idx >= 4:
-        for j in range(1, 5):  # 检查前1、2、3、4天
-            if current_idx - j >= 0:
-                past_open = df.iloc[current_idx - j]['open']
-                if open_price <= past_open:
-                    open_above_past_4days = False
-                    break
-            else:
-                open_above_past_4days = False
-                break
+    # 策略条件2：包括当日在内的近三个交易日开盘价逐渐上升，收盘价逐渐上升，当日收盘价高于开盘价至少2%
+    # 检查近三个交易日开盘价和收盘价是否逐渐上升
+    prices_ascending = True
+    if current_idx >= 2:  # 需要至少前两个交易日的数据
+        # 获取三个交易日的开盘价和收盘价
+        day0_open = df.iloc[current_idx - 2]['open']  # 前两天
+        day0_close = df.iloc[current_idx - 2]['close']
+        day1_open = df.iloc[current_idx - 1]['open']  # 前一天
+        day1_close = df.iloc[current_idx - 1]['close']
+        day2_open = open_price  # 当日
+        day2_close = close_price
+        
+        # 检查开盘价逐渐上升：day0_open < day1_open < day2_open
+        open_ascending = day0_open < day1_open < day2_open
+        # 检查收盘价逐渐上升：day0_close < day1_close < day2_close
+        close_ascending = day0_close < day1_close < day2_close
+        
+        prices_ascending = open_ascending and close_ascending
     else:
-        open_above_past_4days = False
+        prices_ascending = False
     
-    condition2_met = open_above_ma20_ma30 and close_above_ma5_ma10_1_percent and open_above_past_4days
+    # 检查当日收盘价高于开盘价至少2%
+    close_above_open_2_percent = close_price > open_price * 1.02
+    
+    condition2_met = prices_ascending and close_above_open_2_percent
     
     # 策略条件3：前面两个交易日中至少一天均线差距小于1%
     ma_diff_condition_met = False
@@ -230,10 +237,10 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
     Returns:
         bool: 是否符合条件
     """
-    # 需要至少30天的数据来计算30日均线，并且需要前三个交易日数据
-    if current_idx < 30 or current_idx < 3:
+    # 需要至少30天的数据来计算30日均线，并且需要前两个交易日数据
+    if current_idx < 30 or current_idx < 2:
         if verbose:
-            logging.info(f"股票 {stock_code} 索引 {current_idx}: 数据不足，需要至少30天历史数据和前3个交易日数据")
+            logging.info(f"股票 {stock_code} 索引 {current_idx}: 数据不足，需要至少30天历史数据和前2个交易日数据")
         return False
     
     current_date = df.iloc[current_idx]['datetime'].strftime('%Y-%m-%d')
@@ -276,42 +283,51 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
         logging.info(f"  MA20: {ma20:.4f}")
         logging.info(f"  MA30: {ma30:.4f}")
     
-    # 策略条件2：且当日开盘价高于20、30日均线，收盘价高于5、10均线至少1%，开盘价高于过去四天每天的开盘价
-    open_above_ma20_ma30 = open_price > ma20 and open_price > ma30
-    close_above_ma5_ma10_1_percent = close_price > ma5 * 1.01 and close_price > ma10 * 1.01
+    # 策略条件2：包括当日在内的近三个交易日开盘价逐渐上升，收盘价逐渐上升，当日收盘价高于开盘价至少2%
+    # 检查近三个交易日开盘价和收盘价是否逐渐上升
+    prices_ascending = True
+    open_ascending = False
+    close_ascending = False
+    day0_open = day0_close = day1_open = day1_close = None
     
-    # 检查开盘价是否高于过去四天每天的开盘价
-    open_above_past_4days = True
-    past_opens = []
-    if current_idx >= 4:
-        for j in range(1, 5):  # 检查前1、2、3、4天
-            if current_idx - j >= 0:
-                past_open = df.iloc[current_idx - j]['open']
-                past_opens.append(past_open)
-                if open_price <= past_open:
-                    open_above_past_4days = False
-            else:
-                open_above_past_4days = False
-                break
+    if current_idx >= 2:  # 需要至少前两个交易日的数据
+        # 获取三个交易日的开盘价和收盘价
+        day0_open = df.iloc[current_idx - 2]['open']  # 前两天
+        day0_close = df.iloc[current_idx - 2]['close']
+        day1_open = df.iloc[current_idx - 1]['open']  # 前一天
+        day1_close = df.iloc[current_idx - 1]['close']
+        day2_open = open_price  # 当日
+        day2_close = close_price
+        
+        # 检查开盘价逐渐上升：day0_open < day1_open < day2_open
+        open_ascending = day0_open < day1_open < day2_open
+        # 检查收盘价逐渐上升：day0_close < day1_close < day2_close
+        close_ascending = day0_close < day1_close < day2_close
+        
+        prices_ascending = open_ascending and close_ascending
     else:
-        open_above_past_4days = False
+        prices_ascending = False
     
-    condition2_met = open_above_ma20_ma30 and close_above_ma5_ma10_1_percent and open_above_past_4days
+    # 检查当日收盘价高于开盘价至少2%
+    close_above_open_2_percent = close_price > open_price * 1.02
+    
+    condition2_met = prices_ascending and close_above_open_2_percent
     
     if verbose:
-        logging.info(f"\n开盘价与均线比较:")
-        logging.info(f"  开盘价 > MA20: {open_price:.4f} > {ma20:.4f} = {open_price > ma20}")
-        logging.info(f"  开盘价 > MA30: {open_price:.4f} > {ma30:.4f} = {open_price > ma30}")
-        logging.info(f"  开盘价高于20、30日均线: {open_above_ma20_ma30}")
-        logging.info(f"\n收盘价与均线比较:")
-        logging.info(f"  收盘价 > MA5*1.01: {close_price:.4f} > {ma5*1.01:.4f} = {close_price > ma5 * 1.01}")
-        logging.info(f"  收盘价 > MA10*1.01: {close_price:.4f} > {ma10*1.01:.4f} = {close_price > ma10 * 1.01}")
-        logging.info(f"  收盘价高于5、10均线至少1%: {close_above_ma5_ma10_1_percent}")
-        logging.info(f"\n开盘价与过去四天比较:")
-        if past_opens:
-            for idx, past_open in enumerate(past_opens, 1):
-                logging.info(f"  开盘价 > 前{idx}天开盘价: {open_price:.4f} > {past_open:.4f} = {open_price > past_open}")
-        logging.info(f"  开盘价高于过去四天每天的开盘价: {open_above_past_4days}")
+        logging.info(f"\n近三个交易日价格趋势检查:")
+        if current_idx >= 2:
+            day0_date = df.iloc[current_idx - 2]['datetime'].strftime('%Y-%m-%d')
+            day1_date = df.iloc[current_idx - 1]['datetime'].strftime('%Y-%m-%d')
+            logging.info(f"  前两天({day0_date}): 开盘价={day0_open:.4f}, 收盘价={day0_close:.4f}")
+            logging.info(f"  前一天({day1_date}): 开盘价={day1_open:.4f}, 收盘价={day1_close:.4f}")
+            logging.info(f"  当日({current_date}): 开盘价={open_price:.4f}, 收盘价={close_price:.4f}")
+            logging.info(f"  开盘价逐渐上升: {day0_open:.4f} < {day1_open:.4f} < {open_price:.4f} = {open_ascending}")
+            logging.info(f"  收盘价逐渐上升: {day0_close:.4f} < {day1_close:.4f} < {close_price:.4f} = {close_ascending}")
+            logging.info(f"  价格趋势满足条件: {prices_ascending}")
+        else:
+            logging.info(f"  数据不足，无法检查近三个交易日趋势")
+        logging.info(f"\n当日收盘价与开盘价比较:")
+        logging.info(f"  收盘价 > 开盘价*1.02: {close_price:.4f} > {open_price*1.02:.4f} = {close_above_open_2_percent}")
         logging.info(f"  条件2满足: {condition2_met}")
     
     # 策略条件3：前面两个交易日中至少一天均线差距小于1%
@@ -387,7 +403,7 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
     
     if verbose:
         logging.info(f"\n最终结果: {result}")
-        logging.info(f"  开盘价高于20、30日均线且收盘价高于5、10均线至少1%且开盘价高于过去四天: {condition2_met}")
+        logging.info(f"  近三个交易日价格逐渐上升且当日收盘价高于开盘价至少2%: {condition2_met}")
         logging.info(f"  前两日至少一天均线差距小于1%: {ma_diff_condition_met}")
         logging.info(f"  成交量条件(当日成交量<前一日10日成交量均值10倍): {volume_condition_met}")
         if result:
@@ -688,7 +704,7 @@ def process_stock_dynamic(task_queue, result_queue, data_folder_path, process_in
     log_to_file(final_msg)
     logging.info(final_msg)
 
-def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num_processes=20):
+def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num_processes=20, limit=None):
     """
     动态批量运行选股策略，使用多进程和任务队列实现动态负载均衡
     
@@ -696,6 +712,7 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
         data_folder_path: 股票数据文件夹路径
         output_file_path: 输出结果CSV文件路径
         num_processes: 进程数量，默认20
+        limit: 限制处理的股票数量，None表示处理所有股票
     """
     logging.info(f"开始动态批量运行选股策略，使用 {num_processes} 个进程...")
     
@@ -716,6 +733,14 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
             filtered_stock_folders.append(stock_folder)
     
     logging.info(f"过滤后符合条件的股票: {len(filtered_stock_folders)} 个")
+    
+    # 如果设置了limit参数，限制处理的股票数量
+    if limit is not None and limit > 0:
+        if limit < len(filtered_stock_folders):
+            filtered_stock_folders = filtered_stock_folders[:limit]
+            logging.info(f"根据limit参数限制，实际处理股票数量: {len(filtered_stock_folders)} 个")
+        else:
+            logging.info(f"limit参数({limit})大于等于可用股票数量({len(filtered_stock_folders)})，处理所有股票")
     
     if not filtered_stock_folders:
         logging.warning("没有找到符合条件的股票文件夹")
@@ -827,6 +852,10 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
         next_high_open_high_close = result_df[(result_df['next_open_change_pct'] > 0) & (result_df['next_close_change_pct'] > 0)]
         high_open_high_close_count = len(next_high_open_high_close)
         
+        # 筛选次日低开收盘上涨的股票（次日开盘下跌但收盘上涨）
+        next_low_open_close_up = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] > 0)]
+        low_open_close_up_count = len(next_low_open_close_up)
+        
         # 在次日高开高走的股票中，计算3日、5日、10日收盘上涨的比例
         if high_open_high_close_count > 0:
             high_open_high_close_day3_up = len(next_high_open_high_close[(next_high_open_high_close['day3_change_pct'] > 0) & pd.notna(next_high_open_high_close['day3_change_pct'])])
@@ -838,12 +867,15 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
             high_open_high_close_day10_up = 0
         
         logging.info("关键比例统计:")
-        logging.info(f"次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_count/total_count*100:.2f}%)")
-        logging.info(f"次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_count/total_count*100:.2f}%)")
-        logging.info(f"次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_count/total_count*100:.2f}%)")
-        logging.info(f"3日收盘上涨比例: {day3_up_count}/{total_count} ({day3_up_count/total_count*100:.2f}%)")
-        logging.info(f"5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_count/total_count*100:.2f}%)")
-        logging.info(f"10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_count/total_count*100:.2f}%)")
+        logging.info("次日表现:")
+        logging.info(f"  次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_count/total_count*100:.2f}%)")
+        logging.info(f"  次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_count/total_count*100:.2f}%)")
+        logging.info(f"  次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_count/total_count*100:.2f}%)")
+        logging.info(f"  次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_count/total_count*100:.2f}%)")
+        logging.info("中长期表现:")
+        logging.info(f"  3日收盘上涨比例: {day3_up_count}/{total_count} ({day3_up_count/total_count*100:.2f}%)")
+        logging.info(f"  5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_count/total_count*100:.2f}%)")
+        logging.info(f"  10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_count/total_count*100:.2f}%)")
         
         # 在次日高开高走的股票中的统计
         logging.info("\n次日高开高走股票中的后续表现:")
@@ -854,10 +886,6 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
         else:
             logging.info("无次日高开高走的股票")
         
-        # 筛选次日低开收盘上涨的股票（次日开盘下跌但收盘上涨）
-        next_low_open_close_up = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] > 0)]
-        low_open_close_up_count = len(next_low_open_close_up)
-        
         # 在次日低开收盘上涨的股票中，计算3日、5日、10日收盘上涨的比例
         if low_open_close_up_count > 0:
             low_open_close_up_day3_up = len(next_low_open_close_up[(next_low_open_close_up['day3_change_pct'] > 0) & pd.notna(next_low_open_close_up['day3_change_pct'])])
@@ -867,8 +895,6 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
             low_open_close_up_day3_up = 0
             low_open_close_up_day5_up = 0
             low_open_close_up_day10_up = 0
-        
-        logging.info(f"次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_count/total_count*100:.2f}%)")
         
         # 在次日低开收盘上涨的股票中的统计
         logging.info("\n次日低开收盘上涨股票中的后续表现:")
@@ -1061,11 +1087,14 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
             high_open_high_close_day10_up = 0
         
         logging.info("关键比例统计:")
-        logging.info(f"次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_count/total_count*100:.2f}%)")
-        logging.info(f"次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_count/total_count*100:.2f}%)")
-        logging.info(f"次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_count/total_count*100:.2f}%)")
-        logging.info(f"5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_count/total_count*100:.2f}%)")
-        logging.info(f"10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_count/total_count*100:.2f}%)")
+        logging.info("次日表现:")
+        logging.info(f"  次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_count/total_count*100:.2f}%)")
+        logging.info(f"  次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_count/total_count*100:.2f}%)")
+        logging.info(f"  次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_count/total_count*100:.2f}%)")
+        logging.info(f"  次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_count/total_count*100:.2f}%)")
+        logging.info("中长期表现:")
+        logging.info(f"  5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_count/total_count*100:.2f}%)")
+        logging.info(f"  10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_count/total_count*100:.2f}%)")
         
         # 在次日高开高走的股票中的统计
         logging.info("\n次日高开高走股票中的后续表现:")
@@ -1088,8 +1117,6 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
             low_open_close_up_day3_up = 0
             low_open_close_up_day5_up = 0
             low_open_close_up_day10_up = 0
-        
-        logging.info(f"次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_count/total_count*100:.2f}%)")
         
         # 在次日低开收盘上涨的股票中的统计
         logging.info("\n次日低开收盘上涨股票中的后续表现:")
@@ -1174,13 +1201,8 @@ def write_backtest_result_to_file(total_count, next_open_up_count, next_close_up
         # 获取当前时间戳
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # 定义策略条件
-        strategy_conditions = """
-策略条件：
-1、股票价格必须大于1（最低价和收盘价都必须大于1）
-2、且当日开盘价高于20、30日均线，收盘价高于5、10均线至少1%，开盘价高于过去四天每天的开盘价
-3、前面两个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%
-4、当日成交量小于之前一个交易日10日成交量均值的10倍"""
+        # 使用统一的策略条件定义
+        strategy_conditions = STRATEGY_CONDITIONS
         
         # 计算百分比，避免除零错误
         next_open_up_pct = (next_open_up_count/total_count*100) if total_count > 0 else 0.00
@@ -1208,13 +1230,15 @@ def write_backtest_result_to_file(total_count, next_open_up_count, next_close_up
 总共符合条件的交易日数: {total_count}
 涉及股票数: {result_df['stock_code'].nunique() if len(result_df) > 0 else 0}
 关键比例统计:
-次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_pct:.2f}%)
-次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_pct:.2f}%)
-次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_pct:.2f}%)
-次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_pct:.2f}%)
-3日收盘上涨比例: {day3_up_count}/{total_count} ({day3_up_pct:.2f}%)
-5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_pct:.2f}%)
-10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_pct:.2f}%)
+次日表现:
+  次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_pct:.2f}%)
+  次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_pct:.2f}%)
+  次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_pct:.2f}%)
+  次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_pct:.2f}%)
+中长期表现:
+  3日收盘上涨比例: {day3_up_count}/{total_count} ({day3_up_pct:.2f}%)
+  5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_pct:.2f}%)
+  10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_pct:.2f}%)
 
 次日高开高走股票中的后续表现:
 3日收盘上涨比例: {high_open_high_close_day3_up_count}/{high_open_high_close_count} ({high_open_high_close_day3_up_pct:.2f}%)
@@ -1308,10 +1332,17 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
             high_open_high_close_day5_up = 0
             high_open_high_close_day10_up = 0
         
+        # 筛选次日低开收盘上涨的股票
+        low_open_close_up_results = [r for r in results if r['next_open_change_pct'] < 0 and r['next_close_change_pct'] > 0]
+        low_open_close_up_count = len(low_open_close_up_results)
+        
         logging.info(f"统计信息:")
+        logging.info("次日表现:")
         logging.info(f"  次日高开比例: {next_open_up}/{len(results)} ({next_open_up/len(results)*100:.2f}%)")
         logging.info(f"  次日收盘上涨比例: {next_close_up}/{len(results)} ({next_close_up/len(results)*100:.2f}%)")
         logging.info(f"  次日高开高走比例: {high_open_high_close_count}/{len(results)} ({high_open_high_close_count/len(results)*100:.2f}%)")
+        logging.info(f"  次日低开收盘上涨比例: {low_open_close_up_count}/{len(results)} ({low_open_close_up_count/len(results)*100:.2f}%)")
+        logging.info("中长期表现:")
         logging.info(f"  3日上涨比例: {day3_up}/{len(results)} ({day3_up/len(results)*100:.2f}%)")
         logging.info(f"  5日上涨比例: {day5_up}/{len(results)} ({day5_up/len(results)*100:.2f}%)")
         logging.info(f"  10日上涨比例: {day10_up}/{len(results)} ({day10_up/len(results)*100:.2f}%)")
@@ -1325,10 +1356,6 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
         else:
             logging.info(f"  无次日高开高走的股票")
         
-        # 筛选次日低开收盘上涨的股票
-        low_open_close_up_results = [r for r in results if r['next_open_change_pct'] < 0 and r['next_close_change_pct'] > 0]
-        low_open_close_up_count = len(low_open_close_up_results)
-        
         # 在次日低开收盘上涨的股票中，计算3日、5日、10日收盘上涨的比例
         if low_open_close_up_count > 0:
             low_open_close_up_day3_up = len([r for r in low_open_close_up_results if r['day3_change_pct'] is not None and r['day3_change_pct'] > 0])
@@ -1338,8 +1365,6 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
             low_open_close_up_day3_up = 0
             low_open_close_up_day5_up = 0
             low_open_close_up_day10_up = 0
-        
-        logging.info(f"  次日低开收盘上涨比例: {low_open_close_up_count}/{len(results)} ({low_open_close_up_count/len(results)*100:.2f}%)")
         
         # 在次日低开收盘上涨的股票中的统计
         logging.info(f"\n次日低开收盘上涨股票中的后续表现:")
@@ -1452,6 +1477,7 @@ def main():
                        default=r"c:\Users\17701\github\my_first_repo\stockapi\stock_base_info\all_stocks_data",
                        help='股票数据文件夹路径')
     parser.add_argument('--processes', type=int, default=20, help='多进程数量（仅全量测试模式）')
+    parser.add_argument('--limit', type=int, help='限制批量测试的股票数量，如: 100（仅全量测试模式）')
     args = parser.parse_args()
     
     # 配置日志
@@ -1496,7 +1522,9 @@ def main():
         logging.info(f"输入文件夹: {args.data_folder}")
         logging.info(f"输出文件: {output_file}")
         logging.info(f"进程数量: {args.processes}")
-        run_stock_selection_strategy_dynamic(args.data_folder, output_file, num_processes=args.processes)
+        if args.limit:
+            logging.info(f"限制测试数量: {args.limit}")
+        run_stock_selection_strategy_dynamic(args.data_folder, output_file, num_processes=args.processes, limit=args.limit)
 
 
 if __name__ == "__main__":
