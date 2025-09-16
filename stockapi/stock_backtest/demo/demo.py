@@ -8,9 +8,9 @@
 
 策略条件：
 1、股票价格必须大于1（最低价和收盘价都必须大于1）
-2、当天股票收盘价高于开盘价1%以上
+2、且当日开盘价高于20、30日均线，收盘价高于5、10均线至少1%，开盘价高于过去四天每天的开盘价
 3、前面两个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%
-4、当日成交量大于之前一个交易日5日成交量均值的2倍，且之前一个交易日的成交量小于10日成交量均值的1.25倍
+4、当日成交量小于之前一个交易日10日成交量均值的10倍
 """
 
 import pandas as pd
@@ -163,8 +163,26 @@ def check_strategy_conditions(df, current_idx):
     ma20 = current_data['ma20']
     ma30 = current_data['ma30']
     
-    # 策略条件2：当天股票收盘价高于开盘价1%以上
-    close_above_open_1_percent = close_price > open_price * 1.01
+    # 策略条件2：且当日开盘价高于20、30日均线，收盘价高于5、10均线至少1%，开盘价高于过去四天每天的开盘价
+    open_above_ma20_ma30 = open_price > ma20 and open_price > ma30
+    close_above_ma5_ma10_1_percent = close_price > ma5 * 1.01 and close_price > ma10 * 1.01
+    
+    # 检查开盘价是否高于过去四天每天的开盘价
+    open_above_past_4days = True
+    if current_idx >= 4:
+        for j in range(1, 5):  # 检查前1、2、3、4天
+            if current_idx - j >= 0:
+                past_open = df.iloc[current_idx - j]['open']
+                if open_price <= past_open:
+                    open_above_past_4days = False
+                    break
+            else:
+                open_above_past_4days = False
+                break
+    else:
+        open_above_past_4days = False
+    
+    condition2_met = open_above_ma20_ma30 and close_above_ma5_ma10_1_percent and open_above_past_4days
     
     # 策略条件3：前面两个交易日中至少一天均线差距小于1%
     ma_diff_condition_met = False
@@ -188,20 +206,16 @@ def check_strategy_conditions(df, current_idx):
             ma_diff_condition_met = True
             break
     
-    # 策略条件4：当日成交量大于之前一个交易日5日成交量均值的2倍，且之前一个交易日的成交量小于10日成交量均值的1.25倍
+    # 策略条件4：当日成交量小于之前一个交易日10日成交量均值的10倍
     volume_condition_met = False
     if volume is not None and current_idx >= 1:
         prev_data = df.iloc[current_idx - 1]
-        prev_vol5 = prev_data['vol5'] if 'vol5' in prev_data and not pd.isna(prev_data['vol5']) else None
         prev_vol10 = prev_data['vol10'] if 'vol10' in prev_data and not pd.isna(prev_data['vol10']) else None
-        prev_volume = prev_data['volume'] if 'volume' in prev_data and not pd.isna(prev_data['volume']) else None
         
-        if prev_vol5 is not None and prev_vol5 > 0 and prev_volume is not None and prev_vol10 is not None:
-            current_volume_above_threshold = volume > prev_vol5 * 2.0
-            prev_volume_below_threshold = prev_volume < prev_vol10 * 1.25
-            volume_condition_met = current_volume_above_threshold and prev_volume_below_threshold
+        if prev_vol10 is not None and prev_vol10 > 0:
+            volume_condition_met = volume < prev_vol10 * 10
     
-    return close_above_open_1_percent and ma_diff_condition_met and volume_condition_met
+    return condition2_met and ma_diff_condition_met and volume_condition_met
 
 def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False):
     """
@@ -262,13 +276,43 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
         logging.info(f"  MA20: {ma20:.4f}")
         logging.info(f"  MA30: {ma30:.4f}")
     
-    # 策略条件2：当天股票收盘价高于开盘价1%以上
-    close_above_open_1_percent = close_price > open_price * 1.01
+    # 策略条件2：且当日开盘价高于20、30日均线，收盘价高于5、10均线至少1%，开盘价高于过去四天每天的开盘价
+    open_above_ma20_ma30 = open_price > ma20 and open_price > ma30
+    close_above_ma5_ma10_1_percent = close_price > ma5 * 1.01 and close_price > ma10 * 1.01
+    
+    # 检查开盘价是否高于过去四天每天的开盘价
+    open_above_past_4days = True
+    past_opens = []
+    if current_idx >= 4:
+        for j in range(1, 5):  # 检查前1、2、3、4天
+            if current_idx - j >= 0:
+                past_open = df.iloc[current_idx - j]['open']
+                past_opens.append(past_open)
+                if open_price <= past_open:
+                    open_above_past_4days = False
+            else:
+                open_above_past_4days = False
+                break
+    else:
+        open_above_past_4days = False
+    
+    condition2_met = open_above_ma20_ma30 and close_above_ma5_ma10_1_percent and open_above_past_4days
     
     if verbose:
-        logging.info(f"\n收盘价与开盘价比较:")
-        logging.info(f"  收盘价 > 开盘价*1.01: {close_price:.4f} > {open_price*1.01:.4f} = {close_above_open_1_percent}")
-        logging.info(f"  收盘价高于开盘价1%: {close_above_open_1_percent}")
+        logging.info(f"\n开盘价与均线比较:")
+        logging.info(f"  开盘价 > MA20: {open_price:.4f} > {ma20:.4f} = {open_price > ma20}")
+        logging.info(f"  开盘价 > MA30: {open_price:.4f} > {ma30:.4f} = {open_price > ma30}")
+        logging.info(f"  开盘价高于20、30日均线: {open_above_ma20_ma30}")
+        logging.info(f"\n收盘价与均线比较:")
+        logging.info(f"  收盘价 > MA5*1.01: {close_price:.4f} > {ma5*1.01:.4f} = {close_price > ma5 * 1.01}")
+        logging.info(f"  收盘价 > MA10*1.01: {close_price:.4f} > {ma10*1.01:.4f} = {close_price > ma10 * 1.01}")
+        logging.info(f"  收盘价高于5、10均线至少1%: {close_above_ma5_ma10_1_percent}")
+        logging.info(f"\n开盘价与过去四天比较:")
+        if past_opens:
+            for idx, past_open in enumerate(past_opens, 1):
+                logging.info(f"  开盘价 > 前{idx}天开盘价: {open_price:.4f} > {past_open:.4f} = {open_price > past_open}")
+        logging.info(f"  开盘价高于过去四天每天的开盘价: {open_above_past_4days}")
+        logging.info(f"  条件2满足: {condition2_met}")
     
     # 策略条件3：前面两个交易日中至少一天均线差距小于1%
     ma_diff_condition_met = False
@@ -309,31 +353,24 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
     if verbose:
         logging.info(f"  前三个交易日至少一天差距小于1%: {ma_diff_condition_met}")
     
-    # 策略条件4：当日成交量大于之前一个交易日5日成交量均值的2倍，且之前一个交易日的成交量小于10日成交量均值的1.25倍
+    # 策略条件4：当日成交量小于之前一个交易日10日成交量均值的10倍
     volume_condition_met = False
     if volume is not None and current_idx >= 1:
         prev_data = df.iloc[current_idx - 1]
+        
+        # 使用预计算的5日和10日成交量均值
         prev_vol5 = prev_data['vol5'] if 'vol5' in prev_data and not pd.isna(prev_data['vol5']) else None
+        prev_vol10 = prev_data['vol10'] if 'vol10' in prev_data and not pd.isna(prev_data['vol10']) else None
         prev_volume = prev_data['volume'] if 'volume' in prev_data and not pd.isna(prev_data['volume']) else None
         
-        # 使用预计算的10日成交量均值
-        prev_vol10 = prev_data['vol10'] if 'vol10' in prev_data and not pd.isna(prev_data['vol10']) else None
-        
-        if prev_vol5 is not None and prev_vol5 > 0 and prev_volume is not None and prev_vol10 is not None:
-            current_volume_above_threshold = volume > prev_vol5 * 2.0
-            prev_volume_below_threshold = prev_volume < prev_vol10 * 1.25
-            volume_condition_met = current_volume_above_threshold and prev_volume_below_threshold
+        if prev_vol10 is not None and prev_vol10 > 0:
+            volume_condition_met = volume < prev_vol10 * 10
             
             if verbose:
                 logging.info(f"\n成交量检查:")
                 logging.info(f"  当日成交量: {volume}")
-                logging.info(f"  前一日5日成交量均值: {prev_vol5}")
-                logging.info(f"  需要大于: {prev_vol5 * 2.0}")
-                logging.info(f"  当日成交量大于阈值: {current_volume_above_threshold}")
-                logging.info(f"  前一日成交量: {prev_volume}")
                 logging.info(f"  前一日10日成交量均值: {prev_vol10}")
-                logging.info(f"  前一日需要小于: {prev_vol10 * 1.25}")
-                logging.info(f"  前一日成交量小于阈值: {prev_volume_below_threshold}")
+                logging.info(f"  需要小于: {prev_vol10 * 10}")
                 logging.info(f"  成交量条件满足: {volume_condition_met}")
         else:
             if verbose:
@@ -346,13 +383,13 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
             logging.info(f"\n成交量检查: 当日成交量数据缺失")
     
     # 最终结果
-    result = close_above_open_1_percent and ma_diff_condition_met and volume_condition_met
+    result = condition2_met and ma_diff_condition_met and volume_condition_met
     
     if verbose:
         logging.info(f"\n最终结果: {result}")
-        logging.info(f"  收盘价高于开盘价1%: {close_above_open_1_percent}")
+        logging.info(f"  开盘价高于20、30日均线且收盘价高于5、10均线至少1%且开盘价高于过去四天: {condition2_met}")
         logging.info(f"  前两日至少一天均线差距小于1%: {ma_diff_condition_met}")
-        logging.info(f"  成交量条件(当日>前一日5日均值2倍且前一日<10日均值1.25倍): {volume_condition_met}")
+        logging.info(f"  成交量条件(当日成交量<前一日10日成交量均值10倍): {volume_condition_met}")
         if result:
             logging.info(f"*** 股票 {stock_code} 在 {current_date} 符合选股条件! ***")
         logging.info("=" * 60)
@@ -817,6 +854,31 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
         else:
             logging.info("无次日高开高走的股票")
         
+        # 筛选次日低开收盘上涨的股票（次日开盘下跌但收盘上涨）
+        next_low_open_close_up = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] > 0)]
+        low_open_close_up_count = len(next_low_open_close_up)
+        
+        # 在次日低开收盘上涨的股票中，计算3日、5日、10日收盘上涨的比例
+        if low_open_close_up_count > 0:
+            low_open_close_up_day3_up = len(next_low_open_close_up[(next_low_open_close_up['day3_change_pct'] > 0) & pd.notna(next_low_open_close_up['day3_change_pct'])])
+            low_open_close_up_day5_up = len(next_low_open_close_up[next_low_open_close_up['day5_change_pct'] > 0])
+            low_open_close_up_day10_up = len(next_low_open_close_up[next_low_open_close_up['day10_change_pct'] > 0])
+        else:
+            low_open_close_up_day3_up = 0
+            low_open_close_up_day5_up = 0
+            low_open_close_up_day10_up = 0
+        
+        logging.info(f"次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_count/total_count*100:.2f}%)")
+        
+        # 在次日低开收盘上涨的股票中的统计
+        logging.info("\n次日低开收盘上涨股票中的后续表现:")
+        if low_open_close_up_count > 0:
+            logging.info(f"3日收盘上涨比例: {low_open_close_up_day3_up}/{low_open_close_up_count} ({low_open_close_up_day3_up/low_open_close_up_count*100:.2f}%)")
+            logging.info(f"5日收盘上涨比例: {low_open_close_up_day5_up}/{low_open_close_up_count} ({low_open_close_up_day5_up/low_open_close_up_count*100:.2f}%)")
+            logging.info(f"10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up/low_open_close_up_count*100:.2f}%)")
+        else:
+            logging.info("无次日低开收盘上涨的股票")
+        
         # 计算平均涨跌幅
         logging.info("平均涨跌幅统计:")
         logging.info(f"次日开盘平均涨跌幅: {result_df['next_open_change_pct'].mean():.2f}%")
@@ -872,6 +934,14 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
                 logging.info(f"{row['stock_code']} {row['date']} 次日开盘:{row['next_open_change_pct']:.2f}% 次日收盘:{row['next_close_change_pct']:.2f}% 3日:{day3_str} 5日:{day5_str} 10日:{day10_str}")
         else:
             logging.info("无符合条件的数据")
+        
+        # 将回测结果写入final_result文件
+        write_backtest_result_to_file(total_count, next_open_up_count, next_close_up_count, 
+                                    high_open_high_close_count, day5_up_count, day10_up_count,
+                                    high_open_high_close_day5_up, high_open_high_close_day10_up,
+                                    low_open_close_up_count, low_open_close_up_day3_up,
+                                    low_open_close_up_day5_up, low_open_close_up_day10_up,
+                                    result_df)
     else:
         logging.warning("没有找到符合条件的交易日")
         # 创建空的CSV文件
@@ -884,6 +954,9 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
         
         empty_df.to_csv(output_file_path, index=False, encoding='utf-8')
         logging.info(f"空结果文件已保存到: {output_file_path}")
+        
+        # 即使没有符合条件的数据，也要写入回测结果
+        write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
 
 def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_processes=20):
     """
@@ -1002,6 +1075,31 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
         else:
             logging.info("无次日高开高走的股票")
         
+        # 筛选次日低开收盘上涨的股票（次日开盘下跌但收盘上涨）
+        next_low_open_close_up = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] > 0)]
+        low_open_close_up_count = len(next_low_open_close_up)
+        
+        # 在次日低开收盘上涨的股票中，计算3日、5日、10日收盘上涨的比例
+        if low_open_close_up_count > 0:
+            low_open_close_up_day3_up = len(next_low_open_close_up[(next_low_open_close_up['day3_change_pct'] > 0) & pd.notna(next_low_open_close_up['day3_change_pct'])])
+            low_open_close_up_day5_up = len(next_low_open_close_up[next_low_open_close_up['day5_change_pct'] > 0])
+            low_open_close_up_day10_up = len(next_low_open_close_up[next_low_open_close_up['day10_change_pct'] > 0])
+        else:
+            low_open_close_up_day3_up = 0
+            low_open_close_up_day5_up = 0
+            low_open_close_up_day10_up = 0
+        
+        logging.info(f"次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_count/total_count*100:.2f}%)")
+        
+        # 在次日低开收盘上涨的股票中的统计
+        logging.info("\n次日低开收盘上涨股票中的后续表现:")
+        if low_open_close_up_count > 0:
+            logging.info(f"3日收盘上涨比例: {low_open_close_up_day3_up}/{low_open_close_up_count} ({low_open_close_up_day3_up/low_open_close_up_count*100:.2f}%)")
+            logging.info(f"5日收盘上涨比例: {low_open_close_up_day5_up}/{low_open_close_up_count} ({low_open_close_up_day5_up/low_open_close_up_count*100:.2f}%)")
+            logging.info(f"10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up/low_open_close_up_count*100:.2f}%)")
+        else:
+            logging.info("无次日低开收盘上涨的股票")
+        
         # 计算平均涨跌幅
         logging.info("平均涨跌幅统计:")
         logging.info(f"次日开盘平均涨跌幅: {result_df['next_open_change_pct'].mean():.2f}%")
@@ -1030,12 +1128,126 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
                 logging.info(f"{row['stock_code']} {row['date']} 次日开盘:{row['next_open_change_pct']:.2f}% 次日收盘:{row['next_close_change_pct']:.2f}% 5日:{day5_str} 10日:{day10_str}")
         else:
             logging.info("无符合条件的数据")
+        
+        # 将回测结果写入final_result文件
+        write_backtest_result_to_file(total_count, next_open_up_count, next_close_up_count, 
+                                    high_open_high_close_count, day5_up_count, day10_up_count,
+                                    high_open_high_close_day5_up, high_open_high_close_day10_up,
+                                    low_open_close_up_count, low_open_close_up_day3_up,
+                                    low_open_close_up_day5_up, low_open_close_up_day10_up,
+                                    result_df)
     else:
         logging.warning("没有找到符合条件的交易日")
         # 创建空的CSV文件
         empty_df = pd.DataFrame(columns=['stock_code', 'date', 'open', 'close', 'low', 'ma5', 'ma10', 'ma20', 'ma30', 'next_open', 'next_close', 'next_open_change_pct', 'next_close_change_pct', 'day3_close', 'day3_change_pct', 'day5_close', 'day5_change_pct', 'day10_close', 'day10_change_pct'])
         empty_df.to_csv(output_file_path, index=False, encoding='utf-8')
         logging.info(f"空结果文件已保存到: {output_file_path}")
+        
+        # 即使没有符合条件的数据，也要写入回测结果
+        write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
+
+def write_backtest_result_to_file(total_count, next_open_up_count, next_close_up_count, 
+                                 high_open_high_close_count, day5_up_count, day10_up_count,
+                                 high_open_high_close_day5_up, high_open_high_close_day10_up,
+                                 low_open_close_up_count, low_open_close_up_day3_up, 
+                                 low_open_close_up_day5_up, low_open_close_up_day10_up,
+                                 result_df):
+    """
+    将回测结果以增量方式写入final_result文件
+    
+    Args:
+        total_count: 总交易日数
+        next_open_up_count: 次日高开数量
+        next_close_up_count: 次日收盘上涨数量
+        high_open_high_close_count: 次日高开高走数量
+        day5_up_count: 5日收盘上涨数量
+        day10_up_count: 10日收盘上涨数量
+        high_open_high_close_day5_up: 次日高开高走中5日上涨数量
+        high_open_high_close_day10_up: 次日高开高走中10日上涨数量
+        low_open_close_up_count: 次日低开收盘上涨数量
+        low_open_close_up_day3_up: 次日低开收盘上涨中3日上涨数量
+        low_open_close_up_day5_up: 次日低开收盘上涨中5日上涨数量
+        low_open_close_up_day10_up: 次日低开收盘上涨中10日上涨数量
+        result_df: 结果DataFrame
+    """
+    try:
+        # 获取当前时间戳
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # 定义策略条件
+        strategy_conditions = """
+策略条件：
+1、股票价格必须大于1（最低价和收盘价都必须大于1）
+2、且当日开盘价高于20、30日均线，收盘价高于5、10均线至少1%，开盘价高于过去四天每天的开盘价
+3、前面两个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%
+4、当日成交量小于之前一个交易日10日成交量均值的10倍"""
+        
+        # 计算百分比，避免除零错误
+        next_open_up_pct = (next_open_up_count/total_count*100) if total_count > 0 else 0.00
+        next_close_up_pct = (next_close_up_count/total_count*100) if total_count > 0 else 0.00
+        high_open_high_close_pct = (high_open_high_close_count/total_count*100) if total_count > 0 else 0.00
+        low_open_close_up_pct = (low_open_close_up_count/total_count*100) if total_count > 0 else 0.00
+        day3_up_count = len(result_df[result_df['day3_change_pct'] > 0]) if len(result_df) > 0 else 0
+        day3_up_pct = (day3_up_count/total_count*100) if total_count > 0 else 0.00
+        day5_up_pct = (day5_up_count/total_count*100) if total_count > 0 else 0.00
+        day10_up_pct = (day10_up_count/total_count*100) if total_count > 0 else 0.00
+        
+        high_open_high_close_day3_up_count = len(result_df[(result_df['next_open_change_pct'] > 0) & (result_df['next_close_change_pct'] > 0) & (result_df['day3_change_pct'] > 0)]) if len(result_df) > 0 else 0
+        high_open_high_close_day3_up_pct = (high_open_high_close_day3_up_count/high_open_high_close_count*100) if high_open_high_close_count > 0 else 0.00
+        high_open_high_close_day5_up_pct = (high_open_high_close_day5_up/high_open_high_close_count*100) if high_open_high_close_count > 0 else 0.00
+        high_open_high_close_day10_up_pct = (high_open_high_close_day10_up/high_open_high_close_count*100) if high_open_high_close_count > 0 else 0.00
+        
+        # 计算次日低开收盘上涨的百分比
+        low_open_close_up_day3_up_pct = (low_open_close_up_day3_up/low_open_close_up_count*100) if low_open_close_up_count > 0 else 0.00
+        low_open_close_up_day5_up_pct = (low_open_close_up_day5_up/low_open_close_up_count*100) if low_open_close_up_count > 0 else 0.00
+        low_open_close_up_day10_up_pct = (low_open_close_up_day10_up/low_open_close_up_count*100) if low_open_close_up_count > 0 else 0.00
+        
+        # 构建统计信息
+        statistics_info = f"""
+统计信息:
+总共符合条件的交易日数: {total_count}
+涉及股票数: {result_df['stock_code'].nunique() if len(result_df) > 0 else 0}
+关键比例统计:
+次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_pct:.2f}%)
+次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_pct:.2f}%)
+次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_pct:.2f}%)
+次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_pct:.2f}%)
+3日收盘上涨比例: {day3_up_count}/{total_count} ({day3_up_pct:.2f}%)
+5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_pct:.2f}%)
+10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_pct:.2f}%)
+
+次日高开高走股票中的后续表现:
+3日收盘上涨比例: {high_open_high_close_day3_up_count}/{high_open_high_close_count} ({high_open_high_close_day3_up_pct:.2f}%)
+5日收盘上涨比例: {high_open_high_close_day5_up}/{high_open_high_close_count} ({high_open_high_close_day5_up_pct:.2f}%)
+10日收盘上涨比例: {high_open_high_close_day10_up}/{high_open_high_close_count} ({high_open_high_close_day10_up_pct:.2f}%)
+
+次日低开收盘上涨股票中的后续表现:
+3日收盘上涨比例: {low_open_close_up_day3_up}/{low_open_close_up_count} ({low_open_close_up_day3_up_pct:.2f}%)
+5日收盘上涨比例: {low_open_close_up_day5_up}/{low_open_close_up_count} ({low_open_close_up_day5_up_pct:.2f}%)
+10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up_pct:.2f}%)"""
+        
+        # 构建完整的回测记录
+        backtest_record = f"""
+{'='*80}
+回测时间: {current_time}
+{strategy_conditions}
+{statistics_info}
+{'='*80}
+
+"""
+        
+        # 确定final_result文件路径
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        final_result_path = os.path.join(os.path.dirname(script_dir), "final_result")
+        
+        # 以追加模式写入文件，确保使用UTF-8编码（不使用BOM）
+        with open(final_result_path, 'a', encoding='utf-8') as f:
+            f.write(backtest_record)
+        
+        logging.info(f"回测结果已追加写入: {final_result_path}")
+        
+    except Exception as e:
+        logging.error(f"写入final_result文件失败: {e}")
 
 def test_single_stock(stock_code, data_folder_path, verbose=True):
     """
@@ -1113,6 +1325,31 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
         else:
             logging.info(f"  无次日高开高走的股票")
         
+        # 筛选次日低开收盘上涨的股票
+        low_open_close_up_results = [r for r in results if r['next_open_change_pct'] < 0 and r['next_close_change_pct'] > 0]
+        low_open_close_up_count = len(low_open_close_up_results)
+        
+        # 在次日低开收盘上涨的股票中，计算3日、5日、10日收盘上涨的比例
+        if low_open_close_up_count > 0:
+            low_open_close_up_day3_up = len([r for r in low_open_close_up_results if r['day3_change_pct'] is not None and r['day3_change_pct'] > 0])
+            low_open_close_up_day5_up = len([r for r in low_open_close_up_results if r['day5_change_pct'] is not None and r['day5_change_pct'] > 0])
+            low_open_close_up_day10_up = len([r for r in low_open_close_up_results if r['day10_change_pct'] is not None and r['day10_change_pct'] > 0])
+        else:
+            low_open_close_up_day3_up = 0
+            low_open_close_up_day5_up = 0
+            low_open_close_up_day10_up = 0
+        
+        logging.info(f"  次日低开收盘上涨比例: {low_open_close_up_count}/{len(results)} ({low_open_close_up_count/len(results)*100:.2f}%)")
+        
+        # 在次日低开收盘上涨的股票中的统计
+        logging.info(f"\n次日低开收盘上涨股票中的后续表现:")
+        if low_open_close_up_count > 0:
+            logging.info(f"  3日收盘上涨比例: {low_open_close_up_day3_up}/{low_open_close_up_count} ({low_open_close_up_day3_up/low_open_close_up_count*100:.2f}%)")
+            logging.info(f"  5日收盘上涨比例: {low_open_close_up_day5_up}/{low_open_close_up_count} ({low_open_close_up_day5_up/low_open_close_up_count*100:.2f}%)")
+            logging.info(f"  10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up/low_open_close_up_count*100:.2f}%)")
+        else:
+            logging.info(f"  无次日低开收盘上涨的股票")
+        
         # 计算平均涨跌幅
         avg_next_open = sum(r['next_open_change_pct'] for r in results) / len(results)
         avg_next_close = sum(r['next_close_change_pct'] for r in results) / len(results)
@@ -1177,8 +1414,32 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
         else:
             logging.info(f"\n无5日下跌的记录")
         
+        # 将单股票测试结果写入final_result文件
+        result_df = pd.DataFrame(results)
+        total_count = len(results)
+        next_open_up_count = len([r for r in results if r['next_open_change_pct'] > 0])
+        next_close_up_count = len([r for r in results if r['next_close_change_pct'] > 0])
+        high_open_high_close_count = len([r for r in results if r['next_open_change_pct'] > 0 and r['next_close_change_pct'] > 0])
+        day5_up_count = len([r for r in results if r['day5_change_pct'] is not None and r['day5_change_pct'] > 0])
+        day10_up_count = len([r for r in results if r['day10_change_pct'] is not None and r['day10_change_pct'] > 0])
+        high_open_high_close_results = [r for r in results if r['next_open_change_pct'] > 0 and r['next_close_change_pct'] > 0]
+        high_open_high_close_day5_up = len([r for r in high_open_high_close_results if r['day5_change_pct'] is not None and r['day5_change_pct'] > 0])
+        high_open_high_close_day10_up = len([r for r in high_open_high_close_results if r['day10_change_pct'] is not None and r['day10_change_pct'] > 0])
+        
+        write_backtest_result_to_file(total_count, next_open_up_count, next_close_up_count, 
+                                     high_open_high_close_count, day5_up_count, day10_up_count,
+                                     high_open_high_close_day5_up, high_open_high_close_day10_up,
+                                     low_open_close_up_count, low_open_close_up_day3_up,
+                                     low_open_close_up_day5_up, low_open_close_up_day10_up,
+                                     result_df)
+        logging.info(f"单股票测试结果已写入final_result文件")
+        
     else:
         logging.info(f"股票 {stock_code} 没有找到符合条件的交易日")
+        # 即使没有结果也写入final_result文件记录
+        empty_df = pd.DataFrame()
+        write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
+        logging.info(f"单股票测试结果（无符合条件记录）已写入final_result文件")
 
 def main():
     """
@@ -1231,7 +1492,7 @@ def main():
             except Exception as e:
                 logging.error(f"清空进程日志目录失败: {e}")
         
-        output_file = os.path.join(script_dir, "demo.csv")
+        output_file = os.path.join(script_dir, "stock_backtest_data.csv")
         logging.info(f"输入文件夹: {args.data_folder}")
         logging.info(f"输出文件: {output_file}")
         logging.info(f"进程数量: {args.processes}")
