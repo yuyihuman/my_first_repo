@@ -819,6 +819,14 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
         next_low_open_close_up = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] > 0)]
         low_open_close_up_count = len(next_low_open_close_up)
         
+        # 筛选次日低开低走的股票（次日开盘下跌且收盘也下跌）
+        next_low_open_low_close = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] < 0)]
+        low_open_low_close_count = len(next_low_open_low_close)
+        
+        # 筛选次日低开低走的股票（次日开盘下跌且收盘也下跌）
+        next_low_open_low_close = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] < 0)]
+        low_open_low_close_count = len(next_low_open_low_close)
+        
         # 在次日高开高走的股票中，计算3日、5日、10日收盘上涨的比例
         if high_open_high_close_count > 0:
             high_open_high_close_day3_up = len(next_high_open_high_close[(next_high_open_high_close['day3_change_pct'] > 0) & pd.notna(next_high_open_high_close['day3_change_pct'])])
@@ -829,12 +837,23 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
             high_open_high_close_day5_up = 0
             high_open_high_close_day10_up = 0
         
+        # 在次日低开低走的股票中，计算3日、5日、10日收盘上涨的比例
+        if low_open_low_close_count > 0:
+            low_open_low_close_day3_up = len(next_low_open_low_close[(next_low_open_low_close['day3_change_pct'] > 0) & pd.notna(next_low_open_low_close['day3_change_pct'])])
+            low_open_low_close_day5_up = len(next_low_open_low_close[next_low_open_low_close['day5_change_pct'] > 0])
+            low_open_low_close_day10_up = len(next_low_open_low_close[next_low_open_low_close['day10_change_pct'] > 0])
+        else:
+            low_open_low_close_day3_up = 0
+            low_open_low_close_day5_up = 0
+            low_open_low_close_day10_up = 0
+        
         logging.info("关键比例统计:")
         logging.info("次日表现:")
         logging.info(f"  次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_count/total_count*100:.2f}%)")
         logging.info(f"  次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_count/total_count*100:.2f}%)")
         logging.info(f"  次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_count/total_count*100:.2f}%)")
         logging.info(f"  次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_count/total_count*100:.2f}%)")
+        logging.info(f"  次日低开低走比例: {low_open_low_close_count}/{total_count} ({low_open_low_close_count/total_count*100:.2f}%)")
         logging.info("中长期表现:")
         logging.info(f"  3日收盘上涨比例: {day3_up_count}/{total_count} ({day3_up_count/total_count*100:.2f}%)")
         logging.info(f"  5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_count/total_count*100:.2f}%)")
@@ -859,6 +878,26 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
             low_open_close_up_day5_up = 0
             low_open_close_up_day10_up = 0
         
+        # 在次日低开低走的股票中，计算3日、5日、10日收盘上涨的比例
+        if low_open_low_close_count > 0:
+            low_open_low_close_day3_up = len(next_low_open_low_close[(next_low_open_low_close['day3_change_pct'] > 0) & pd.notna(next_low_open_low_close['day3_change_pct'])])
+            low_open_low_close_day5_up = len(next_low_open_low_close[next_low_open_low_close['day5_change_pct'] > 0])
+            low_open_low_close_day10_up = len(next_low_open_low_close[next_low_open_low_close['day10_change_pct'] > 0])
+        else:
+            low_open_low_close_day3_up = 0
+            low_open_low_close_day5_up = 0
+            low_open_low_close_day10_up = 0
+        
+        # 在次日低开低走的股票中，计算3日、5日、10日收盘上涨的比例
+        if low_open_low_close_count > 0:
+            low_open_low_close_day3_up = len(next_low_open_low_close[(next_low_open_low_close['day3_change_pct'] > 0) & pd.notna(next_low_open_low_close['day3_change_pct'])])
+            low_open_low_close_day5_up = len(next_low_open_low_close[next_low_open_low_close['day5_change_pct'] > 0])
+            low_open_low_close_day10_up = len(next_low_open_low_close[next_low_open_low_close['day10_change_pct'] > 0])
+        else:
+            low_open_low_close_day3_up = 0
+            low_open_low_close_day5_up = 0
+            low_open_low_close_day10_up = 0
+        
         # 在次日低开收盘上涨的股票中的统计
         logging.info("\n次日低开收盘上涨股票中的后续表现:")
         if low_open_close_up_count > 0:
@@ -867,6 +906,15 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
             logging.info(f"10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up/low_open_close_up_count*100:.2f}%)")
         else:
             logging.info("无次日低开收盘上涨的股票")
+        
+        # 在次日低开低走的股票中的统计
+        logging.info("\n次日低开低走股票中的后续表现:")
+        if low_open_low_close_count > 0:
+            logging.info(f"3日收盘上涨比例: {low_open_low_close_day3_up}/{low_open_low_close_count} ({low_open_low_close_day3_up/low_open_low_close_count*100:.2f}%)")
+            logging.info(f"5日收盘上涨比例: {low_open_low_close_day5_up}/{low_open_low_close_count} ({low_open_low_close_day5_up/low_open_low_close_count*100:.2f}%)")
+            logging.info(f"10日收盘上涨比例: {low_open_low_close_day10_up}/{low_open_low_close_count} ({low_open_low_close_day10_up/low_open_low_close_count*100:.2f}%)")
+        else:
+            logging.info("无次日低开低走的股票")
         
         # 计算平均涨跌幅
         logging.info("平均涨跌幅统计:")
@@ -930,6 +978,8 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
                                     high_open_high_close_day5_up, high_open_high_close_day10_up,
                                     low_open_close_up_count, low_open_close_up_day3_up,
                                     low_open_close_up_day5_up, low_open_close_up_day10_up,
+                                    low_open_low_close_count, low_open_low_close_day3_up,
+                                    low_open_low_close_day5_up, low_open_low_close_day10_up,
                                     result_df)
     else:
         logging.warning("没有找到符合条件的交易日")
@@ -1041,6 +1091,14 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
         next_high_open_high_close = result_df[(result_df['next_open_change_pct'] > 0) & (result_df['next_close_change_pct'] > 0)]
         high_open_high_close_count = len(next_high_open_high_close)
         
+        # 筛选次日低开收盘上涨的股票（次日开盘下跌但收盘上涨）
+        next_low_open_close_up = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] > 0)]
+        low_open_close_up_count = len(next_low_open_close_up)
+        
+        # 筛选次日低开低走的股票（次日开盘下跌且收盘也下跌）
+        next_low_open_low_close = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] < 0)]
+        low_open_low_close_count = len(next_low_open_low_close)
+        
         # 在次日高开高走的股票中，计算5日、10日收盘上涨的比例
         if high_open_high_close_count > 0:
             high_open_high_close_day5_up = len(next_high_open_high_close[next_high_open_high_close['day5_change_pct'] > 0])
@@ -1055,6 +1113,7 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
         logging.info(f"  次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_count/total_count*100:.2f}%)")
         logging.info(f"  次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_count/total_count*100:.2f}%)")
         logging.info(f"  次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_count/total_count*100:.2f}%)")
+        logging.info(f"  次日低开低走比例: {low_open_low_close_count}/{total_count} ({low_open_low_close_count/total_count*100:.2f}%)")
         logging.info("中长期表现:")
         logging.info(f"  5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_count/total_count*100:.2f}%)")
         logging.info(f"  10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_count/total_count*100:.2f}%)")
@@ -1067,10 +1126,6 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
         else:
             logging.info("无次日高开高走的股票")
         
-        # 筛选次日低开收盘上涨的股票（次日开盘下跌但收盘上涨）
-        next_low_open_close_up = result_df[(result_df['next_open_change_pct'] < 0) & (result_df['next_close_change_pct'] > 0)]
-        low_open_close_up_count = len(next_low_open_close_up)
-        
         # 在次日低开收盘上涨的股票中，计算3日、5日、10日收盘上涨的比例
         if low_open_close_up_count > 0:
             low_open_close_up_day3_up = len(next_low_open_close_up[(next_low_open_close_up['day3_change_pct'] > 0) & pd.notna(next_low_open_close_up['day3_change_pct'])])
@@ -1081,6 +1136,16 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
             low_open_close_up_day5_up = 0
             low_open_close_up_day10_up = 0
         
+        # 在次日低开低走的股票中，计算3日、5日、10日收盘上涨的比例
+        if low_open_low_close_count > 0:
+            low_open_low_close_day3_up = len(next_low_open_low_close[(next_low_open_low_close['day3_change_pct'] > 0) & pd.notna(next_low_open_low_close['day3_change_pct'])])
+            low_open_low_close_day5_up = len(next_low_open_low_close[next_low_open_low_close['day5_change_pct'] > 0])
+            low_open_low_close_day10_up = len(next_low_open_low_close[next_low_open_low_close['day10_change_pct'] > 0])
+        else:
+            low_open_low_close_day3_up = 0
+            low_open_low_close_day5_up = 0
+            low_open_low_close_day10_up = 0
+        
         # 在次日低开收盘上涨的股票中的统计
         logging.info("\n次日低开收盘上涨股票中的后续表现:")
         if low_open_close_up_count > 0:
@@ -1089,6 +1154,15 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
             logging.info(f"10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up/low_open_close_up_count*100:.2f}%)")
         else:
             logging.info("无次日低开收盘上涨的股票")
+        
+        # 在次日低开低走的股票中的统计
+        logging.info("\n次日低开低走股票中的后续表现:")
+        if low_open_low_close_count > 0:
+            logging.info(f"3日收盘上涨比例: {low_open_low_close_day3_up}/{low_open_low_close_count} ({low_open_low_close_day3_up/low_open_low_close_count*100:.2f}%)")
+            logging.info(f"5日收盘上涨比例: {low_open_low_close_day5_up}/{low_open_low_close_count} ({low_open_low_close_day5_up/low_open_low_close_count*100:.2f}%)")
+            logging.info(f"10日收盘上涨比例: {low_open_low_close_day10_up}/{low_open_low_close_count} ({low_open_low_close_day10_up/low_open_low_close_count*100:.2f}%)")
+        else:
+            logging.info("无次日低开低走的股票")
         
         # 计算平均涨跌幅
         logging.info("平均涨跌幅统计:")
@@ -1125,6 +1199,8 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
                                     high_open_high_close_day5_up, high_open_high_close_day10_up,
                                     low_open_close_up_count, low_open_close_up_day3_up,
                                     low_open_close_up_day5_up, low_open_close_up_day10_up,
+                                    low_open_low_close_count, low_open_low_close_day3_up,
+                                    low_open_low_close_day5_up, low_open_low_close_day10_up,
                                     result_df)
     else:
         logging.warning("没有找到符合条件的交易日")
@@ -1141,6 +1217,8 @@ def write_backtest_result_to_file(total_count, next_open_up_count, next_close_up
                                  high_open_high_close_day5_up, high_open_high_close_day10_up,
                                  low_open_close_up_count, low_open_close_up_day3_up, 
                                  low_open_close_up_day5_up, low_open_close_up_day10_up,
+                                 low_open_low_close_count, low_open_low_close_day3_up,
+                                 low_open_low_close_day5_up, low_open_low_close_day10_up,
                                  result_df):
     """
     将回测结果以增量方式写入final_result文件
@@ -1158,6 +1236,10 @@ def write_backtest_result_to_file(total_count, next_open_up_count, next_close_up
         low_open_close_up_day3_up: 次日低开收盘上涨中3日上涨数量
         low_open_close_up_day5_up: 次日低开收盘上涨中5日上涨数量
         low_open_close_up_day10_up: 次日低开收盘上涨中10日上涨数量
+        low_open_low_close_count: 次日低开低走数量
+        low_open_low_close_day3_up: 次日低开低走中3日上涨数量
+        low_open_low_close_day5_up: 次日低开低走中5日上涨数量
+        low_open_low_close_day10_up: 次日低开低走中10日上涨数量
         result_df: 结果DataFrame
     """
     try:
@@ -1187,6 +1269,12 @@ def write_backtest_result_to_file(total_count, next_open_up_count, next_close_up
         low_open_close_up_day5_up_pct = (low_open_close_up_day5_up/low_open_close_up_count*100) if low_open_close_up_count > 0 else 0.00
         low_open_close_up_day10_up_pct = (low_open_close_up_day10_up/low_open_close_up_count*100) if low_open_close_up_count > 0 else 0.00
         
+        # 计算次日低开低走的百分比
+        low_open_low_close_pct = (low_open_low_close_count/total_count*100) if total_count > 0 else 0.00
+        low_open_low_close_day3_up_pct = (low_open_low_close_day3_up/low_open_low_close_count*100) if low_open_low_close_count > 0 else 0.00
+        low_open_low_close_day5_up_pct = (low_open_low_close_day5_up/low_open_low_close_count*100) if low_open_low_close_count > 0 else 0.00
+        low_open_low_close_day10_up_pct = (low_open_low_close_day10_up/low_open_low_close_count*100) if low_open_low_close_count > 0 else 0.00
+        
         # 构建统计信息
         statistics_info = f"""
 统计信息:
@@ -1198,6 +1286,7 @@ def write_backtest_result_to_file(total_count, next_open_up_count, next_close_up
   次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_pct:.2f}%)
   次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_pct:.2f}%)
   次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_pct:.2f}%)
+  次日低开低走比例: {low_open_low_close_count}/{total_count} ({low_open_low_close_pct:.2f}%)
 中长期表现:
   3日收盘上涨比例: {day3_up_count}/{total_count} ({day3_up_pct:.2f}%)
   5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_pct:.2f}%)
@@ -1211,7 +1300,12 @@ def write_backtest_result_to_file(total_count, next_open_up_count, next_close_up
 次日低开收盘上涨股票中的后续表现:
 3日收盘上涨比例: {low_open_close_up_day3_up}/{low_open_close_up_count} ({low_open_close_up_day3_up_pct:.2f}%)
 5日收盘上涨比例: {low_open_close_up_day5_up}/{low_open_close_up_count} ({low_open_close_up_day5_up_pct:.2f}%)
-10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up_pct:.2f}%)"""
+10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up_pct:.2f}%)
+
+次日低开低走股票中的后续表现:
+3日收盘上涨比例: {low_open_low_close_day3_up}/{low_open_low_close_count} ({low_open_low_close_day3_up_pct:.2f}%)
+5日收盘上涨比例: {low_open_low_close_day5_up}/{low_open_low_close_count} ({low_open_low_close_day5_up_pct:.2f}%)
+10日收盘上涨比例: {low_open_low_close_day10_up}/{low_open_low_close_count} ({low_open_low_close_day10_up_pct:.2f}%)"""
         
         # 构建完整的回测记录
         backtest_record = f"""
@@ -1299,12 +1393,17 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
         low_open_close_up_results = [r for r in results if r['next_open_change_pct'] < 0 and r['next_close_change_pct'] > 0]
         low_open_close_up_count = len(low_open_close_up_results)
         
+        # 筛选次日低开低走的股票
+        low_open_low_close_results = [r for r in results if r['next_open_change_pct'] < 0 and r['next_close_change_pct'] < 0]
+        low_open_low_close_count = len(low_open_low_close_results)
+        
         logging.info(f"统计信息:")
         logging.info("次日表现:")
         logging.info(f"  次日高开比例: {next_open_up}/{len(results)} ({next_open_up/len(results)*100:.2f}%)")
         logging.info(f"  次日收盘上涨比例: {next_close_up}/{len(results)} ({next_close_up/len(results)*100:.2f}%)")
         logging.info(f"  次日高开高走比例: {high_open_high_close_count}/{len(results)} ({high_open_high_close_count/len(results)*100:.2f}%)")
         logging.info(f"  次日低开收盘上涨比例: {low_open_close_up_count}/{len(results)} ({low_open_close_up_count/len(results)*100:.2f}%)")
+        logging.info(f"  次日低开低走比例: {low_open_low_close_count}/{len(results)} ({low_open_low_close_count/len(results)*100:.2f}%)")
         logging.info("中长期表现:")
         logging.info(f"  3日上涨比例: {day3_up}/{len(results)} ({day3_up/len(results)*100:.2f}%)")
         logging.info(f"  5日上涨比例: {day5_up}/{len(results)} ({day5_up/len(results)*100:.2f}%)")
@@ -1337,6 +1436,25 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
             logging.info(f"  10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up/low_open_close_up_count*100:.2f}%)")
         else:
             logging.info(f"  无次日低开收盘上涨的股票")
+        
+        # 在次日低开低走的股票中，计算3日、5日、10日收盘上涨的比例
+        if low_open_low_close_count > 0:
+            low_open_low_close_day3_up = len([r for r in low_open_low_close_results if r['day3_change_pct'] is not None and r['day3_change_pct'] > 0])
+            low_open_low_close_day5_up = len([r for r in low_open_low_close_results if r['day5_change_pct'] is not None and r['day5_change_pct'] > 0])
+            low_open_low_close_day10_up = len([r for r in low_open_low_close_results if r['day10_change_pct'] is not None and r['day10_change_pct'] > 0])
+        else:
+            low_open_low_close_day3_up = 0
+            low_open_low_close_day5_up = 0
+            low_open_low_close_day10_up = 0
+        
+        # 在次日低开低走的股票中的统计
+        logging.info(f"\n次日低开低走股票中的后续表现:")
+        if low_open_low_close_count > 0:
+            logging.info(f"  3日收盘上涨比例: {low_open_low_close_day3_up}/{low_open_low_close_count} ({low_open_low_close_day3_up/low_open_low_close_count*100:.2f}%)")
+            logging.info(f"  5日收盘上涨比例: {low_open_low_close_day5_up}/{low_open_low_close_count} ({low_open_low_close_day5_up/low_open_low_close_count*100:.2f}%)")
+            logging.info(f"  10日收盘上涨比例: {low_open_low_close_day10_up}/{low_open_low_close_count} ({low_open_low_close_day10_up/low_open_low_close_count*100:.2f}%)")
+        else:
+            logging.info(f"  无次日低开低走的股票")
         
         # 计算平均涨跌幅
         avg_next_open = sum(r['next_open_change_pct'] for r in results) / len(results)
