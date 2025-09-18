@@ -1547,6 +1547,224 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
         write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
         logging.info(f"单股票测试结果（无符合条件记录）已写入final_result文件")
 
+def simulate_investment_strategy(result_df, initial_capital=100000):
+    """
+    投资模拟功能：以2000年1月1日为基准，总计100000元
+    策略：选定日期以当日收盘价买入，次日低开直接卖出，次日高开则第三日收盘价卖出
+    
+    Args:
+        result_df: 包含股票回测结果的DataFrame
+        initial_capital: 初始资金，默认100000元
+    
+    Returns:
+        dict: 包含总收益率和各年收益率的统计结果
+    """
+    if result_df.empty:
+        logging.warning("没有回测数据，无法进行投资模拟")
+        return {}
+    
+    # 按日期排序
+    result_df = result_df.sort_values('date').reset_index(drop=True)
+    
+    # 过滤数据：从2000年1月1日开始
+    result_df['date'] = pd.to_datetime(result_df['date'])
+    start_date = pd.to_datetime('2000-01-01')
+    
+    logging.info(f"过滤前数据量: {len(result_df)} 条")
+    if not result_df.empty:
+        logging.info(f"过滤前日期范围: {result_df['date'].min()} 到 {result_df['date'].max()}")
+    
+    filtered_df = result_df[result_df['date'] >= start_date].copy()
+    
+    logging.info(f"过滤后数据量: {len(filtered_df)} 条")
+    if not filtered_df.empty:
+        logging.info(f"过滤后日期范围: {filtered_df['date'].min()} 到 {filtered_df['date'].max()}")
+    
+    if filtered_df.empty:
+        logging.warning("没有2000年1月1日及之后的数据，无法进行投资模拟")
+        return {}
+    
+    # 投资记录
+    investment_records = []
+    current_capital = initial_capital
+    yearly_returns = {}
+    
+    logging.info(f"=== 投资模拟开始 ===")
+    logging.info(f"初始资金: {initial_capital:,.2f}元")
+    logging.info(f"基准日期: 2000年1月1日")
+    
+    # 按日期分组处理，同一天的股票平均分配资金
+    grouped = filtered_df.groupby('date')
+    
+    for date_str, group in grouped:
+        try:
+            date = pd.to_datetime(date_str)
+            stocks_count = len(group)
+            
+            # 如果当天有多只股票，平均分配资金
+            capital_per_stock = current_capital / stocks_count
+            day_total_profit = 0
+            day_trades = 0
+            
+            for idx, row in group.iterrows():
+                # 获取股票数据
+                stock_code = row['stock_code']
+                close_price = row['close']
+                next_open_price = row['next_open']
+                next_close_price = row['next_close']
+                day3_close_price = row.get('day3_close', None)
+                
+                # 检查必要数据
+                if pd.isna(close_price) or pd.isna(next_open_price) or pd.isna(next_close_price):
+                    continue
+                
+                # 过滤异常数据：次日开盘价和收盘价相同且开盘涨幅大于4%
+                next_open_gain = ((next_open_price - close_price) / close_price) * 100
+                if next_open_price == next_close_price and next_open_gain > 4.0:
+                    logging.warning(f"剔除异常数据 - 股票: {stock_code}, 日期: {date.strftime('%Y-%m-%d')}, "
+                                  f"次日开盘价和收盘价相同且开盘涨幅{next_open_gain:.2f}%超过4%")
+                    continue
+                
+                # 计算买入股数（按分配的资金买入）
+                buy_price = close_price
+                shares = int(capital_per_stock / buy_price)
+                if shares <= 0:
+                    continue
+                
+                # 实际买入金额
+                buy_amount = shares * buy_price
+                
+                # 统一使用次日开盘价卖出
+                sell_price = next_open_price
+                sell_date = date + pd.Timedelta(days=1)
+                sell_reason = "次日开盘价卖出"
+                
+                # 计算收益
+                sell_amount = shares * sell_price
+                profit = sell_amount - buy_amount
+                profit_rate = (profit / buy_amount) * 100
+                
+                # 记录交易详情
+                investment_records.append({
+                    'date': date.strftime('%Y-%m-%d'),
+                    'stock_code': stock_code,
+                    'buy_price': buy_price,
+                    'sell_price': sell_price,
+                    'shares': shares,
+                    'buy_amount': buy_amount,
+                    'sell_amount': sell_amount,
+                    'profit': profit,
+                    'profit_rate': profit_rate,
+                    'sell_date': sell_date.strftime('%Y-%m-%d'),
+                    'sell_reason': sell_reason,
+                    'capital_before': current_capital,
+                    'capital_after': 0  # 稍后更新
+                })
+                
+                # 打印每笔交易的详细记录
+                logging.info(f"交易记录 - 日期: {date.strftime('%Y-%m-%d')}, "
+                           f"股票: {stock_code}, "
+                           f"买入价: {buy_price:.2f}, "
+                           f"卖出价: {sell_price:.2f}, "
+                           f"股数: {shares}, "
+                           f"买入金额: {buy_amount:.2f}, "
+                           f"卖出金额: {sell_amount:.2f}, "
+                           f"收益: {profit:.2f} ({profit_rate:.2f}%), "
+                           f"卖出日期: {sell_date.strftime('%Y-%m-%d')}, "
+                           f"原因: {sell_reason}")
+                
+                # 累计当天收益
+                day_total_profit += profit
+                day_trades += 1
+                
+
+            
+            # 更新总资金（当天所有交易完成后）
+            current_capital += day_total_profit
+            
+            # 更新当天所有交易记录的资金状态
+            for record in investment_records[-day_trades:]:
+                record['capital_after'] = current_capital
+            
+            # 统计年度收益
+            year = date.year
+            if year not in yearly_returns:
+                yearly_returns[year] = {'profit': 0, 'trades': 0}
+            yearly_returns[year]['profit'] += day_total_profit
+            yearly_returns[year]['trades'] += day_trades
+            
+        except Exception as e:
+            logging.warning(f"处理日期 {date_str} 时出错: {e}")
+            continue
+    
+    # 计算总收益率
+    total_return = ((current_capital - initial_capital) / initial_capital) * 100
+    
+    # 计算各年收益率
+    yearly_return_rates = {}
+    running_capital = initial_capital
+    
+    for year in sorted(yearly_returns.keys()):
+        year_profit = yearly_returns[year]['profit']
+        year_return_rate = (year_profit / running_capital) * 100
+        running_capital += year_profit
+        yearly_return_rates[year] = {
+            'profit': year_profit,
+            'return_rate': year_return_rate,
+            'trades': yearly_returns[year]['trades'],
+            'capital_end': running_capital
+        }
+    
+    # 输出统计结果
+    logging.info(f"=== 投资模拟结果 ===")
+    logging.info(f"总交易次数: {len(investment_records)}")
+    logging.info(f"初始资金: {initial_capital:,.2f}元")
+    logging.info(f"最终资金: {current_capital:,.2f}元")
+    logging.info(f"总收益: {current_capital - initial_capital:,.2f}元")
+    logging.info(f"总收益率: {total_return:.2f}%")
+    
+    logging.info(f"=== 各年收益统计 ===")
+    for year in sorted(yearly_return_rates.keys()):
+        year_data = yearly_return_rates[year]
+        logging.info(f"{year}年: 收益 {year_data['profit']:,.2f}元, "
+                    f"收益率 {year_data['return_rate']:.2f}%, "
+                    f"交易次数 {year_data['trades']}, "
+                    f"年末资金 {year_data['capital_end']:,.2f}元")
+    
+    # 计算一些额外统计指标
+    if investment_records:
+        profits = [r['profit'] for r in investment_records]
+        profit_rates = [r['profit_rate'] for r in investment_records]
+        
+        win_trades = [p for p in profits if p > 0]
+        lose_trades = [p for p in profits if p <= 0]
+        
+        win_rate = len(win_trades) / len(profits) * 100 if profits else 0
+        avg_profit = sum(profits) / len(profits) if profits else 0
+        avg_profit_rate = sum(profit_rates) / len(profit_rates) if profit_rates else 0
+        
+        logging.info(f"=== 交易统计 ===")
+        logging.info(f"胜率: {win_rate:.2f}% ({len(win_trades)}/{len(profits)})")
+        logging.info(f"平均每笔收益: {avg_profit:.2f}元")
+        logging.info(f"平均每笔收益率: {avg_profit_rate:.2f}%")
+        
+        if win_trades:
+            avg_win = sum(win_trades) / len(win_trades)
+            logging.info(f"平均盈利: {avg_win:.2f}元")
+        
+        if lose_trades:
+            avg_lose = sum(lose_trades) / len(lose_trades)
+            logging.info(f"平均亏损: {avg_lose:.2f}元")
+    
+    return {
+        'total_return': total_return,
+        'yearly_returns': yearly_return_rates,
+        'investment_records': investment_records,
+        'final_capital': current_capital,
+        'total_trades': len(investment_records)
+    }
+
+
 def main():
     """
     主函数
@@ -1559,6 +1777,7 @@ def main():
                        help='股票数据文件夹路径')
     parser.add_argument('--processes', type=int, default=20, help='多进程数量（仅全量测试模式）')
     parser.add_argument('--limit', type=int, help='限制批量测试的股票数量，如: 100（仅全量测试模式）')
+    parser.add_argument('--investment-simulation', action='store_true', help='启用投资模拟功能')
     args = parser.parse_args()
     
     # 配置日志
@@ -1606,6 +1825,18 @@ def main():
         if args.limit:
             logging.info(f"限制测试数量: {args.limit}")
         run_stock_selection_strategy_dynamic(args.data_folder, output_file, num_processes=args.processes, limit=args.limit)
+        
+        # 如果启用投资模拟功能
+        if args.investment_simulation:
+            try:
+                # 读取回测结果
+                if os.path.exists(output_file):
+                    result_df = pd.read_csv(output_file)
+                    simulate_investment_strategy(result_df)
+                else:
+                    logging.error("回测结果文件不存在，无法进行投资模拟")
+            except Exception as e:
+                logging.error(f"投资模拟过程中出错: {e}")
 
 
 if __name__ == "__main__":
