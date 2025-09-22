@@ -38,6 +38,17 @@ def load_stock_data(csv_file_path):
         DataFrame: 股票数据
     """
     try:
+        # 检查文件是否存在
+        if not os.path.exists(csv_file_path):
+            logging.warning(f"数据文件不存在: {csv_file_path}")
+            return None
+        
+        # 检查文件大小
+        file_size = os.path.getsize(csv_file_path)
+        if file_size == 0:
+            logging.warning(f"数据文件为空: {csv_file_path}")
+            return None
+        
         # 首先读取基本列
         basic_cols = ['datetime', 'open', 'close', 'high', 'low', 'volume']
         ma_cols = ['close_5d_avg', 'close_10d_avg', 'close_20d_avg', 'close_30d_avg', 'close_60d_avg']
@@ -48,6 +59,13 @@ def load_stock_data(csv_file_path):
             # 读取第一行来检查列名
             sample_df = pd.read_csv(csv_file_path, nrows=1)
             available_cols = sample_df.columns.tolist()
+            logging.debug(f"文件 {csv_file_path} 可用列: {available_cols}")
+            
+            # 检查基本列是否存在
+            missing_basic_cols = [col for col in basic_cols if col not in available_cols]
+            if missing_basic_cols:
+                logging.warning(f"文件 {csv_file_path} 缺失基本列: {missing_basic_cols}")
+                return None
             
             # 确定要读取的列
             cols_to_read = basic_cols.copy()
@@ -58,14 +76,31 @@ def load_stock_data(csv_file_path):
             
             # 读取CSV文件
             df = pd.read_csv(csv_file_path, usecols=cols_to_read)
+            logging.debug(f"成功读取文件 {csv_file_path}，数据行数: {len(df)}")
             
-        except Exception:
-            # 如果列检查失败，回退到只读取基本列
-            df = pd.read_csv(csv_file_path, usecols=basic_cols)
-            available_ma_cols = []
+        except Exception as e:
+            logging.warning(f"列检查失败，回退到基本列读取: {e}")
+            try:
+                # 如果列检查失败，回退到只读取基本列
+                df = pd.read_csv(csv_file_path, usecols=basic_cols)
+                available_ma_cols = []
+                available_volume_cols = []
+                logging.debug(f"回退读取成功，数据行数: {len(df)}")
+            except Exception as e2:
+                logging.error(f"回退读取也失败: {e2}")
+                return None
+        
+        # 检查数据是否为空
+        if df.empty:
+            logging.warning(f"数据文件内容为空: {csv_file_path}")
+            return None
         
         # 转换日期列
-        df['datetime'] = pd.to_datetime(df['datetime'])
+        try:
+            df['datetime'] = pd.to_datetime(df['datetime'])
+        except Exception as e:
+            logging.error(f"日期列转换失败: {e}")
+            return None
         
         # 按日期排序
         df = df.sort_values('datetime').reset_index(drop=True)
@@ -75,7 +110,7 @@ def load_stock_data(csv_file_path):
         missing_ma_cols = [col for col in required_ma_cols if col not in available_ma_cols]
         
         if missing_ma_cols:
-            logging.warning(f"缺失预计算均线数据: {missing_ma_cols}，跳过该股票")
+            logging.warning(f"文件 {csv_file_path} 缺失预计算均线数据: {missing_ma_cols}，跳过该股票")
             return None
         
         # 处理收盘价均线数据：只使用预计算的数据
@@ -95,7 +130,7 @@ def load_stock_data(csv_file_path):
         missing_volume_cols = [col for col in required_volume_cols if col not in available_volume_cols]
         
         if missing_volume_cols:
-            logging.warning(f"缺失预计算成交量数据: {missing_volume_cols}，跳过该股票")
+            logging.warning(f"文件 {csv_file_path} 缺失预计算成交量数据: {missing_volume_cols}，跳过该股票")
             return None
         
         # 处理成交量数据：只使用预计算的数据
@@ -107,9 +142,16 @@ def load_stock_data(csv_file_path):
             if col in df.columns:
                 df.drop(col, axis=1, inplace=True)
         
+        # 最终数据验证
+        if len(df) < 41:  # 至少需要41天数据
+            logging.warning(f"文件 {csv_file_path} 数据量不足（{len(df)}条），需要至少41条数据")
+            return None
+        
+        logging.debug(f"成功加载数据文件 {csv_file_path}，最终数据行数: {len(df)}")
         return df
+        
     except Exception as e:
-        logging.error(f"加载数据失败: {e}")
+        logging.error(f"加载数据失败 {csv_file_path}: {e}")
         return None
 
 def check_strategy_conditions(df, current_idx):
@@ -580,10 +622,14 @@ def process_stock_dynamic(task_queue, result_queue, data_folder_path, process_in
     process_log_file = os.path.join(logs_dir, f"process_{process_index}.log")
     
     def log_to_file(message, level="info"):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_message = f"[{timestamp}] {message}\n"
-        with open(process_log_file, "a", encoding="utf-8") as f:
-            f.write(log_message)
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_message = f"[{timestamp}] {message}\n"
+            with open(process_log_file, "a", encoding="utf-8") as f:
+                f.write(log_message)
+                f.flush()
+        except Exception as e:
+            logging.error(f"进程 {process_index} 日志写入失败: {e}")
     
     start_time = datetime.now()
     log_to_file(f"进程 {process_index} 启动，开始动态处理任务，启动时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -593,25 +639,30 @@ def process_stock_dynamic(task_queue, result_queue, data_folder_path, process_in
     total_results = []
     
     while True:
+        stock_folder = None
         try:
             # 从队列中获取任务，设置超时避免无限等待
-            get_task_msg = f"进程 {process_index} 尝试获取任务..."
-            log_to_file(get_task_msg)
+            log_to_file(f"进程 {process_index} 尝试获取任务...")
             
-            stock_folder = task_queue.get(timeout=2)
+            stock_folder = task_queue.get(timeout=3)
             
-            task_received_msg = f"进程 {process_index} 获取到任务: {stock_folder}"
-            log_to_file(task_received_msg)
+            log_to_file(f"进程 {process_index} 获取到任务: {stock_folder}")
             
             try:
                 # 处理单个股票
+                log_to_file(f"进程 {process_index} 开始处理股票: {stock_folder}")
                 stock_results = process_single_stock(stock_folder, data_folder_path, process_index, log_to_file)
-                total_results.extend(stock_results)
+                
+                if stock_results:
+                    total_results.extend(stock_results)
+                    log_to_file(f"进程 {process_index} 股票 {stock_folder} 处理完成，找到 {len(stock_results)} 个符合条件的日期")
+                else:
+                    log_to_file(f"进程 {process_index} 股票 {stock_folder} 处理完成，未找到符合条件的日期")
                 
                 processed_count += 1
                 
-                # 每处理10个股票就进行一次垃圾回收和进度报告
-                if processed_count % 10 == 0:
+                # 每处理5个股票就进行一次垃圾回收和进度报告
+                if processed_count % 5 == 0:
                     gc.collect()
                     progress_msg = f"进程 {process_index} 已处理 {processed_count} 个股票，当前结果数: {len(total_results)}"
                     log_to_file(progress_msg)
@@ -621,23 +672,28 @@ def process_stock_dynamic(task_queue, result_queue, data_folder_path, process_in
                 error_msg = f"进程 {process_index} 处理股票 {stock_folder} 时发生错误: {process_error}"
                 log_to_file(error_msg)
                 logging.warning(error_msg)
-            
-            # 无论处理成功还是失败，都要标记任务完成
-            task_done_msg = f"进程 {process_index} 标记任务 {stock_folder} 完成"
-            log_to_file(task_done_msg)
-            task_queue.task_done()
+            finally:
+                # 无论处理成功还是失败，都要标记任务完成
+                try:
+                    task_queue.task_done()
+                    log_to_file(f"进程 {process_index} 标记任务 {stock_folder} 完成")
+                except Exception as task_done_error:
+                    log_to_file(f"进程 {process_index} 标记任务完成时出错: {task_done_error}")
             
         except Exception as e:
-            error_msg = f"进程 {process_index} 获取任务时发生错误: {e}"
+            error_type = type(e).__name__
+            error_msg = f"进程 {process_index} 获取任务时发生错误: {error_type}: {e}"
             log_to_file(error_msg)
             
-            if "timeout" in str(e).lower() or "Empty" in str(e) or "queue.Empty" in str(type(e)):
+            # 检查是否是队列为空的异常
+            if "timeout" in str(e).lower() or "Empty" in error_type or "queue.Empty" in str(type(e)):
                 # 队列为空或超时，准备退出并提交结果
                 timeout_msg = f"进程 {process_index} 获取任务超时，可能所有任务已完成，准备退出"
                 log_to_file(timeout_msg)
                 logging.info(timeout_msg)
                 break
             else:
+                # 其他错误，记录但继续尝试
                 logging.error(error_msg)
                 continue
     
@@ -647,13 +703,14 @@ def process_stock_dynamic(task_queue, result_queue, data_folder_path, process_in
     log_to_file(completion_msg)
     logging.info(completion_msg)
     
-    # 将结果放入结果队列（使用非阻塞方式避免卡住）
+    # 将结果放入结果队列
     put_start_msg = f"进程 {process_index} 开始将结果放入队列，结果数量: {len(total_results)}"
     log_to_file(put_start_msg)
     logging.info(put_start_msg)
     
     try:
-        result_queue.put(total_results, timeout=5)
+        # 使用较长的超时时间，确保结果能够成功提交
+        result_queue.put(total_results, timeout=10)
         exit_msg = f"进程 {process_index} 已将结果放入队列，准备退出"
         log_to_file(exit_msg)
         logging.info(exit_msg)
@@ -995,7 +1052,7 @@ def run_stock_selection_strategy_dynamic(data_folder_path, output_file_path, num
         logging.info(f"空结果文件已保存到: {output_file_path}")
         
         # 即使没有符合条件的数据，也要写入回测结果
-        write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
+        write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
 
 def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_processes=20):
     """
@@ -1210,7 +1267,7 @@ def run_stock_selection_strategy_batch(data_folder_path, output_file_path, num_p
         logging.info(f"空结果文件已保存到: {output_file_path}")
         
         # 即使没有符合条件的数据，也要写入回测结果
-        write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
+        write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
 
 def write_backtest_result_to_file(total_count, next_open_up_count, next_close_up_count, 
                                  high_open_high_close_count, day5_up_count, day10_up_count,
@@ -1537,6 +1594,8 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
                                      high_open_high_close_day5_up, high_open_high_close_day10_up,
                                      low_open_close_up_count, low_open_close_up_day3_up,
                                      low_open_close_up_day5_up, low_open_close_up_day10_up,
+                                     low_open_low_close_count, low_open_low_close_day3_up,
+                                     low_open_low_close_day5_up, low_open_low_close_day10_up,
                                      result_df)
         logging.info(f"单股票测试结果已写入final_result文件")
         
@@ -1544,8 +1603,263 @@ def test_single_stock(stock_code, data_folder_path, verbose=True):
         logging.info(f"股票 {stock_code} 没有找到符合条件的交易日")
         # 即使没有结果也写入final_result文件记录
         empty_df = pd.DataFrame()
-        write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
+        write_backtest_result_to_file(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, empty_df)
         logging.info(f"单股票测试结果（无符合条件记录）已写入final_result文件")
+
+def test_batch_stocks(stock_codes_str, data_folder_path, num_processes=20):
+    """
+    批量测试指定的股票代码列表，使用多线程处理
+    
+    Args:
+        stock_codes_str: 股票代码字符串，用逗号分隔，如 "000001,000002,000003"
+        data_folder_path: 股票数据文件夹路径
+        num_processes: 进程数量，默认20
+    
+    Returns:
+        list: 所有符合条件的日期列表
+    """
+    # 输入验证
+    if not stock_codes_str or not stock_codes_str.strip():
+        logging.error("股票代码列表不能为空")
+        return []
+    
+    # 解析股票代码
+    stock_codes = []
+    for code in stock_codes_str.split(','):
+        code = code.strip()
+        if not code:
+            continue
+        
+        # 检查是否为纯数字（可能缺少前导零）
+        if code.isdigit():
+            # 如果是纯数字且长度小于等于6位，自动补齐前导零
+            if len(code) <= 6:
+                code = code.zfill(6)
+                logging.info(f"股票代码自动补齐前导零: {stock_codes_str.split(',')[stock_codes.count(code)].strip()} -> {code}")
+            elif len(code) > 6:
+                logging.warning(f"股票代码长度超过6位，视为无效: {code}")
+                continue
+        
+        # 验证股票代码格式（6位数字）
+        if not (len(code) == 6 and code.isdigit()):
+            logging.warning(f"股票代码格式无效，跳过: {code}")
+            continue
+        
+        stock_codes.append(code)
+    
+    if not stock_codes:
+        logging.error("没有有效的股票代码")
+        return []
+    
+    logging.info(f"批量股票测试模式: {stock_codes}")
+    logging.info(f"数据文件夹: {data_folder_path}")
+    logging.info(f"进程数量: {num_processes}")
+    
+    # 初始化结果存储
+    all_results = []
+    successful_stocks = []
+    failed_stocks = []
+    
+    # 创建任务队列和结果队列
+    task_queue = mp.JoinableQueue()
+    result_queue = mp.Queue()
+    
+    # 将股票代码转换为股票文件夹名称并放入任务队列
+    for stock_code in stock_codes:
+        stock_folder_name = f"stock_{stock_code}_data"
+        task_queue.put(stock_folder_name)
+    
+    # 启动多个进程
+    processes = []
+    for i in range(num_processes):
+        p = mp.Process(target=process_stock_dynamic, args=(task_queue, result_queue, data_folder_path, i+1))
+        p.start()
+        processes.append(p)
+        logging.info(f"启动处理进程 {i+1}")
+    
+    # 等待所有任务完成
+    task_queue.join()
+    logging.info("所有任务已完成，开始收集结果")
+    
+    # 等待进程完成结果提交
+    logging.info("等待进程完成结果提交...")
+    result_count = 0
+    
+    # 给进程更多时间完成最后的结果提交
+    import time
+    time.sleep(5)
+    
+    # 使用更健壮的结果收集机制
+    logging.info("开始收集进程结果...")
+    max_wait_time = 30  # 最大等待30秒
+    start_collect_time = time.time()
+    
+    while result_count < num_processes and (time.time() - start_collect_time) < max_wait_time:
+        try:
+            # 使用带超时的get方法，避免无限等待
+            batch_results = result_queue.get(timeout=2)
+            if batch_results:
+                all_results.extend(batch_results)
+                result_count += 1
+                logging.info(f"收集到结果批次 {result_count}，包含 {len(batch_results)} 个符合条件的日期，当前总结果数: {len(all_results)}")
+            else:
+                result_count += 1
+                logging.info(f"收集到空结果批次 {result_count}")
+        except Exception as e:
+            if "timeout" in str(e).lower() or "Empty" in str(type(e)):
+                # 队列为空，检查是否还有活跃进程
+                active_processes = sum(1 for p in processes if p.is_alive())
+                if active_processes == 0:
+                    logging.info("所有进程已结束，停止等待结果")
+                    break
+                else:
+                    logging.info(f"队列暂时为空，还有 {active_processes} 个进程活跃，继续等待...")
+                    time.sleep(1)
+            else:
+                logging.warning(f"收集结果时出错: {e}")
+                break
+    
+    # 最后尝试收集剩余结果
+    final_collect_attempts = 0
+    while not result_queue.empty() and final_collect_attempts < 5:
+        try:
+            batch_results = result_queue.get_nowait()
+            if batch_results:
+                all_results.extend(batch_results)
+                result_count += 1
+                logging.info(f"最终收集到结果批次 {result_count}，包含 {len(batch_results)} 个符合条件的日期")
+        except Exception as e:
+            logging.warning(f"最终收集结果时出错: {e}")
+            break
+        final_collect_attempts += 1
+    
+    # 检查进程状态并终止
+    logging.info("检查并终止进程...")
+    for i, p in enumerate(processes):
+        if p.is_alive():
+            logging.info(f"进程 {i+1} (PID: {p.pid}) 仍在运行，准备终止")
+            p.terminate()
+            p.join(timeout=3)
+            if p.is_alive():
+                logging.warning(f"进程 {i+1} (PID: {p.pid}) 未能正常终止，强制杀死")
+                p.kill()
+                p.join(timeout=2)
+        else:
+            logging.info(f"进程 {i+1} (PID: {p.pid}) 已正常结束")
+    
+    logging.info(f"结果收集完成！共收集了 {result_count}/{num_processes} 个进程的结果，总计 {len(all_results)} 个符合条件的日期")
+    
+    # 如果没有收集到任何结果，记录详细信息
+    if len(all_results) == 0:
+        logging.warning("警告：批量处理未收集到任何结果！")
+        logging.info("可能的原因：")
+        logging.info("1. 股票数据文件不存在或格式错误")
+        logging.info("2. 选股策略条件过于严格")
+        logging.info("3. 进程处理过程中发生错误")
+        logging.info("请检查process_logs文件夹中的详细日志")
+    
+    # 统计结果
+    stock_result_count = {}
+    processed_stocks = set()  # 记录所有被处理过的股票（包括无结果的）
+    
+    for result in all_results:
+        stock_code = result.get('stock_code', 'unknown')
+        processed_stocks.add(stock_code)
+        if stock_code not in stock_result_count:
+            stock_result_count[stock_code] = 0
+        stock_result_count[stock_code] += 1
+    
+    # 从日志文件中获取实际处理过的股票列表
+    # 这样可以区分"处理成功但无结果"和"处理失败"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    process_logs_dir = os.path.join(script_dir, "process_logs")
+    
+    if os.path.exists(process_logs_dir):
+        for log_file in os.listdir(process_logs_dir):
+            if log_file.startswith("process_") and log_file.endswith(".log"):
+                log_path = os.path.join(process_logs_dir, log_file)
+                try:
+                    with open(log_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        # 查找"处理完成"的记录
+                        for line in content.split('\n'):
+                            if "处理完成" in line and "stock_" in line:
+                                # 提取股票代码
+                                import re
+                                match = re.search(r'stock_(\d+)_data', line)
+                                if match:
+                                    stock_code = match.group(1)
+                                    processed_stocks.add(stock_code)
+                except Exception as e:
+                    logging.debug(f"读取日志文件 {log_file} 时出错: {e}")
+    
+    # 分类股票状态
+    successful_stocks = []      # 有符合条件日期的股票
+    processed_no_results = []   # 处理成功但无符合条件日期的股票
+    failed_stocks = []          # 真正处理失败的股票
+    
+    for stock_code in stock_codes:
+        if stock_code in stock_result_count and stock_result_count[stock_code] > 0:
+            successful_stocks.append(stock_code)
+        elif stock_code in processed_stocks:
+            processed_no_results.append(stock_code)
+        else:
+            failed_stocks.append(stock_code)
+    
+    # 输出统计信息
+    logging.info(f"=== 批量测试结果统计 ===")
+    logging.info(f"总股票数: {len(stock_codes)}")
+    logging.info(f"找到符合条件日期: {len(successful_stocks)} 个股票")
+    logging.info(f"处理成功但无符合条件日期: {len(processed_no_results)} 个股票")
+    logging.info(f"处理失败: {len(failed_stocks)} 个股票")
+    logging.info(f"总符合条件日期数: {len(all_results)}")
+    
+    if successful_stocks:
+        logging.info(f"有符合条件日期的股票: {', '.join(successful_stocks)}")
+    
+    if processed_no_results:
+        logging.info(f"处理成功但无符合条件日期的股票: {', '.join(processed_no_results)}")
+    
+    if failed_stocks:
+        logging.info(f"处理失败的股票: {', '.join(failed_stocks)}")
+    
+    # 保存结果到CSV文件
+    if all_results:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_file = os.path.join(script_dir, "batch_stocks_backtest_data.csv")
+        
+        df = pd.DataFrame(all_results)
+        df.to_csv(output_file, index=False, encoding='utf-8-sig')
+        logging.info(f"批量测试结果已保存到: {output_file}")
+        
+        # 显示前10个结果作为示例
+        logging.info("=== 前10个符合条件的日期示例 ===")
+        for i, result in enumerate(all_results[:10]):
+            next_close_change = result.get('next_close_change_pct', 'N/A')
+            next_close_str = f"{next_close_change}%" if next_close_change != 'N/A' else 'N/A'
+            logging.info(f"{i+1}. 股票: {result.get('stock_code', 'N/A')}, "
+                        f"日期: {result.get('date', 'N/A')}, "
+                        f"收盘价: {result.get('close', 'N/A')}, "
+                        f"次日收盘涨跌幅: {next_close_str}")
+    
+    # 计算各股票的次日收盘涨跌幅分布
+    if all_results:
+        positive_count = len([r for r in all_results if r.get('next_close_change_pct', 0) > 0])
+        negative_count = len([r for r in all_results if r.get('next_close_change_pct', 0) <= 0])
+        
+        positive_ratio = (positive_count / len(all_results)) * 100
+        negative_ratio = (negative_count / len(all_results)) * 100
+        
+        # 计算平均次日收盘涨跌幅
+        avg_next_close_change = sum([r.get('next_close_change_pct', 0) for r in all_results]) / len(all_results)
+        
+        logging.info(f"=== 次日收盘涨跌幅分布 ===")
+        logging.info(f"次日上涨日期: {positive_count} 个 ({positive_ratio:.1f}%)")
+        logging.info(f"次日下跌日期: {negative_count} 个 ({negative_ratio:.1f}%)")
+        logging.info(f"平均次日收盘涨跌幅: {avg_next_close_change:.2f}%")
+    
+    return all_results
+
 
 def simulate_investment_strategy(result_df, initial_capital=100000):
     """
@@ -1772,6 +2086,7 @@ def main():
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='股票选股策略回测工具')
     parser.add_argument('--single-stock', type=str, help='指定单个股票代码进行测试，如: 301379')
+    parser.add_argument('--batch-stocks', type=str, help='指定多个股票代码进行批量测试，用逗号分隔，如: 000001,000002,000003')
     parser.add_argument('--data-folder', type=str, 
                        default=r"c:\Users\17701\github\my_first_repo\stockapi\stock_base_info\all_stocks_data",
                        help='股票数据文件夹路径')
@@ -1805,6 +2120,22 @@ def main():
         logging.info(f"=== 单股票测试模式: {args.single_stock} ===")
         logging.info(f"数据文件夹: {args.data_folder}")
         test_single_stock(args.single_stock, args.data_folder, verbose=True)
+    elif args.batch_stocks:
+        # 批量股票测试模式
+        logging.info(f"=== 批量股票测试模式: {args.batch_stocks} ===")
+        logging.info(f"数据文件夹: {args.data_folder}")
+        logging.info(f"进程数量: {args.processes}")
+        
+        # 清空进程日志目录
+        logs_dir = os.path.join(script_dir, "process_logs")
+        if os.path.exists(logs_dir):
+            try:
+                shutil.rmtree(logs_dir)
+                logging.info("已清空进程日志目录")
+            except Exception as e:
+                logging.error(f"清空进程日志目录失败: {e}")
+        
+        test_batch_stocks(args.batch_stocks, args.data_folder, args.processes)
     else:
         # 全量测试模式
         logging.info("=== 全量测试模式 ===")
