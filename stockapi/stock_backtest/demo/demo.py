@@ -22,10 +22,10 @@ import argparse
 # 策略条件定义（唯一权威来源）
 STRATEGY_CONDITIONS = """策略条件：
 1、股票价格必须大于1（最低价和收盘价都必须大于1）
-2、当天开盘价高于上一日最高价至少2%，且当日收盘价高于上一日最高价，当天涨幅小于9.5%
-3、当日20，30日均线值大于上一日20，30日均线值
-4、前面三个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%
-5、当日成交量小于之前一个交易日10日成交量均值的2.5倍"""
+2、前面10个交易日20，30，60日均线都是逐渐升高的
+3、前面三个交易日中每天的收盘价在20日均线正负1%范围内或者30日均线正负1%范围内
+4、当日是阳线，并且收盘价高于前面三个交易日的最高价
+5、当日成交量小于之前一个交易日10日成交量均值的1.5倍"""
 
 def load_stock_data(csv_file_path):
     """
@@ -165,8 +165,8 @@ def check_strategy_conditions(df, current_idx):
     Returns:
         bool: 是否符合条件
     """
-    # 需要至少前三个交易日的数据
-    if current_idx < 3:
+    # 需要至少前10个交易日的数据
+    if current_idx < 10:
         return False
     
     # 获取当日数据和前一日数据
@@ -179,64 +179,92 @@ def check_strategy_conditions(df, current_idx):
     low_price = current_data['low']
     volume = current_data['volume'] if 'volume' in current_data and not pd.isna(current_data['volume']) else None
     
-    # 获取前一日最高价和收盘价
-    prev_high = prev_data['high']
-    prev_close = prev_data['close']
-    
     # 策略条件1：股票价格必须大于1（最低价和收盘价都必须大于1）
     if close_price <= 1 or low_price <= 1:
         return False
     
-    # 策略条件2：当天开盘价高于上一日最高价至少2%，且当日收盘价高于上一日最高价，当天涨幅小于9.5%
-    open_above_prev_high_2_percent = open_price > prev_high * 1.02
-    close_above_prev_high = close_price > prev_high
+    # 策略条件2：前面10个交易日20，30，60日均线都是逐渐升高的
+    condition2_met = True
+    for i in range(1, 11):  # 检查前1到前10个交易日
+        if current_idx - i < 0:
+            condition2_met = False
+            break
+        
+        current_day = df.iloc[current_idx - i + 1] if i > 1 else current_data
+        prev_day = df.iloc[current_idx - i]
+        
+        # 检查20日均线
+        current_ma20 = current_day['ma20'] if 'ma20' in current_day and not pd.isna(current_day['ma20']) else None
+        prev_ma20 = prev_day['ma20'] if 'ma20' in prev_day and not pd.isna(prev_day['ma20']) else None
+        
+        # 检查30日均线
+        current_ma30 = current_day['ma30'] if 'ma30' in current_day and not pd.isna(current_day['ma30']) else None
+        prev_ma30 = prev_day['ma30'] if 'ma30' in prev_day and not pd.isna(prev_day['ma30']) else None
+        
+        # 检查60日均线
+        current_ma60 = current_day['ma60'] if 'ma60' in current_day and not pd.isna(current_day['ma60']) else None
+        prev_ma60 = prev_day['ma60'] if 'ma60' in prev_day and not pd.isna(prev_day['ma60']) else None
+        
+        # 如果任何一个均线数据缺失或不是上升的，则条件不满足
+        if (current_ma20 is None or prev_ma20 is None or current_ma20 <= prev_ma20 or
+            current_ma30 is None or prev_ma30 is None or current_ma30 <= prev_ma30 or
+            current_ma60 is None or prev_ma60 is None or current_ma60 <= prev_ma60):
+            condition2_met = False
+            break
     
-    # 计算当天涨幅（相对于前一日收盘价）
-    daily_return = (close_price - prev_close) / prev_close
-    daily_return_under_9_5_percent = daily_return < 0.095
-    
-    condition2_met = open_above_prev_high_2_percent and close_above_prev_high and daily_return_under_9_5_percent
-    
-    # 策略条件3：当日20，30日均线值大于上一日20，30日均线值
-    condition3_met = False
-    current_ma20 = current_data['ma20'] if 'ma20' in current_data and not pd.isna(current_data['ma20']) else None
-    current_ma30 = current_data['ma30'] if 'ma30' in current_data and not pd.isna(current_data['ma30']) else None
-    prev_ma20 = prev_data['ma20'] if 'ma20' in prev_data and not pd.isna(prev_data['ma20']) else None
-    prev_ma30 = prev_data['ma30'] if 'ma30' in prev_data and not pd.isna(prev_data['ma30']) else None
-    
-    if (current_ma20 is not None and prev_ma20 is not None and 
-        current_ma30 is not None and prev_ma30 is not None):
-        condition3_met = current_ma20 > prev_ma20 and current_ma30 > prev_ma30
-    
-    # 策略条件4：前面三个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%
-    condition4_met = False
+    # 策略条件3：前面三个交易日中每天的收盘价在20日均线正负1%范围内或者30日均线正负1%范围内
+    condition3_met = True
     for i in range(1, 4):  # 检查前1、2、3个交易日
-        if current_idx - i >= 0:
-            day_data = df.iloc[current_idx - i]
-            
-            # 获取均线数据
-            ma_values = []
-            for ma_col in ['ma5', 'ma10', 'ma20', 'ma30']:
-                if ma_col in day_data and not pd.isna(day_data[ma_col]):
-                    ma_values.append(day_data[ma_col])
-            
-            # 如果有足够的均线数据，检查差距
-            if len(ma_values) >= 2:
-                max_ma = max(ma_values)
-                min_ma = min(ma_values)
-                if min_ma > 0:
-                    ma_diff_percent = (max_ma - min_ma) / min_ma
-                    if ma_diff_percent < 0.01:  # 小于1%
-                        condition4_met = True
-                        break
+        if current_idx - i < 0:
+            condition3_met = False
+            break
+        
+        day_data = df.iloc[current_idx - i]
+        day_close = day_data['close']
+        day_ma20 = day_data['ma20'] if 'ma20' in day_data and not pd.isna(day_data['ma20']) else None
+        day_ma30 = day_data['ma30'] if 'ma30' in day_data and not pd.isna(day_data['ma30']) else None
+        
+        # 检查是否在20日均线正负1%范围内
+        in_ma20_range = False
+        if day_ma20 is not None and day_ma20 > 0:
+            ma20_diff_percent = abs(day_close - day_ma20) / day_ma20
+            in_ma20_range = ma20_diff_percent <= 0.01
+        
+        # 检查是否在30日均线正负1%范围内
+        in_ma30_range = False
+        if day_ma30 is not None and day_ma30 > 0:
+            ma30_diff_percent = abs(day_close - day_ma30) / day_ma30
+            in_ma30_range = ma30_diff_percent <= 0.01
+        
+        # 如果既不在20日均线范围内，也不在30日均线范围内，则条件不满足
+        if not (in_ma20_range or in_ma30_range):
+            condition3_met = False
+            break
     
-    # 策略条件5：当日成交量小于之前一个交易日10日成交量均值的2.5倍
+    # 策略条件4：当日是阳线，并且收盘价高于前面三个交易日的最高价
+    condition4_met = False
+    
+    # 检查是否是阳线
+    is_positive_line = close_price > open_price
+    
+    # 获取前面三个交易日的最高价
+    if is_positive_line and current_idx >= 3:
+        prev_3days_high_prices = []
+        for i in range(1, 4):  # 前1、2、3个交易日
+            if current_idx - i >= 0:
+                prev_3days_high_prices.append(df.iloc[current_idx - i]['high'])
+        
+        if prev_3days_high_prices:
+            max_prev_3days_high = max(prev_3days_high_prices)
+            condition4_met = close_price > max_prev_3days_high
+    
+    # 策略条件5：当日成交量小于之前一个交易日10日成交量均值的1.5倍
     condition5_met = False
     if volume is not None:
         prev_vol10 = prev_data['vol10'] if 'vol10' in prev_data and not pd.isna(prev_data['vol10']) else None
         
         if prev_vol10 is not None and prev_vol10 > 0:
-            condition5_met = volume < prev_vol10 * 2.5
+            condition5_met = volume < prev_vol10 * 1.5
     
     return condition2_met and condition3_met and condition4_met and condition5_met
 
@@ -253,10 +281,10 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
     Returns:
         bool: 是否符合条件
     """
-    # 需要至少前三个交易日的数据
-    if current_idx < 3:
+    # 需要至少前10个交易日的数据
+    if current_idx < 10:
         if verbose:
-            logging.info(f"股票 {stock_code} 索引 {current_idx}: 数据不足，需要至少前3个交易日数据")
+            logging.info(f"股票 {stock_code} 索引 {current_idx}: 数据不足，需要至少前10个交易日数据")
         return False
     
     current_date = df.iloc[current_idx]['datetime'].strftime('%Y-%m-%d')
@@ -269,10 +297,6 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
     close_price = current_data['close']
     low_price = current_data['low']
     volume = current_data['volume'] if 'volume' in current_data and not pd.isna(current_data['volume']) else None
-    
-    # 获取前一日最高价和收盘价
-    prev_high = prev_data['high']
-    prev_close = prev_data['close']
 
     if verbose:
         logging.info(f"\n=== 股票 {stock_code} 日期 {current_date} 策略条件检查 ===")
@@ -281,9 +305,6 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
         logging.info(f"  收盘价: {close_price:.4f}")
         logging.info(f"  最低价: {low_price:.4f}")
         logging.info(f"  成交量: {volume if volume is not None else 'N/A'}")
-        logging.info(f"前一日价格信息({prev_date}):")
-        logging.info(f"  最高价: {prev_high:.4f}")
-        logging.info(f"  收盘价: {prev_close:.4f}")
     
     # 策略条件1：股票价格必须大于1（最低价和收盘价都必须大于1）
     if close_price <= 1 or low_price <= 1:
@@ -291,103 +312,148 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
             logging.info(f"股票 {stock_code} 日期 {current_date}: 股票价格小于等于1，跳过 (收盘价:{close_price}, 最低价:{low_price})")
         return False
     
-    # 策略条件2：当天开盘价高于上一日最高价至少2%，且当日收盘价高于上一日最高价，当天涨幅小于9.5%
-    open_above_prev_high_2_percent = open_price > prev_high * 1.02
-    close_above_prev_high = close_price > prev_high
+    # 策略条件2：前面10个交易日20，30，60日均线都是逐渐升高的
+    condition2_met = True
+    if verbose:
+        logging.info(f"\n策略条件2检查(前10个交易日均线逐渐升高):")
     
-    # 计算当天涨幅（相对于前一日收盘价）
-    daily_return = (close_price - prev_close) / prev_close
-    daily_return_under_9_5_percent = daily_return < 0.095
-    
-    condition2_met = open_above_prev_high_2_percent and close_above_prev_high and daily_return_under_9_5_percent
+    for i in range(1, 11):  # 检查前1到前10个交易日
+        if current_idx - i < 0:
+            condition2_met = False
+            if verbose:
+                logging.info(f"  数据不足，无法检查前{i}个交易日")
+            break
+        
+        current_day = df.iloc[current_idx - i + 1] if i > 1 else current_data
+        prev_day = df.iloc[current_idx - i]
+        
+        # 检查20日均线
+        current_ma20 = current_day['ma20'] if 'ma20' in current_day and not pd.isna(current_day['ma20']) else None
+        prev_ma20 = prev_day['ma20'] if 'ma20' in prev_day and not pd.isna(prev_day['ma20']) else None
+        
+        # 检查30日均线
+        current_ma30 = current_day['ma30'] if 'ma30' in current_day and not pd.isna(current_day['ma30']) else None
+        prev_ma30 = prev_day['ma30'] if 'ma30' in prev_day and not pd.isna(prev_day['ma30']) else None
+        
+        # 检查60日均线
+        current_ma60 = current_day['ma60'] if 'ma60' in current_day and not pd.isna(current_day['ma60']) else None
+        prev_ma60 = prev_day['ma60'] if 'ma60' in prev_day and not pd.isna(prev_day['ma60']) else None
+        
+        # 如果任何一个均线数据缺失或不是上升的，则条件不满足
+        if (current_ma20 is None or prev_ma20 is None or current_ma20 <= prev_ma20 or
+            current_ma30 is None or prev_ma30 is None or current_ma30 <= prev_ma30 or
+            current_ma60 is None or prev_ma60 is None or current_ma60 <= prev_ma60):
+            condition2_met = False
+            if verbose:
+                current_day_date = current_day['datetime'].strftime('%Y-%m-%d')
+                prev_day_date = prev_day['datetime'].strftime('%Y-%m-%d')
+                logging.info(f"  第{i}个交易日检查失败 ({prev_day_date} -> {current_day_date}):")
+                logging.info(f"    MA20: {prev_ma20} -> {current_ma20} (上升: {current_ma20 > prev_ma20 if current_ma20 and prev_ma20 else False})")
+                logging.info(f"    MA30: {prev_ma30} -> {current_ma30} (上升: {current_ma30 > prev_ma30 if current_ma30 and prev_ma30 else False})")
+                logging.info(f"    MA60: {prev_ma60} -> {current_ma60} (上升: {current_ma60 > prev_ma60 if current_ma60 and prev_ma60 else False})")
+            break
+        elif verbose and i <= 3:  # 只显示前3个交易日的详细信息
+            current_day_date = current_day['datetime'].strftime('%Y-%m-%d')
+            prev_day_date = prev_day['datetime'].strftime('%Y-%m-%d')
+            logging.info(f"  第{i}个交易日检查通过 ({prev_day_date} -> {current_day_date})")
     
     if verbose:
-        logging.info(f"\n策略条件2检查:")
-        logging.info(f"  当日开盘价 > 前一日最高价*1.02: {open_price:.4f} > {prev_high*1.02:.4f} = {open_above_prev_high_2_percent}")
-        logging.info(f"  当日收盘价 > 前一日最高价: {close_price:.4f} > {prev_high:.4f} = {close_above_prev_high}")
-        logging.info(f"  当天涨幅: ({close_price:.4f} - {prev_close:.4f}) / {prev_close:.4f} = {daily_return:.4f} ({daily_return*100:.2f}%)")
-        logging.info(f"  当天涨幅 < 9.5%: {daily_return*100:.2f}% < 9.5% = {daily_return_under_9_5_percent}")
         logging.info(f"  条件2满足: {condition2_met}")
     
-    # 策略条件3：当日20，30日均线值大于上一日20，30日均线值
-    condition3_met = False
-    current_ma20 = current_data['ma20'] if 'ma20' in current_data and not pd.isna(current_data['ma20']) else None
-    current_ma30 = current_data['ma30'] if 'ma30' in current_data and not pd.isna(current_data['ma30']) else None
-    prev_ma20 = prev_data['ma20'] if 'ma20' in prev_data and not pd.isna(prev_data['ma20']) else None
-    prev_ma30 = prev_data['ma30'] if 'ma30' in prev_data and not pd.isna(prev_data['ma30']) else None
-    
-    if (current_ma20 is not None and prev_ma20 is not None and 
-        current_ma30 is not None and prev_ma30 is not None):
-        condition3_met = current_ma20 > prev_ma20 and current_ma30 > prev_ma30
-    
+    # 策略条件3：前面三个交易日中每天的收盘价在20日均线正负1%范围内或者30日均线正负1%范围内
+    condition3_met = True
     if verbose:
-        logging.info(f"\n策略条件3检查(均线上升):")
-        logging.info(f"  当日20日均线: {current_ma20}")
-        logging.info(f"  前一日20日均线: {prev_ma20}")
-        logging.info(f"  当日30日均线: {current_ma30}")
-        logging.info(f"  前一日30日均线: {prev_ma30}")
-        if (current_ma20 is not None and prev_ma20 is not None and 
-            current_ma30 is not None and prev_ma30 is not None):
-            logging.info(f"  20日均线上升: {current_ma20:.4f} > {prev_ma20:.4f} = {current_ma20 > prev_ma20}")
-            logging.info(f"  30日均线上升: {current_ma30:.4f} > {prev_ma30:.4f} = {current_ma30 > prev_ma30}")
-        logging.info(f"  条件3满足: {condition3_met}")
-    
-    # 策略条件4：前面三个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%
-    condition4_met = False
-    if verbose:
-        logging.info(f"\n策略条件4检查(均线差距):")
+        logging.info(f"\n策略条件3检查(前3个交易日收盘价在均线范围内):")
     
     for i in range(1, 4):  # 检查前1、2、3个交易日
-        if current_idx - i >= 0:
-            day_data = df.iloc[current_idx - i]
-            day_date = day_data['datetime'].strftime('%Y-%m-%d')
-            
-            # 获取均线数据
-            ma_values = []
-            ma_info = {}
-            for ma_col in ['ma5', 'ma10', 'ma20', 'ma30']:
-                if ma_col in day_data and not pd.isna(day_data[ma_col]):
-                    ma_values.append(day_data[ma_col])
-                    ma_info[ma_col] = day_data[ma_col]
-            
+        if current_idx - i < 0:
+            condition3_met = False
             if verbose:
-                logging.info(f"  检查日期 {day_date}: {ma_info}")
-            
-            # 如果有足够的均线数据，检查差距
-            if len(ma_values) >= 2:
-                max_ma = max(ma_values)
-                min_ma = min(ma_values)
-                if min_ma > 0:
-                    ma_diff_percent = (max_ma - min_ma) / min_ma
-                    if verbose:
-                        logging.info(f"    均线差距: ({max_ma:.4f} - {min_ma:.4f}) / {min_ma:.4f} = {ma_diff_percent:.4f} ({ma_diff_percent*100:.2f}%)")
-                    
-                    if ma_diff_percent < 0.01:  # 小于1%
-                        condition4_met = True
-                        if verbose:
-                            logging.info(f"    ✓ 日期 {day_date} 均线差距小于1%，条件4满足")
-                        break
-                    elif verbose:
-                        logging.info(f"    ✗ 日期 {day_date} 均线差距大于等于1%")
-            elif verbose:
-                logging.info(f"    ✗ 日期 {day_date} 均线数据不足")
+                logging.info(f"  数据不足，无法检查前{i}个交易日")
+            break
+        
+        day_data = df.iloc[current_idx - i]
+        day_date = day_data['datetime'].strftime('%Y-%m-%d')
+        day_close = day_data['close']
+        day_ma20 = day_data['ma20'] if 'ma20' in day_data and not pd.isna(day_data['ma20']) else None
+        day_ma30 = day_data['ma30'] if 'ma30' in day_data and not pd.isna(day_data['ma30']) else None
+        
+        # 检查是否在20日均线正负1%范围内
+        in_ma20_range = False
+        if day_ma20 is not None and day_ma20 > 0:
+            ma20_diff_percent = abs(day_close - day_ma20) / day_ma20
+            in_ma20_range = ma20_diff_percent <= 0.01
+        
+        # 检查是否在30日均线正负1%范围内
+        in_ma30_range = False
+        if day_ma30 is not None and day_ma30 > 0:
+            ma30_diff_percent = abs(day_close - day_ma30) / day_ma30
+            in_ma30_range = ma30_diff_percent <= 0.01
+        
+        # 如果既不在20日均线范围内，也不在30日均线范围内，则条件不满足
+        if not (in_ma20_range or in_ma30_range):
+            condition3_met = False
+            if verbose:
+                logging.info(f"  日期 {day_date} 检查失败:")
+                logging.info(f"    收盘价: {day_close:.4f}")
+                logging.info(f"    MA20: {day_ma20:.4f if day_ma20 else 'N/A'}, 差距: {ma20_diff_percent*100:.2f}% (在范围内: {in_ma20_range})" if day_ma20 else "    MA20: N/A")
+                logging.info(f"    MA30: {day_ma30:.4f if day_ma30 else 'N/A'}, 差距: {ma30_diff_percent*100:.2f}% (在范围内: {in_ma30_range})" if day_ma30 else "    MA30: N/A")
+            break
+        elif verbose:
+            logging.info(f"  日期 {day_date} 检查通过 (收盘价: {day_close:.4f})")
+    
+    if verbose:
+        logging.info(f"  条件3满足: {condition3_met}")
+    
+    # 策略条件4：当日是阳线，并且收盘价高于前面三个交易日的最高价
+    condition4_met = False
+    
+    # 检查是否是阳线
+    is_positive_line = close_price > open_price
+    
+    if verbose:
+        logging.info(f"\n策略条件4检查(当日阳线且收盘价高于前3日最高价):")
+        logging.info(f"  当日是阳线: {is_positive_line} (开盘: {open_price:.4f}, 收盘: {close_price:.4f})")
+    
+    # 获取前面三个交易日的最高价
+    if is_positive_line and current_idx >= 3:
+        prev_3days_high_prices = []
+        for i in range(1, 4):  # 前1、2、3个交易日
+            if current_idx - i >= 0:
+                day_high = df.iloc[current_idx - i]['high']
+                prev_3days_high_prices.append(day_high)
+                if verbose:
+                    day_date = df.iloc[current_idx - i]['datetime'].strftime('%Y-%m-%d')
+                    logging.info(f"    前{i}个交易日({day_date})最高价: {day_high:.4f}")
+        
+        if prev_3days_high_prices:
+            max_prev_3days_high = max(prev_3days_high_prices)
+            condition4_met = close_price > max_prev_3days_high
+            if verbose:
+                logging.info(f"  前3个交易日最高价: {max_prev_3days_high:.4f}")
+                logging.info(f"  当日收盘价 > 前3日最高价: {close_price:.4f} > {max_prev_3days_high:.4f} = {condition4_met}")
+    elif verbose:
+        if not is_positive_line:
+            logging.info(f"  当日不是阳线，条件4不满足")
+        else:
+            logging.info(f"  数据不足，无法检查前3个交易日")
     
     if verbose:
         logging.info(f"  条件4满足: {condition4_met}")
     
-    # 策略条件5：当日成交量小于之前一个交易日10日成交量均值的2.5倍
+    # 策略条件5：当日成交量小于之前一个交易日10日成交量均值的1.5倍
     condition5_met = False
     if volume is not None:
         prev_vol10 = prev_data['vol10'] if 'vol10' in prev_data and not pd.isna(prev_data['vol10']) else None
         
         if prev_vol10 is not None and prev_vol10 > 0:
-            condition5_met = volume < prev_vol10 * 2.5
+            condition5_met = volume < prev_vol10 * 1.5
             
             if verbose:
                 logging.info(f"\n策略条件5检查(成交量):")
                 logging.info(f"  当日成交量: {volume}")
                 logging.info(f"  前一日10日成交量均值: {prev_vol10}")
-                logging.info(f"  需要小于: {prev_vol10 * 2.5}")
+                logging.info(f"  需要小于: {prev_vol10 * 1.5}")
                 logging.info(f"  条件5满足: {condition5_met}")
         else:
             if verbose:
@@ -402,10 +468,10 @@ def check_strategy_conditions_verbose(df, current_idx, stock_code, verbose=False
     
     if verbose:
         logging.info(f"\n最终结果: {result}")
-        logging.info(f"  条件2(开盘价和收盘价高于前一日最高价且涨幅<9.5%): {condition2_met}")
-        logging.info(f"  条件3(当日20、30日均线值大于上一日均线值): {condition3_met}")
-        logging.info(f"  条件4(前三日中至少一天均线差距<1%): {condition4_met}")
-        logging.info(f"  条件5(成交量<前一日10日成交量均值2.5倍): {condition5_met}")
+        logging.info(f"  条件2(前10个交易日均线逐渐升高): {condition2_met}")
+        logging.info(f"  条件3(前3个交易日收盘价在均线范围内): {condition3_met}")
+        logging.info(f"  条件4(当日阳线且收盘价高于前3日最高价): {condition4_met}")
+        logging.info(f"  条件5(成交量<前一日10日成交量均值1.5倍): {condition5_met}")
         if result:
             logging.info(f"*** 股票 {stock_code} 在 {current_date} 符合选股条件! ***")
         logging.info("=" * 60)
