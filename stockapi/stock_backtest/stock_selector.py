@@ -2,16 +2,13 @@
 """
 选股模块 - 基于策略筛选股票
 
-支持单股票测试、批量测试和全量测试
+专注于单股票测试和信号筛选功能
 """
 
 import pandas as pd
 import os
 import logging
-import multiprocessing as mp
-from multiprocessing import Queue, Process, JoinableQueue
-from functools import partial
-import gc
+import time
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 
@@ -47,35 +44,44 @@ class StockSelector:
         Returns:
             List[Dict[str, Any]]: 符合条件的信号列表
         """
+        # 记录开始时间
+        start_time = time.time()
         self.logger.info(f"开始测试股票: {stock_code}")
         
-        # 加载股票数据
-        df = self.data_loader.load_stock_data(stock_code)
-        if df is None:
-            self.logger.error(f"无法加载股票 {stock_code} 的数据")
-            return []
-        
-        # 验证数据质量
-        if not self.data_loader.validate_data_quality(df, stock_code):
-            self.logger.error(f"股票 {stock_code} 数据质量不合格")
-            return []
-        
-        # 清理数据
-        df = self.data_preprocessor.clean_data(df, stock_code)
-        
-        # 添加技术指标
-        df = self.data_preprocessor.add_technical_indicators(df)
-        
-        # 扫描信号
-        signals = self.strategy_engine.scan_stock_for_signals(df, stock_code)
-        
-        if verbose:
-            self.logger.info(f"股票 {stock_code} 找到 {len(signals)} 个符合条件的信号")
-            for signal in signals:
-                self.logger.info(f"  日期: {signal['date']}, 收盘价: {signal['close']:.4f}, "
-                               f"次日收益: {signal['next_day_return']:.2f}%" if signal['next_day_return'] else "次日收益: N/A")
-        
-        return signals
+        try:
+            # 加载股票数据
+            df = self.data_loader.load_stock_data(stock_code)
+            if df is None:
+                self.logger.error(f"无法加载股票 {stock_code} 的数据")
+                return []
+            
+            # 验证数据质量
+            if not self.data_loader.validate_data_quality(df, stock_code):
+                self.logger.error(f"股票 {stock_code} 数据质量不合格")
+                return []
+            
+            # 清理数据
+            df = self.data_preprocessor.clean_data(df, stock_code)
+            
+            # 添加技术指标
+            df = self.data_preprocessor.add_technical_indicators(df)
+            
+            # 扫描信号
+            signals = self.strategy_engine.scan_stock_for_signals(df, stock_code)
+            
+            if verbose:
+                self.logger.info(f"股票 {stock_code} 找到 {len(signals)} 个符合条件的信号")
+                for signal in signals:
+                    self.logger.info(f"  日期: {signal['date']}, 收盘价: {signal['close']:.4f}, "
+                                   f"次日收益: {signal['next_day_return']:.2f}%" if signal['next_day_return'] else "次日收益: N/A")
+            
+            return signals
+            
+        finally:
+            # 计算耗时并记录结束日志
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            self.logger.info(f"完成测试股票: {stock_code}, 耗时: {elapsed_time:.3f}秒")
     
     def test_single_stock_verbose(self, stock_code: str, target_date: str = None) -> Dict[str, Any]:
         """
@@ -88,272 +94,53 @@ class StockSelector:
         Returns:
             Dict[str, Any]: 详细检查结果
         """
+        # 记录开始时间
+        start_time = time.time()
         self.logger.info(f"开始详细测试股票: {stock_code}")
         
-        # 加载股票数据
-        df = self.data_loader.load_stock_data(stock_code)
-        if df is None:
-            return {"error": f"无法加载股票 {stock_code} 的数据"}
-        
-        # 验证数据质量
-        if not self.data_loader.validate_data_quality(df, stock_code):
-            return {"error": f"股票 {stock_code} 数据质量不合格"}
-        
-        # 清理数据
-        df = self.data_preprocessor.clean_data(df, stock_code)
-        
-        # 确定测试日期索引
-        if target_date:
-            target_datetime = pd.to_datetime(target_date)
-            matching_rows = df[df['datetime'] == target_datetime]
-            if matching_rows.empty:
-                return {"error": f"未找到日期 {target_date} 的数据"}
-            current_idx = matching_rows.index[0]
-        else:
-            current_idx = len(df) - 1  # 最新日期
-        
-        # 详细检查策略条件
-        result, details = self.strategy_engine.check_strategy_conditions_verbose(
-            df, current_idx, stock_code, verbose=True
-        )
-        
-        return details
-    
-    def test_batch_stocks(self, stock_codes: List[str], num_processes: int = 4) -> pd.DataFrame:
-        """
-        批量测试多个股票
-        
-        Args:
-            stock_codes: 股票代码列表
-            num_processes: 进程数量
+        try:
+            # 加载股票数据
+            df = self.data_loader.load_stock_data(stock_code)
+            if df is None:
+                return {"error": f"无法加载股票 {stock_code} 的数据"}
             
-        Returns:
-            pd.DataFrame: 回测结果
-        """
-        self.logger.info(f"开始批量测试 {len(stock_codes)} 个股票，使用 {num_processes} 个进程")
-        
-        if num_processes == 1:
-            # 单进程处理
-            all_signals = []
-            for stock_code in stock_codes:
-                signals = self.test_single_stock(stock_code, verbose=False)
-                all_signals.extend(signals)
-        else:
-            # 多进程处理
-            all_signals = self._process_stocks_multiprocessing(stock_codes, num_processes)
-        
-        # 转换为DataFrame
-        if all_signals:
-            result_df = pd.DataFrame(all_signals)
-            result_df = result_df.sort_values(['date', 'stock_code']).reset_index(drop=True)
-        else:
-            result_df = pd.DataFrame()
-        
-        self.logger.info(f"批量测试完成，共找到 {len(all_signals)} 个信号")
-        return result_df
-    
-    def test_all_stocks(self, num_processes: int = 20, limit: int = None) -> pd.DataFrame:
-        """
-        测试所有可用股票
-        
-        Args:
-            num_processes: 进程数量
-            limit: 限制测试的股票数量
+            # 验证数据质量
+            if not self.data_loader.validate_data_quality(df, stock_code):
+                return {"error": f"股票 {stock_code} 数据质量不合格"}
             
-        Returns:
-            pd.DataFrame: 回测结果
-        """
-        # 获取所有可用股票
-        all_stock_codes = self.data_loader.get_available_stocks()
-        
-        if limit:
-            all_stock_codes = all_stock_codes[:limit]
-        
-        self.logger.info(f"开始全量测试，共 {len(all_stock_codes)} 个股票")
-        
-        return self.test_batch_stocks(all_stock_codes, num_processes)
-    
-    def _process_stocks_multiprocessing(self, stock_codes: List[str], num_processes: int) -> List[Dict[str, Any]]:
-        """
-        多进程处理股票
-        
-        Args:
-            stock_codes: 股票代码列表
-            num_processes: 进程数量
+            # 清理数据
+            df = self.data_preprocessor.clean_data(df, stock_code)
             
-        Returns:
-            List[Dict[str, Any]]: 所有信号列表
-        """
-        # 创建任务队列
-        task_queue = JoinableQueue()
-        result_queue = Queue()
-        
-        # 添加任务到队列
-        for stock_code in stock_codes:
-            task_queue.put(stock_code)
-        
-        # 创建工作进程
-        processes = []
-        for i in range(num_processes):
-            p = Process(
-                target=self._worker_process,
-                args=(task_queue, result_queue, i + 1)
-            )
-            p.start()
-            processes.append(p)
-        
-        # 等待所有任务完成
-        self.logger.info("等待所有任务完成...")
-        task_queue.join()
-        self.logger.info("所有任务已完成，开始收集结果并终止进程")
-        
-        # 等待进程完成结果提交
-        self.logger.info("等待进程完成结果提交...")
-        import time
-        time.sleep(3)
-        
-        # 收集所有可用的结果
-        self.logger.info("开始收集进程结果...")
-        all_signals = []
-        result_count = 0
-        
-        while not result_queue.empty():
-            try:
-                signals = result_queue.get_nowait()
-                all_signals.extend(signals)
-                result_count += 1
-                self.logger.info(f"收集到结果批次 {result_count}，当前总信号数: {len(all_signals)}")
-            except:
-                break
-        
-        # 再等待一下，确保所有进程都有机会提交结果
-        if result_count == 0:
-            self.logger.info("第一次未收集到结果，再等待2秒...")
-            time.sleep(2)
-            while not result_queue.empty():
-                try:
-                    signals = result_queue.get_nowait()
-                    all_signals.extend(signals)
-                    result_count += 1
-                    self.logger.info(f"延迟收集到结果批次 {result_count}，当前总信号数: {len(all_signals)}")
-                except:
-                    break
-        
-        # 现在强制终止所有进程
-        self.logger.info("开始强制终止所有进程...")
-        for i, p in enumerate(processes):
-            if p.is_alive():
-                self.logger.info(f"强制终止进程 {i+1} (PID: {p.pid})")
-                p.terminate()
-                p.join(timeout=3)  # 给一点时间让进程清理
-                if p.is_alive():
-                    self.logger.warning(f"进程 {i+1} (PID: {p.pid}) 仍未结束，使用kill")
-                    p.kill()
+            # 确定测试日期索引
+            if target_date:
+                target_datetime = pd.to_datetime(target_date)
+                matching_rows = df[df['datetime'] == target_datetime]
+                if matching_rows.empty:
+                    return {"error": f"未找到日期 {target_date} 的数据"}
+                current_idx = matching_rows.index[0]
             else:
-                self.logger.info(f"进程 {i+1} (PID: {p.pid}) 已自然结束")
-        
-        self.logger.info("所有进程已完成")
-        self.logger.info(f"结果收集完成！共收集了 {result_count} 个进程的结果")
-        self.logger.info(f"多进程处理完成！总共找到 {len(all_signals)} 个信号")
-        
-        return all_signals
+                current_idx = len(df) - 1  # 最新日期
+            
+            # 详细检查策略条件
+            result, details = self.strategy_engine.check_strategy_conditions_verbose(
+                df, current_idx, stock_code, verbose=True
+            )
+            
+            return details
+            
+        finally:
+            # 计算耗时并记录结束日志
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            self.logger.info(f"完成详细测试股票: {stock_code}, 耗时: {elapsed_time:.3f}秒")
     
-    def _worker_process(self, task_queue: JoinableQueue, result_queue: Queue, process_id: int):
-        """
-        工作进程函数
-        
-        Args:
-            task_queue: 任务队列
-            result_queue: 结果队列
-            process_id: 进程ID
-        """
-        # 为每个进程创建独立的日志
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        logs_dir = os.path.join(script_dir, "process_logs")
-        os.makedirs(logs_dir, exist_ok=True)
-        
-        log_file = os.path.join(logs_dir, f"process_{process_id}.log")
-        
-        # 重新配置根日志器，确保所有模块的日志都只输出到文件
-        root_logger = logging.getLogger()
-        
-        # 清除根日志器的所有处理器（包括控制台处理器）
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
-        
-        # 只添加文件处理器到根日志器
-        file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        root_logger.addHandler(file_handler)
-        root_logger.setLevel(logging.INFO)
-        
-        # 获取进程专用的日志器
-        process_logger = logging.getLogger(f"process_{process_id}")
-        
-        # 记录进程开始工作
-        root_logger.info(f"进程 {process_id} 开始工作，日志文件: {log_file}")
-        
-        # 创建独立的数据加载器和策略引擎
-        data_loader = StockDataLoader(self.data_folder)
-        data_preprocessor = DataPreprocessor()
-        strategy_engine = StrategyEngine()
-        
-        processed_count = 0
-        
-        while True:
-            try:
-                stock_code = task_queue.get(timeout=5)  # 增加超时时间
-                if stock_code is None:
-                    break
-                
-                try:
-                    process_logger.info(f"进程 {process_id} 开始处理股票: {stock_code}")
-                    
-                    # 加载股票数据
-                    df = data_loader.load_stock_data(stock_code)
-                    if df is None:
-                        process_logger.warning(f"无法加载股票 {stock_code} 的数据")
-                        task_queue.task_done()
-                        continue
-                    
-                    # 验证数据质量
-                    if not data_loader.validate_data_quality(df, stock_code):
-                        process_logger.warning(f"股票 {stock_code} 数据质量不合格")
-                        task_queue.task_done()
-                        continue
-                    
-                    # 清理数据
-                    df = data_preprocessor.clean_data(df, stock_code)
-                    
-                    # 添加技术指标
-                    df = data_preprocessor.add_technical_indicators(df)
-                    
-                    # 扫描信号
-                    signals = strategy_engine.scan_stock_for_signals(df, stock_code)
-                    
-                    # 将结果放入结果队列
-                    result_queue.put(signals)
-                    
-                    processed_count += 1
-                    process_logger.info(f"进程 {process_id} 完成处理股票: {stock_code}, "
-                                      f"找到 {len(signals)} 个信号, 已处理 {processed_count} 个股票")
-                    
-                    # 清理内存
-                    del df
-                    gc.collect()
-                    
-                except Exception as e:
-                    process_logger.error(f"进程 {process_id} 处理股票 {stock_code} 时出错: {e}")
-                
-                finally:
-                    task_queue.task_done()
-                    
-            except Exception as e:
-                # 超时或其他异常时退出循环
-                process_logger.info(f"进程 {process_id} 退出循环: {e}")
-                break
-        
-        process_logger.info(f"进程 {process_id} 完成，共处理 {processed_count} 个股票")
+
+    
+
+    
+
+    
+
     
     def filter_signals_by_date(self, signals: List[Dict[str, Any]], 
                              start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:

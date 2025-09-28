@@ -13,6 +13,9 @@ import shutil
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+import multiprocessing as mp
+from multiprocessing import Queue, Process, JoinableQueue
+import time
 
 # 添加当前目录到Python路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -84,6 +87,34 @@ class BacktestingSystem:
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"日志系统已配置，日志文件: {self.log_file}")
     
+    def _setup_worker_logging(self, process_id: int):
+        """
+        为工作进程配置日志系统
+        
+        Args:
+            process_id: 进程ID
+        """
+        # 清除当前进程的日志配置
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        
+        # 使用主进程的日志文件
+        if hasattr(self, 'log_file') and self.log_file:
+            # 创建文件处理器和控制台处理器
+            file_handler = logging.FileHandler(self.log_file, encoding='utf-8')
+            console_handler = logging.StreamHandler(sys.stdout)
+            
+            # 设置格式
+            formatter = logging.Formatter(f'%(asctime)s - %(name)s - %(levelname)s - [Process-{process_id}] %(message)s')
+            file_handler.setFormatter(formatter)
+            console_handler.setFormatter(formatter)
+            
+            # 配置根日志器
+            root_logger.setLevel(logging.INFO)
+            root_logger.addHandler(file_handler)
+            root_logger.addHandler(console_handler)
+    
     def clear_output_folder(self):
         """清空output文件夹"""
         if os.path.exists(self.output_folder):
@@ -134,191 +165,9 @@ class BacktestingSystem:
         os.makedirs(process_logs_dir, exist_ok=True)
         self.logger.info(f"已创建进程日志文件夹: {process_logs_dir}")
     
-    def write_backtest_result_to_file(self, total_count, next_open_up_count, next_close_up_count, 
-                                     high_open_high_close_count, day3_up_count, day5_up_count, day10_up_count,
-                                     high_open_high_close_day3_up, high_open_high_close_day5_up, high_open_high_close_day10_up,
-                                     low_open_close_up_count, low_open_close_up_day3_up, 
-                                     low_open_close_up_day5_up, low_open_close_up_day10_up,
-                                     low_open_low_close_count, low_open_low_close_day3_up,
-                                     low_open_low_close_day5_up, low_open_low_close_day10_up,
-                                     result_df):
-        """
-        将回测结果以增量方式写入final_result文件
-        """
-        try:
-            # 获取当前时间戳
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            # 计算百分比，避免除零错误
-            next_open_up_pct = (next_open_up_count/total_count*100) if total_count > 0 else 0.00
-            next_close_up_pct = (next_close_up_count/total_count*100) if total_count > 0 else 0.00
-            high_open_high_close_pct = (high_open_high_close_count/total_count*100) if total_count > 0 else 0.00
-            low_open_close_up_pct = (low_open_close_up_count/total_count*100) if total_count > 0 else 0.00
-            day3_up_pct = (day3_up_count/total_count*100) if total_count > 0 else 0.00
-            day5_up_pct = (day5_up_count/total_count*100) if total_count > 0 else 0.00
-            day10_up_pct = (day10_up_count/total_count*100) if total_count > 0 else 0.00
-            
-            high_open_high_close_day3_up_pct = (high_open_high_close_day3_up/high_open_high_close_count*100) if high_open_high_close_count > 0 else 0.00
-            high_open_high_close_day5_up_pct = (high_open_high_close_day5_up/high_open_high_close_count*100) if high_open_high_close_count > 0 else 0.00
-            high_open_high_close_day10_up_pct = (high_open_high_close_day10_up/high_open_high_close_count*100) if high_open_high_close_count > 0 else 0.00
-            
-            # 计算次日低开收盘上涨的百分比
-            low_open_close_up_day3_up_pct = (low_open_close_up_day3_up/low_open_close_up_count*100) if low_open_close_up_count > 0 else 0.00
-            low_open_close_up_day5_up_pct = (low_open_close_up_day5_up/low_open_close_up_count*100) if low_open_close_up_count > 0 else 0.00
-            low_open_close_up_day10_up_pct = (low_open_close_up_day10_up/low_open_close_up_count*100) if low_open_close_up_count > 0 else 0.00
-            
-            # 计算次日低开低走的百分比
-            low_open_low_close_pct = (low_open_low_close_count/total_count*100) if total_count > 0 else 0.00
-            low_open_low_close_day3_up_pct = (low_open_low_close_day3_up/low_open_low_close_count*100) if low_open_low_close_count > 0 else 0.00
-            low_open_low_close_day5_up_pct = (low_open_low_close_day5_up/low_open_low_close_count*100) if low_open_low_close_count > 0 else 0.00
-            low_open_low_close_day10_up_pct = (low_open_low_close_day10_up/low_open_low_close_count*100) if low_open_low_close_count > 0 else 0.00
-            
-            # 构建统计信息
-            statistics_info = f"""
-统计信息:
-总共符合条件的交易日数: {total_count}
-涉及股票数: {result_df['stock_code'].nunique() if len(result_df) > 0 else 0}
-关键比例统计:
-次日表现:
-  次日高开比例: {next_open_up_count}/{total_count} ({next_open_up_pct:.2f}%)
-  次日收盘上涨比例: {next_close_up_count}/{total_count} ({next_close_up_pct:.2f}%)
-  次日高开高走比例: {high_open_high_close_count}/{total_count} ({high_open_high_close_pct:.2f}%)
-  次日低开收盘上涨比例: {low_open_close_up_count}/{total_count} ({low_open_close_up_pct:.2f}%)
-  次日低开低走比例: {low_open_low_close_count}/{total_count} ({low_open_low_close_pct:.2f}%)
-中长期表现:
-  3日收盘上涨比例: {day3_up_count}/{total_count} ({day3_up_pct:.2f}%)
-  5日收盘上涨比例: {day5_up_count}/{total_count} ({day5_up_pct:.2f}%)
-  10日收盘上涨比例: {day10_up_count}/{total_count} ({day10_up_pct:.2f}%)
 
-次日高开高走股票中的后续表现:
-3日收盘上涨比例: {high_open_high_close_day3_up}/{high_open_high_close_count} ({high_open_high_close_day3_up_pct:.2f}%)
-5日收盘上涨比例: {high_open_high_close_day5_up}/{high_open_high_close_count} ({high_open_high_close_day5_up_pct:.2f}%)
-10日收盘上涨比例: {high_open_high_close_day10_up}/{high_open_high_close_count} ({high_open_high_close_day10_up_pct:.2f}%)
-
-次日低开收盘上涨股票中的后续表现:
-3日收盘上涨比例: {low_open_close_up_day3_up}/{low_open_close_up_count} ({low_open_close_up_day3_up_pct:.2f}%)
-5日收盘上涨比例: {low_open_close_up_day5_up}/{low_open_close_up_count} ({low_open_close_up_day5_up_pct:.2f}%)
-10日收盘上涨比例: {low_open_close_up_day10_up}/{low_open_close_up_count} ({low_open_close_up_day10_up_pct:.2f}%)
-
-次日低开低走股票中的后续表现:
-3日收盘上涨比例: {low_open_low_close_day3_up}/{low_open_low_close_count} ({low_open_low_close_day3_up_pct:.2f}%)
-5日收盘上涨比例: {low_open_low_close_day5_up}/{low_open_low_close_count} ({low_open_low_close_day5_up_pct:.2f}%)
-10日收盘上涨比例: {low_open_low_close_day10_up}/{low_open_low_close_count} ({low_open_low_close_day10_up_pct:.2f}%)"""
-            
-            # 从StrategyEngine获取策略描述
-            strategy_description = self.strategy_engine.get_strategy_description()
-            
-            # 构建完整的回测记录
-            backtest_record = f"""
-{'='*80}
-回测时间: {current_time}
-{strategy_description}
-
-{statistics_info}
-{'='*80}
-
-"""
-            
-            # 确定final_result文件路径
-            final_result_path = os.path.join(current_dir, "final_result")
-            
-            # 以追加模式写入文件，确保使用UTF-8编码（不使用BOM）
-            with open(final_result_path, 'a', encoding='utf-8') as f:
-                f.write(backtest_record)
-            
-            self.logger.info(f"回测结果已追加写入: {final_result_path}")
-            
-        except Exception as e:
-            self.logger.error(f"写入final_result文件失败: {e}")
     
-    def calculate_detailed_statistics(self, signals: List[Dict[str, Any]]) -> Dict[str, int]:
-        """
-        计算详细的统计数据，用于生成测试简报
-        
-        Args:
-            signals: 信号列表
-            
-        Returns:
-            Dict[str, int]: 统计数据
-        """
-        if not signals:
-            return {
-                'total_count': 0,
-                'next_open_up_count': 0,
-                'next_close_up_count': 0,
-                'high_open_high_close_count': 0,
-                'day3_up_count': 0,
-                'day5_up_count': 0,
-                'day10_up_count': 0,
-                'high_open_high_close_day3_up': 0,
-                'high_open_high_close_day5_up': 0,
-                'high_open_high_close_day10_up': 0,
-                'low_open_close_up_count': 0,
-                'low_open_close_up_day3_up': 0,
-                'low_open_close_up_day5_up': 0,
-                'low_open_close_up_day10_up': 0,
-                'low_open_low_close_count': 0,
-                'low_open_low_close_day3_up': 0,
-                'low_open_low_close_day5_up': 0,
-                'low_open_low_close_day10_up': 0
-            }
-        
-        total_count = len(signals)
-        next_open_up_count = len([s for s in signals if s.get('next_open_change_pct', 0) > 0])
-        next_close_up_count = len([s for s in signals if s.get('next_close_change_pct', 0) > 0])
-        
-        # 筛选次日高开高走的股票
-        high_open_high_close_signals = [s for s in signals if s.get('next_open_change_pct', 0) > 0 and s.get('next_close_change_pct', 0) > 0]
-        high_open_high_close_count = len(high_open_high_close_signals)
-        
-        # 筛选次日低开收盘上涨的股票
-        low_open_close_up_signals = [s for s in signals if s.get('next_open_change_pct', 0) < 0 and s.get('next_close_change_pct', 0) > 0]
-        low_open_close_up_count = len(low_open_close_up_signals)
-        
-        # 筛选次日低开低走的股票
-        low_open_low_close_signals = [s for s in signals if s.get('next_open_change_pct', 0) < 0 and s.get('next_close_change_pct', 0) < 0]
-        low_open_low_close_count = len(low_open_low_close_signals)
-        
-        # 计算中长期表现
-        day3_up_count = len([s for s in signals if s.get('day3_change_pct') is not None and s.get('day3_change_pct', 0) > 0])
-        day5_up_count = len([s for s in signals if s.get('day5_change_pct') is not None and s.get('day5_change_pct', 0) > 0])
-        day10_up_count = len([s for s in signals if s.get('day10_change_pct') is not None and s.get('day10_change_pct', 0) > 0])
-        
-        # 计算次日高开高走股票中的后续表现
-        high_open_high_close_day3_up = len([s for s in high_open_high_close_signals if s.get('day3_change_pct') is not None and s.get('day3_change_pct', 0) > 0])
-        high_open_high_close_day5_up = len([s for s in high_open_high_close_signals if s.get('day5_change_pct') is not None and s.get('day5_change_pct', 0) > 0])
-        high_open_high_close_day10_up = len([s for s in high_open_high_close_signals if s.get('day10_change_pct') is not None and s.get('day10_change_pct', 0) > 0])
-        
-        # 计算次日低开收盘上涨股票中的后续表现
-        low_open_close_up_day3_up = len([s for s in low_open_close_up_signals if s.get('day3_change_pct') is not None and s.get('day3_change_pct', 0) > 0])
-        low_open_close_up_day5_up = len([s for s in low_open_close_up_signals if s.get('day5_change_pct') is not None and s.get('day5_change_pct', 0) > 0])
-        low_open_close_up_day10_up = len([s for s in low_open_close_up_signals if s.get('day10_change_pct') is not None and s.get('day10_change_pct', 0) > 0])
-        
-        # 计算次日低开低走股票中的后续表现
-        low_open_low_close_day3_up = len([s for s in low_open_low_close_signals if s.get('day3_change_pct') is not None and s.get('day3_change_pct', 0) > 0])
-        low_open_low_close_day5_up = len([s for s in low_open_low_close_signals if s.get('day5_change_pct') is not None and s.get('day5_change_pct', 0) > 0])
-        low_open_low_close_day10_up = len([s for s in low_open_low_close_signals if s.get('day10_change_pct') is not None and s.get('day10_change_pct', 0) > 0])
-        
-        return {
-            'total_count': total_count,
-            'next_open_up_count': next_open_up_count,
-            'next_close_up_count': next_close_up_count,
-            'high_open_high_close_count': high_open_high_close_count,
-            'day3_up_count': day3_up_count,
-            'day5_up_count': day5_up_count,
-            'day10_up_count': day10_up_count,
-            'high_open_high_close_day3_up': high_open_high_close_day3_up,
-            'high_open_high_close_day5_up': high_open_high_close_day5_up,
-            'high_open_high_close_day10_up': high_open_high_close_day10_up,
-            'low_open_close_up_count': low_open_close_up_count,
-            'low_open_close_up_day3_up': low_open_close_up_day3_up,
-            'low_open_close_up_day5_up': low_open_close_up_day5_up,
-            'low_open_close_up_day10_up': low_open_close_up_day10_up,
-            'low_open_low_close_count': low_open_low_close_count,
-            'low_open_low_close_day3_up': low_open_low_close_day3_up,
-            'low_open_low_close_day5_up': low_open_low_close_day5_up,
-            'low_open_low_close_day10_up': low_open_low_close_day10_up
-        }
+
     
     def test_single_stock(self, stock_code: str, verbose: bool = True, 
                          target_date: str = None) -> Dict[str, Any]:
@@ -385,16 +234,8 @@ class BacktestingSystem:
                 # 生成测试简报
                 if signals:
                     result_df = pd.DataFrame(signals)
-                    stats = self.calculate_detailed_statistics(signals)
-                    self.write_backtest_result_to_file(
-                        stats['total_count'], stats['next_open_up_count'], stats['next_close_up_count'],
-                        stats['high_open_high_close_count'], stats['day3_up_count'], stats['day5_up_count'], stats['day10_up_count'],
-                        stats['high_open_high_close_day3_up'], stats['high_open_high_close_day5_up'], stats['high_open_high_close_day10_up'],
-                        stats['low_open_close_up_count'], stats['low_open_close_up_day3_up'], 
-                        stats['low_open_close_up_day5_up'], stats['low_open_close_up_day10_up'],
-                        stats['low_open_low_close_count'], stats['low_open_low_close_day3_up'],
-                        stats['low_open_low_close_day5_up'], stats['low_open_low_close_day10_up'],
-                        result_df
+                    self.result_analyzer.write_backtest_result_to_file(
+                        signals, self.get_strategy_description(), current_dir
                     )
                 
                 return {
@@ -432,7 +273,26 @@ class BacktestingSystem:
         
         try:
             # 执行批量测试
-            result_df = self.stock_selector.test_batch_stocks(stock_codes, num_processes)
+            self.logger.info(f"开始批量测试 {len(stock_codes)} 个股票，使用 {num_processes} 个进程")
+            
+            if num_processes == 1:
+                # 单进程处理
+                all_signals = []
+                for stock_code in stock_codes:
+                    signals = self.stock_selector.test_single_stock(stock_code, verbose=False)
+                    all_signals.extend(signals)
+            else:
+                # 多进程处理
+                all_signals = self._process_stocks_multiprocessing(stock_codes, num_processes)
+            
+            # 转换为DataFrame
+            if all_signals:
+                result_df = pd.DataFrame(all_signals)
+                result_df = result_df.sort_values(['date', 'stock_code']).reset_index(drop=True)
+            else:
+                result_df = pd.DataFrame()
+            
+            self.logger.info(f"批量测试完成，共找到 {len(all_signals)} 个信号")
             
             if result_df.empty:
                 self.logger.warning("批量测试未找到任何信号")
@@ -445,6 +305,13 @@ class BacktestingSystem:
             
             # 转换为信号列表
             signals = result_df.to_dict('records')
+            
+            # 应用过滤条件：剔除次日开盘涨幅>4.5%且开盘价等于收盘价的信号
+            original_count = len(signals)
+            signals, filtered_count = self.result_analyzer.filter_high_open_flat_signals(signals)
+            
+            if filtered_count > 0:
+                self.logger.info(f"过滤掉 {filtered_count} 个次日高开平盘信号，剩余 {len(signals)} 个信号")
             
             # 分析结果
             analysis = self.result_analyzer.analyze_signals(signals)
@@ -470,16 +337,8 @@ class BacktestingSystem:
                 self.result_exporter.export_to_csv(signals, output_file, include_analysis=False)
             
             # 生成测试简报
-            stats = self.calculate_detailed_statistics(signals)
-            self.write_backtest_result_to_file(
-                stats['total_count'], stats['next_open_up_count'], stats['next_close_up_count'],
-                stats['high_open_high_close_count'], stats['day3_up_count'], stats['day5_up_count'], stats['day10_up_count'],
-                stats['high_open_high_close_day3_up'], stats['high_open_high_close_day5_up'], stats['high_open_high_close_day10_up'],
-                stats['low_open_close_up_count'], stats['low_open_close_up_day3_up'], 
-                stats['low_open_close_up_day5_up'], stats['low_open_close_up_day10_up'],
-                stats['low_open_low_close_count'], stats['low_open_low_close_day3_up'],
-                stats['low_open_low_close_day5_up'], stats['low_open_low_close_day10_up'],
-                result_df
+            self.result_analyzer.write_backtest_result_to_file(
+                signals, self.get_strategy_description(), current_dir
             )
             
             return {
@@ -528,8 +387,27 @@ class BacktestingSystem:
             
             self.logger.info(f"共找到 {len(all_stock_codes)} 个可用股票")
             
-            # 执行全量测试
-            result_df = self.stock_selector.test_all_stocks(num_processes, limit)
+            # 执行全量测试 - 使用本地的批量处理逻辑
+            self.logger.info(f"开始全量测试 {len(all_stock_codes)} 个股票，使用 {num_processes} 个进程")
+            
+            if num_processes == 1:
+                # 单进程处理
+                all_signals = []
+                for stock_code in all_stock_codes:
+                    signals = self.stock_selector.test_single_stock(stock_code, verbose=False)
+                    all_signals.extend(signals)
+            else:
+                # 多进程处理
+                all_signals = self._process_stocks_multiprocessing(all_stock_codes, num_processes)
+            
+            # 转换为DataFrame
+            if all_signals:
+                result_df = pd.DataFrame(all_signals)
+                result_df = result_df.sort_values(['date', 'stock_code']).reset_index(drop=True)
+            else:
+                result_df = pd.DataFrame()
+            
+            self.logger.info(f"全量测试完成，共找到 {len(all_signals)} 个信号")
             
             if result_df.empty:
                 self.logger.warning("全量测试未找到任何信号")
@@ -542,6 +420,13 @@ class BacktestingSystem:
             
             # 转换为信号列表
             signals = result_df.to_dict('records')
+            
+            # 应用过滤条件：剔除次日开盘涨幅>4.5%且开盘价等于收盘价的信号
+            original_count = len(signals)
+            signals, filtered_count = self.result_analyzer.filter_high_open_flat_signals(signals)
+            
+            if filtered_count > 0:
+                self.logger.info(f"过滤掉 {filtered_count} 个次日高开平盘信号，剩余 {len(signals)} 个信号")
             
             # 分析结果
             analysis = self.result_analyzer.analyze_signals(signals)
@@ -574,16 +459,8 @@ class BacktestingSystem:
                 self.result_analyzer.generate_performance_report(signals, report_file)
             
             # 生成测试简报
-            stats = self.calculate_detailed_statistics(signals)
-            self.write_backtest_result_to_file(
-                stats['total_count'], stats['next_open_up_count'], stats['next_close_up_count'],
-                stats['high_open_high_close_count'], stats['day3_up_count'], stats['day5_up_count'], stats['day10_up_count'],
-                stats['high_open_high_close_day3_up'], stats['high_open_high_close_day5_up'], stats['high_open_high_close_day10_up'],
-                stats['low_open_close_up_count'], stats['low_open_close_up_day3_up'], 
-                stats['low_open_close_up_day5_up'], stats['low_open_close_up_day10_up'],
-                stats['low_open_low_close_count'], stats['low_open_low_close_day3_up'],
-                stats['low_open_low_close_day5_up'], stats['low_open_low_close_day10_up'],
-                result_df
+            self.result_analyzer.write_backtest_result_to_file(
+                signals, self.get_strategy_description(), current_dir
             )
             
             return {
@@ -619,6 +496,136 @@ class BacktestingSystem:
             str: 策略描述
         """
         return self.strategy_engine.get_strategy_description()
+    
+    def _process_stocks_multiprocessing(self, stock_codes: List[str], num_processes: int) -> List[Dict[str, Any]]:
+        """
+        多进程处理股票
+        
+        Args:
+            stock_codes: 股票代码列表
+            num_processes: 进程数量
+            
+        Returns:
+            List[Dict[str, Any]]: 所有信号列表
+        """
+        # 创建任务队列
+        task_queue = JoinableQueue()
+        result_queue = Queue()
+        
+        # 添加任务到队列
+        for stock_code in stock_codes:
+            task_queue.put(stock_code)
+        
+        # 创建工作进程
+        processes = []
+        for i in range(num_processes):
+            p = Process(
+                target=self._worker_process,
+                args=(task_queue, result_queue, i + 1)
+            )
+            p.start()
+            processes.append(p)
+        
+        # 等待所有任务完成
+        self.logger.info("等待所有任务完成...")
+        task_queue.join()
+        self.logger.info("所有任务已完成，开始收集结果并终止进程")
+        
+        # 等待进程完成结果提交
+        self.logger.info("等待进程完成结果提交...")
+        time.sleep(3)
+        
+        # 收集所有可用的结果
+        self.logger.info("开始收集进程结果...")
+        all_signals = []
+        result_count = 0
+        
+        while not result_queue.empty():
+            try:
+                signals = result_queue.get_nowait()
+                all_signals.extend(signals)
+                result_count += 1
+                self.logger.info(f"收集到结果批次 {result_count}，当前总信号数: {len(all_signals)}")
+            except:
+                break
+        
+        # 再等待一下，确保所有进程都有机会提交结果
+        if result_count == 0:
+            self.logger.info("第一次未收集到结果，再等待2秒...")
+            time.sleep(2)
+            while not result_queue.empty():
+                try:
+                    signals = result_queue.get_nowait()
+                    all_signals.extend(signals)
+                    result_count += 1
+                    self.logger.info(f"延迟收集到结果批次 {result_count}，当前总信号数: {len(all_signals)}")
+                except:
+                    break
+        
+        # 现在强制终止所有进程
+        self.logger.info("开始强制终止所有进程...")
+        for i, p in enumerate(processes):
+            if p.is_alive():
+                self.logger.info(f"强制终止进程 {i+1} (PID: {p.pid})")
+                p.terminate()
+                p.join(timeout=3)  # 给一点时间让进程清理
+                if p.is_alive():
+                    self.logger.warning(f"进程 {i+1} (PID: {p.pid}) 仍未结束，使用kill")
+                    p.kill()
+            else:
+                self.logger.info(f"进程 {i+1} (PID: {p.pid}) 已自然结束")
+        
+        self.logger.info("所有进程已完成")
+        self.logger.info(f"结果收集完成！共收集了 {result_count} 个进程的结果")
+        self.logger.info(f"多进程处理完成！总共找到 {len(all_signals)} 个信号")
+        
+        return all_signals
+    
+    def _worker_process(self, task_queue: JoinableQueue, result_queue: Queue, process_id: int):
+        """
+        工作进程函数
+        
+        Args:
+            task_queue: 任务队列
+            result_queue: 结果队列
+            process_id: 进程ID
+        """
+        # 在工作进程中重新配置日志系统
+        self._setup_worker_logging(process_id)
+        
+        # 在工作进程中创建新的StockSelector实例
+        try:
+            stock_selector = StockSelector(self.data_folder, self.strategy_engine)
+            
+            while True:
+                try:
+                    # 从队列获取任务
+                    stock_code = task_queue.get(timeout=1)
+                    
+                    try:
+                        # 处理单个股票
+                        signals = stock_selector.test_single_stock(stock_code, verbose=False)
+                        
+                        # 将结果放入结果队列
+                        result_queue.put(signals)
+                        
+                    except Exception as e:
+                        # 处理单个股票时出错，记录错误但继续处理其他股票
+                        print(f"进程 {process_id} 处理股票 {stock_code} 时出错: {e}")
+                        result_queue.put([])  # 放入空列表表示该股票处理失败
+                    
+                    finally:
+                        # 标记任务完成
+                        task_queue.task_done()
+                        
+                except:
+                    # 队列为空或超时，退出循环
+                    break
+                    
+        except Exception as e:
+            print(f"工作进程 {process_id} 初始化失败: {e}")
+        
+        print(f"工作进程 {process_id} 结束")
 
 
 def main():

@@ -3,11 +3,7 @@
 策略执行模块 - 独立的策略条件检查逻辑
 
 策略条件：
-1、股票价格必须大于1（最低价和收盘价都必须大于1）
-2、前面10个交易日20，30，60日均线都是逐渐升高的
-3、前面三个交易日中每天的收盘价在20日均线正负1%范围内或者30日均线正负1%范围内
-4、当日是阳线，并且收盘价高于前面三个交易日的最高价
-5、当日成交量小于之前一个交易日10日成交量均值的1.5倍
+1、开盘高开3%以上，收盘下跌3%以上
 """
 
 import pandas as pd
@@ -40,142 +36,73 @@ class StrategyCondition(ABC):
         pass
 
 
-class PriceCondition(StrategyCondition):
-    """价格条件：股票价格必须大于1"""
+class HighOpenLowCloseCondition(StrategyCondition):
+    """高开低收条件：开盘高开3%以上，收盘下跌3%以上"""
     
     def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
-        current_data = df.iloc[current_idx]
-        close_price = current_data['close']
-        low_price = current_data['low']
-        
-        return close_price > 1 and low_price > 1
-    
-    def get_description(self) -> str:
-        return "股票价格必须大于1（最低价和收盘价都必须大于1）"
-
-
-class MovingAverageUpwardCondition(StrategyCondition):
-    """均线上升条件：前面10个交易日20，30，60日均线都是逐渐升高的"""
-    
-    def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
-        # 需要至少前10个交易日的数据
-        if current_idx < 10:
+        # 需要至少前1个交易日的数据来计算高开
+        if current_idx < 1:
             return False
         
-        for i in range(1, 11):  # 检查前1到前10个交易日
-            if current_idx - i < 0:
-                return False
-            
-            current_day = df.iloc[current_idx - i + 1] if i > 1 else df.iloc[current_idx]
-            prev_day = df.iloc[current_idx - i]
-            
-            # 检查20日均线
-            current_ma20 = current_day['ma20'] if 'ma20' in current_day and not pd.isna(current_day['ma20']) else None
-            prev_ma20 = prev_day['ma20'] if 'ma20' in prev_day and not pd.isna(prev_day['ma20']) else None
-            
-            # 检查30日均线
-            current_ma30 = current_day['ma30'] if 'ma30' in current_day and not pd.isna(current_day['ma30']) else None
-            prev_ma30 = prev_day['ma30'] if 'ma30' in prev_day and not pd.isna(prev_day['ma30']) else None
-            
-            # 检查60日均线
-            current_ma60 = current_day['ma60'] if 'ma60' in current_day and not pd.isna(current_day['ma60']) else None
-            prev_ma60 = prev_day['ma60'] if 'ma60' in prev_day and not pd.isna(prev_day['ma60']) else None
-            
-            # 如果任何一个均线数据缺失或不是上升的，则条件不满足
-            if (current_ma20 is None or prev_ma20 is None or current_ma20 <= prev_ma20 or
-                current_ma30 is None or prev_ma30 is None or current_ma30 <= prev_ma30 or
-                current_ma60 is None or prev_ma60 is None or current_ma60 <= prev_ma60):
-                return False
+        current_data = df.iloc[current_idx]
+        prev_data = df.iloc[current_idx - 1]
         
-        return True
+        current_open = current_data['open']
+        current_close = current_data['close']
+        prev_close = prev_data['close']
+        
+        # 检查开盘高开3%以上（相对于上一日收盘价）
+        open_change_pct = (current_open - prev_close) / prev_close * 100
+        high_open = open_change_pct >= 3.0
+        
+        # 检查收盘下跌3%以上（相对于上一日收盘价）
+        close_change_pct = (current_close - prev_close) / prev_close * 100
+        low_close = close_change_pct <= -3.0
+        
+        return high_open and low_close
     
     def get_description(self) -> str:
-        return "前面10个交易日20，30，60日均线都是逐渐升高的"
+        return "开盘高开3%以上，收盘下跌3%以上"
 
 
-class ClosePriceNearMACondition(StrategyCondition):
-    """收盘价接近均线条件：前面三个交易日中每天的收盘价在20日均线正负1%范围内或者30日均线正负1%范围内"""
-    
-    def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
-        for i in range(1, 4):  # 检查前1、2、3个交易日
-            if current_idx - i < 0:
-                return False
-            
-            day_data = df.iloc[current_idx - i]
-            day_close = day_data['close']
-            day_ma20 = day_data['ma20'] if 'ma20' in day_data and not pd.isna(day_data['ma20']) else None
-            day_ma30 = day_data['ma30'] if 'ma30' in day_data and not pd.isna(day_data['ma30']) else None
-            
-            # 检查是否在20日均线正负1%范围内
-            in_ma20_range = False
-            if day_ma20 is not None and day_ma20 > 0:
-                ma20_diff_percent = abs(day_close - day_ma20) / day_ma20
-                in_ma20_range = ma20_diff_percent <= 0.01
-            
-            # 检查是否在30日均线正负1%范围内
-            in_ma30_range = False
-            if day_ma30 is not None and day_ma30 > 0:
-                ma30_diff_percent = abs(day_close - day_ma30) / day_ma30
-                in_ma30_range = ma30_diff_percent <= 0.01
-            
-            # 如果既不在20日均线范围内，也不在30日均线范围内，则条件不满足
-            if not (in_ma20_range or in_ma30_range):
-                return False
-        
-        return True
-    
-    def get_description(self) -> str:
-        return "前面三个交易日中每天的收盘价在20日均线正负1%范围内或者30日均线正负1%范围内"
-
-
-class PositiveLineAndHigherCloseCondition(StrategyCondition):
-    """阳线且收盘价更高条件：当日是阳线，并且收盘价高于前面三个交易日的最高价"""
+class PriceAboveOneCondition(StrategyCondition):
+    """价格大于1条件：股票价格必须大于1"""
     
     def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
         current_data = df.iloc[current_idx]
-        open_price = current_data['open']
-        close_price = current_data['close']
+        current_close = current_data['close']
         
-        # 检查是否是阳线
-        is_positive_line = close_price > open_price
-        
-        # 获取前面三个交易日的最高价
-        if is_positive_line and current_idx >= 3:
-            prev_3days_high_prices = []
-            for i in range(1, 4):  # 前1、2、3个交易日
-                if current_idx - i >= 0:
-                    prev_3days_high_prices.append(df.iloc[current_idx - i]['high'])
-            
-            if prev_3days_high_prices:
-                max_prev_3days_high = max(prev_3days_high_prices)
-                return close_price > max_prev_3days_high
-        
-        return False
+        # 检查收盘价是否大于1
+        return current_close > 1.0
     
     def get_description(self) -> str:
-        return "当日是阳线，并且收盘价高于前面三个交易日的最高价"
+        return "股票价格必须大于1"
 
 
-class VolumeCondition(StrategyCondition):
-    """成交量条件：当日成交量小于之前一个交易日10日成交量均值的1.5倍"""
+class VolumeDoubleCondition(StrategyCondition):
+    """成交量翻倍条件：当日成交量大于上一日成交量2倍以上"""
     
     def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
-        current_data = df.iloc[current_idx]
-        prev_data = df.iloc[current_idx - 1] if current_idx > 0 else None
-        
-        if prev_data is None:
+        # 需要至少前1个交易日的数据来比较成交量
+        if current_idx < 1:
             return False
         
-        volume = current_data['volume'] if 'volume' in current_data and not pd.isna(current_data['volume']) else None
-        prev_vol10 = prev_data['vol10'] if 'vol10' in prev_data and not pd.isna(prev_data['vol10']) else None
+        current_data = df.iloc[current_idx]
+        prev_data = df.iloc[current_idx - 1]
         
-        if volume is not None and prev_vol10 is not None and prev_vol10 > 0:
-            return volume < prev_vol10 * 1.5
+        current_volume = current_data['volume']
+        prev_volume = prev_data['volume']
         
-        return False
+        # 检查前一日成交量是否为0，避免除零错误
+        if prev_volume <= 0:
+            return False
+        
+        # 检查当日成交量是否大于上一日成交量的2倍
+        volume_ratio = current_volume / prev_volume
+        return volume_ratio > 2.0
     
     def get_description(self) -> str:
-        return "当日成交量小于之前一个交易日10日成交量均值的1.5倍"
+        return "当日成交量大于上一日成交量2倍以上"
 
 
 class StrategyEngine:
@@ -184,11 +111,9 @@ class StrategyEngine:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.conditions = [
-            PriceCondition(),
-            MovingAverageUpwardCondition(),
-            ClosePriceNearMACondition(),
-            PositiveLineAndHigherCloseCondition(),
-            VolumeCondition()
+            HighOpenLowCloseCondition(),
+            PriceAboveOneCondition(),
+            VolumeDoubleCondition()
         ]
     
     def get_strategy_description(self) -> str:
@@ -215,8 +140,8 @@ class StrategyEngine:
         Returns:
             bool: 是否符合条件
         """
-        # 需要至少前10个交易日的数据
-        if current_idx < 10:
+        # 需要至少前1个交易日的数据
+        if current_idx < 1:
             return False
         
         # 检查所有条件
@@ -240,22 +165,30 @@ class StrategyEngine:
         Returns:
             Tuple[bool, Dict[str, Any]]: (是否符合条件, 详细检查结果)
         """
-        # 需要至少前10个交易日的数据
-        if current_idx < 10:
+        # 需要至少前1个交易日的数据
+        if current_idx < 1:
             if verbose:
-                self.logger.info(f"股票 {stock_code} 索引 {current_idx}: 数据不足，需要至少前10个交易日数据")
+                self.logger.info(f"股票 {stock_code} 索引 {current_idx}: 数据不足，需要至少前1个交易日数据")
             return False, {"error": "数据不足"}
         
         current_date = df.iloc[current_idx]['datetime'].strftime('%Y-%m-%d')
         current_data = df.iloc[current_idx]
+        prev_data = df.iloc[current_idx - 1]
         
         if verbose:
             self.logger.info(f"\n=== 股票 {stock_code} 日期 {current_date} 策略条件检查 ===")
+            self.logger.info(f"前日收盘价: {prev_data['close']:.4f}")
             self.logger.info(f"当日价格信息:")
             self.logger.info(f"  开盘价: {current_data['open']:.4f}")
             self.logger.info(f"  收盘价: {current_data['close']:.4f}")
+            self.logger.info(f"  最高价: {current_data['high']:.4f}")
             self.logger.info(f"  最低价: {current_data['low']:.4f}")
-            self.logger.info(f"  成交量: {current_data['volume'] if 'volume' in current_data and not pd.isna(current_data['volume']) else 'N/A'}")
+            
+            # 计算变化幅度
+            open_change_pct = (current_data['open'] - prev_data['close']) / prev_data['close'] * 100
+            close_change_pct = (current_data['close'] - current_data['open']) / current_data['open'] * 100
+            self.logger.info(f"  开盘涨幅: {open_change_pct:.2f}%")
+            self.logger.info(f"  收盘跌幅: {close_change_pct:.2f}%")
         
         # 检查各个条件
         condition_results = {}
@@ -305,7 +238,7 @@ class StrategyEngine:
         signals = []
         
         if start_idx is None:
-            start_idx = 10  # 至少需要前10个交易日数据
+            start_idx = 1  # 至少需要前1个交易日数据
         if end_idx is None:
             end_idx = len(df) - 1
         
@@ -320,6 +253,7 @@ class StrategyEngine:
                 next_open = None
                 next_open_change_pct = None
                 next_close_change_pct = None
+                next_intraday_change_pct = None  # 次日收盘价相对于次日开盘价的变化
                 
                 # 计算次日数据（如果有次日数据）
                 if idx + 1 < len(df):
@@ -329,6 +263,7 @@ class StrategyEngine:
                     next_day_return = (next_day_close - current_close) / current_close * 100
                     next_open_change_pct = (next_open - current_close) / current_close * 100
                     next_close_change_pct = (next_day_close - current_close) / current_close * 100
+                    next_intraday_change_pct = (next_day_close - next_open) / next_open * 100 if next_open != 0 else None
                 
                 # 计算3日、5日、10日后的数据
                 day3_close = None
@@ -350,6 +285,21 @@ class StrategyEngine:
                     day10_close = df.iloc[idx + 10]['close']
                     day10_change_pct = (day10_close - current_close) / current_close * 100
                 
+                # 基于次日收盘价的3日、5日、10日涨跌幅计算
+                day3_from_next_change_pct = None
+                day5_from_next_change_pct = None
+                day10_from_next_change_pct = None
+                
+                if next_day_close is not None:
+                    if idx + 3 < len(df):
+                        day3_from_next_change_pct = (day3_close - next_day_close) / next_day_close * 100 if day3_close is not None else None
+                    
+                    if idx + 5 < len(df):
+                        day5_from_next_change_pct = (day5_close - next_day_close) / next_day_close * 100 if day5_close is not None else None
+                    
+                    if idx + 10 < len(df):
+                        day10_from_next_change_pct = (day10_close - next_day_close) / next_day_close * 100 if day10_close is not None else None
+                
                 signal = {
                     "stock_code": stock_code,
                     "date": current_data['datetime'].strftime('%Y-%m-%d'),
@@ -363,12 +313,16 @@ class StrategyEngine:
                     "next_day_return": next_day_return,
                     "next_open_change_pct": next_open_change_pct,
                     "next_close_change_pct": next_close_change_pct,
+                    "next_intraday_change_pct": next_intraday_change_pct,
                     "day3_close": day3_close,
                     "day3_change_pct": day3_change_pct,
                     "day5_close": day5_close,
                     "day5_change_pct": day5_change_pct,
                     "day10_close": day10_close,
-                    "day10_change_pct": day10_change_pct
+                    "day10_change_pct": day10_change_pct,
+                    "day3_from_next_change_pct": day3_from_next_change_pct,
+                    "day5_from_next_change_pct": day5_from_next_change_pct,
+                    "day10_from_next_change_pct": day10_from_next_change_pct
                 }
                 
                 signals.append(signal)
