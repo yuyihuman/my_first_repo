@@ -395,6 +395,52 @@
                 moneySupplyChart.destroy();
             }
             
+            // 定义重要时间节点
+            const timePoints = ['2002.2', '2005.5', '2008.12', '2012.1', '2015.3', '2019.1', '2021.11', '2024.9'];
+            
+            // 计算相邻时间点间的月数
+            function calculateMonthsBetween(date1, date2) {
+                const [year1, month1] = date1.split('.').map(Number);
+                const [year2, month2] = date2.split('.').map(Number);
+                return (year2 - year1) * 12 + (month2 - month1);
+            }
+            
+            // 创建注释配置
+            const annotations = {};
+            
+            // 添加垂直线
+            timePoints.forEach((point, index) => {
+                annotations[`line${index}`] = {
+                    type: 'line',
+                    xMin: point,
+                    xMax: point,
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 2,
+                    borderDash: [5, 5]
+                };
+            });
+            
+            // 添加月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = timePoints[i]; // 在起始点附近显示
+                
+                annotations[`label${i}`] = {
+                    type: 'label',
+                    xValue: midPoint,
+                    yValue: 'max',
+                    content: `${months}个月`,
+                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10
+                    },
+                    position: 'start',
+                    yAdjust: -20
+                };
+            }
+            
             // 创建新图表
             moneySupplyChart = new Chart(ctx, {
                 type: 'line',
@@ -435,11 +481,17 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'M2、M1与上海二手住宅价格指数同比变化(%)'
+                            text: 'M2、M1与上海二手住宅价格指数同比变化(%)',
+                            font: {
+                                size: 16
+                            }
                         },
                         tooltip: {
                             mode: 'index',
                             intersect: false
+                        },
+                        annotation: {
+                            annotations: annotations
                         }
                     },
                     scales: {
@@ -501,6 +553,52 @@
                 indexComparisonChart.destroy();
             }
             
+            // 定义适合2016年之后数据的重要时间节点
+            const timePoints = ['2019.1', '2021.11', '2024.9'];
+            
+            // 计算相邻时间点间的月数
+            function calculateMonthsBetween(date1, date2) {
+                const [year1, month1] = date1.split('.').map(Number);
+                const [year2, month2] = date2.split('.').map(Number);
+                return (year2 - year1) * 12 + (month2 - month1);
+            }
+            
+            // 创建注释配置
+            const annotations = {};
+            
+            // 添加垂直线
+            timePoints.forEach((point, index) => {
+                annotations[`line${index}`] = {
+                    type: 'line',
+                    xMin: point,
+                    xMax: point,
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 2,
+                    borderDash: [5, 5]
+                };
+            });
+            
+            // 添加月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = timePoints[i]; // 在起始点附近显示
+                
+                annotations[`label${i}`] = {
+                    type: 'label',
+                    xValue: midPoint,
+                    yValue: 'max',
+                    content: `${months}个月`,
+                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10
+                    },
+                    position: 'start',
+                    yAdjust: -20
+                };
+            }
+            
             // 创建新图表
             indexComparisonChart = new Chart(ctx, {
                 type: 'line',
@@ -556,6 +654,9 @@
                         },
                         legend: {
                             position: 'top',
+                        },
+                        annotation: {
+                            annotations: annotations
                         }
                     },
                     scales: {
@@ -835,7 +936,7 @@
                             pointRadius: 1,
                             tension: 0.1,
                             spanGaps: true,
-                            yAxisID: 'y1'
+                            yAxisID: 'y'
                         }
                     ]
                 },
@@ -879,11 +980,7 @@
                             position: 'left',
                             title: {
                                 display: true,
-                                text: 'M1同比增幅 (%)',
-                                color: 'rgba(54, 162, 235, 1)'
-                            },
-                            ticks: {
-                                color: 'rgba(54, 162, 235, 1)'
+                                text: '同比增幅 (%)'
                             },
                             grid: {
                                 color: function(context) {
@@ -897,72 +994,6 @@
                                         return 2;
                                     }
                                     return 1;
-                                }
-                            }
-                        },
-                        y1: {
-                            type: 'linear',
-                            display: true,
-                            position: 'right',
-                            title: {
-                                display: true,
-                                text: '上海二手住宅价格指数同比 (%)',
-                                color: 'rgba(255, 165, 0, 1)'
-                            },
-                            ticks: {
-                                color: 'rgba(255, 165, 0, 1)'
-                            },
-                            grid: {
-                                drawOnChartArea: false,
-                                color: function(context) {
-                                    if (context.tick.value === 0) {
-                                        return 'rgba(0, 0, 0, 0.8)';
-                                    }
-                                    return 'rgba(0, 0, 0, 0.1)';
-                                },
-                                lineWidth: function(context) {
-                                    if (context.tick.value === 0) {
-                                        return 2;
-                                    }
-                                    return 1;
-                                }
-                            },
-                            // 使用afterBuildTicks来确保0点对齐
-                            afterBuildTicks: function(scale) {
-                                const chart = scale.chart;
-                                const leftScale = chart.scales.y;
-                                
-                                if (leftScale && leftScale.min !== undefined && leftScale.max !== undefined) {
-                                    // 获取右轴数据范围
-                                    const rightData = chart.data.datasets.find(d => d.yAxisID === 'y1').data.filter(v => v !== null && v !== undefined);
-                                    if (rightData.length > 0) {
-                                        const rightDataMax = Math.max(...rightData);
-                                        const rightDataMin = Math.min(...rightData);
-                                        
-                                        // 计算左轴的0点位置比例（从底部算起）
-                                        const leftRange = leftScale.max - leftScale.min;
-                                        const leftZeroPosition = leftScale.min < 0 ? (-leftScale.min) / leftRange : 0;
-                                        
-                                        // 根据左轴0点位置计算右轴范围
-                                        if (leftZeroPosition > 0) {
-                                            // 左轴有负值区域
-                                            const rightRange = rightDataMax - rightDataMin;
-                                            const paddingFactor = 0.1; // 10%的边距
-                                            const expandedRightRange = rightRange * (1 + 2 * paddingFactor);
-                                            
-                                            // 根据左轴0点位置计算右轴的min和max
-                                            const rightNegativeRange = expandedRightRange * leftZeroPosition;
-                                            const rightPositiveRange = expandedRightRange * (1 - leftZeroPosition);
-                                            
-                                            scale.min = -rightNegativeRange;
-                                            scale.max = rightPositiveRange;
-                                        } else {
-                                            // 左轴没有负值，两轴都从0开始
-                                            scale.min = 0;
-                                            const rightRange = rightDataMax - Math.min(0, rightDataMin);
-                                            scale.max = rightRange * 1.1; // 添加10%边距
-                                        }
-                                    }
                                 }
                             }
                         }
@@ -1744,6 +1775,63 @@
             const newOrderIndex = filteredData.map(item => item['新订单指数(%)']);
             const newExportOrderIndex = filteredData.map(item => item['新出口订单指数(%)']);
             
+            // 定义适合PMI数据范围的重要时间节点（通常从2005年开始）
+            const timePoints = ['2008.12', '2012.1', '2015.3', '2019.1', '2021.11', '2024.9'];
+            
+            // 计算相邻时间点间的月数
+            function calculateMonthsBetween(date1, date2) {
+                const [year1, month1] = date1.split('.').map(Number);
+                const [year2, month2] = date2.split('.').map(Number);
+                return (year2 - year1) * 12 + (month2 - month1);
+            }
+            
+            // 创建注释配置
+            const annotations = {};
+            
+            // 添加垂直线
+            timePoints.forEach((point, index) => {
+                annotations[`line${index}`] = {
+                    type: 'line',
+                    xMin: point,
+                    xMax: point,
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 2,
+                    borderDash: [5, 5]
+                };
+            });
+            
+            // 添加月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = timePoints[i]; // 在起始点附近显示
+                
+                annotations[`label${i}`] = {
+                    type: 'label',
+                    xValue: midPoint,
+                    yValue: 'max',
+                    content: `${months}个月`,
+                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10
+                    },
+                    position: 'start',
+                    yAdjust: -20
+                };
+            }
+            
+            // 添加50%基准线
+            annotations['line50'] = {
+                type: 'line',
+                yMin: 50,
+                yMax: 50,
+                yScaleID: 'y1',
+                borderColor: 'rgba(0, 0, 0, 0.8)',
+                borderWidth: 1,
+                borderDash: [5, 5]
+            };
+            
             const ctx = document.getElementById('nonBankProfitPmiChart').getContext('2d');
             
             // 销毁旧图表（如果存在）
@@ -1823,17 +1911,7 @@
                             }
                         },
                         annotation: {
-                            annotations: {
-                                line50: {
-                                    type: 'line',
-                                    yMin: 50,
-                                    yMax: 50,
-                                    yScaleID: 'y1',
-                                    borderColor: 'rgba(0, 0, 0, 0.8)',
-                                    borderWidth: 1,
-                                    borderDash: [5, 5]
-                                }
-                            }
+                            annotations: annotations
                         }
                     },
                     scales: {
@@ -1910,6 +1988,52 @@
             const industrialPurchaseIndex = filteredData.map(item => item['工业生产者购进价格指数(2011年1月=100)']);
             const fuelPowerIndex = filteredData.map(item => item['燃料、动力类购进价格指数(2011年1月=100)']);
             
+            // 定义适合2011年之后数据的重要时间节点
+            const timePoints = ['2012.1', '2015.3', '2019.1', '2021.11', '2024.9'];
+            
+            // 计算相邻时间点间的月数
+            function calculateMonthsBetween(date1, date2) {
+                const [year1, month1] = date1.split('.').map(Number);
+                const [year2, month2] = date2.split('.').map(Number);
+                return (year2 - year1) * 12 + (month2 - month1);
+            }
+            
+            // 创建注释配置
+            const annotations = {};
+            
+            // 添加垂直线
+            timePoints.forEach((point, index) => {
+                annotations[`line${index}`] = {
+                    type: 'line',
+                    xMin: point,
+                    xMax: point,
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 2,
+                    borderDash: [5, 5]
+                };
+            });
+            
+            // 添加月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = timePoints[i]; // 在起始点附近显示
+                
+                annotations[`label${i}`] = {
+                    type: 'label',
+                    xValue: midPoint,
+                    yValue: 'max',
+                    content: `${months}个月`,
+                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    borderColor: 'rgba(128, 128, 128, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10
+                    },
+                    position: 'start',
+                    yAdjust: -20
+                };
+            }
+            
             // 创建新图表
             priceIndexChart = new Chart(ctx, {
                 type: 'line',
@@ -1965,6 +2089,9 @@
                         },
                         legend: {
                             display: true
+                        },
+                        annotation: {
+                            annotations: annotations
                         }
                     },
                     scales: {
