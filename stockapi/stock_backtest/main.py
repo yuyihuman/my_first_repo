@@ -333,8 +333,12 @@ class BacktestingSystem:
             if save_results:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 output_file = os.path.join(self.output_folder, f"batch_test_{timestamp}.csv")
-                # 只导出CSV数据文件，不生成额外的分析文件
+                # 导出CSV数据文件
                 self.result_exporter.export_to_csv(signals, output_file, include_analysis=False)
+                
+                # 生成详细的txt报告文件
+                report_file = os.path.join(self.output_folder, f"batch_report_{timestamp}.txt")
+                self.result_analyzer.generate_performance_report(signals, report_file, self.get_strategy_description())
             
             # 生成测试简报
             self.result_analyzer.write_backtest_result_to_file(
@@ -456,7 +460,7 @@ class BacktestingSystem:
                 
                 # 生成一个简单的报告文件
                 report_file = os.path.join(self.output_folder, f"full_report_{timestamp}.txt")
-                self.result_analyzer.generate_performance_report(signals, report_file)
+                self.result_analyzer.generate_performance_report(signals, report_file, self.get_strategy_description())
             
             # 生成测试简报
             self.result_analyzer.write_backtest_result_to_file(

@@ -66,17 +66,18 @@ class HighOpenLowCloseCondition(StrategyCondition):
 
 
 class PriceAboveOneCondition(StrategyCondition):
-    """价格大于1条件：股票价格必须大于1"""
+    """价格大于1条件：股票价格必须大于1（最低价和收盘价都必须大于1）"""
     
     def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
         current_data = df.iloc[current_idx]
         current_close = current_data['close']
+        current_low = current_data['low']
         
-        # 检查收盘价是否大于1
-        return current_close > 1.0
+        # 检查收盘价和最低价是否都大于1
+        return current_close > 1.0 and current_low > 1.0
     
     def get_description(self) -> str:
-        return "股票价格必须大于1"
+        return "股票价格必须大于1（最低价和收盘价都必须大于1）"
 
 
 class VolumeDoubleCondition(StrategyCondition):
@@ -105,15 +106,86 @@ class VolumeDoubleCondition(StrategyCondition):
         return "当日成交量大于上一日成交量2倍以上"
 
 
+class HighOpenAbovePrevHighCondition(StrategyCondition):
+    """高开高收条件：当天开盘价高于上一日最高价至少2%，且当日收盘价高于上一日最高价，当天涨幅小于9.5%"""
+    
+    def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
+        # 需要至少前1个交易日的数据
+        if current_idx < 1:
+            return False
+        
+        current_data = df.iloc[current_idx]
+        prev_data = df.iloc[current_idx - 1]
+        
+        current_open = current_data['open']
+        current_close = current_data['close']
+        prev_high = prev_data['high']
+        prev_close = prev_data['close']
+        
+        # 检查当天开盘价高于上一日最高价至少2%
+        open_vs_prev_high_pct = (current_open - prev_high) / prev_high * 100
+        open_condition = open_vs_prev_high_pct >= 2.0
+        
+        # 检查当日收盘价高于上一日最高价
+        close_condition = current_close > prev_high
+        
+        # 检查当天涨幅小于9.5%（相对于前一日收盘价）
+        daily_change_pct = (current_close - prev_close) / prev_close * 100
+        change_condition = daily_change_pct < 9.5
+        
+        return open_condition and close_condition and change_condition
+    
+    def get_description(self) -> str:
+        return "当天开盘价高于上一日最高价至少2%，且当日收盘价高于上一日最高价，当天涨幅小于9.5%"
+
+
+class MovingAverageSpreadCondition(StrategyCondition):
+    """均线差距条件：前面三个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%"""
+    
+    def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
+        # 需要至少前30个交易日的数据来计算30日均线
+        if current_idx < 30:
+            return False
+        
+        # 检查前三个交易日（不包括当天）
+        for i in range(1, 4):  # 前1天、前2天、前3天
+            check_idx = current_idx - i
+            if check_idx < 30:
+                continue
+            
+            # 计算该日的5、10、20、30日均线
+            ma5 = df.iloc[check_idx - 4:check_idx + 1]['close'].mean()
+            ma10 = df.iloc[check_idx - 9:check_idx + 1]['close'].mean()
+            ma20 = df.iloc[check_idx - 19:check_idx + 1]['close'].mean()
+            ma30 = df.iloc[check_idx - 29:check_idx + 1]['close'].mean()
+            
+            # 找出最大值和最小值
+            ma_values = [ma5, ma10, ma20, ma30]
+            max_ma = max(ma_values)
+            min_ma = min(ma_values)
+            
+            # 计算差距百分比
+            if min_ma > 0:
+                spread_pct = (max_ma - min_ma) / min_ma * 100
+                if spread_pct < 1.0:
+                    return True
+        
+        return False
+    
+    def get_description(self) -> str:
+        return "前面三个交易日中至少一天5、10、20、30日均线中最大值和最小值之间的差距小于1%"
+
+
 class StrategyEngine:
     """策略执行引擎"""
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.conditions = [
-            HighOpenLowCloseCondition(),
             PriceAboveOneCondition(),
-            VolumeDoubleCondition()
+            HighOpenAbovePrevHighCondition(),
+            MovingAverageSpreadCondition(),
+            VolumeLimitCondition()
         ]
     
     def get_strategy_description(self) -> str:
@@ -430,3 +502,26 @@ class ModelBasedStrategy(StrategyEngine):
             "model_prediction": model_result,
             "final_result": final_result
         }
+
+
+class VolumeLimitCondition(StrategyCondition):
+    """成交量限制条件：当日成交量小于之前一个交易日10日成交量均值的1.5倍"""
+    
+    def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
+        # 需要至少前10个交易日的数据来计算10日成交量均值
+        if current_idx < 10:
+            return False
+        
+        current_data = df.iloc[current_idx]
+        current_volume = current_data['volume']
+        
+        # 计算前一个交易日的10日成交量均值
+        # 前一个交易日是current_idx - 1，其10日均值是从current_idx - 10到current_idx - 1
+        prev_10_day_avg_volume = df.iloc[current_idx - 10:current_idx]['volume'].mean()
+        
+        # 检查当日成交量是否小于前一个交易日10日成交量均值的1.5倍
+        volume_limit = prev_10_day_avg_volume * 1.5
+        return current_volume < volume_limit
+    
+    def get_description(self) -> str:
+        return "当日成交量小于之前一个交易日10日成交量均值的1.5倍"

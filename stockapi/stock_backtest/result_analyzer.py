@@ -100,11 +100,16 @@ class ResultAnalyzer:
         Returns:
             dict: 详细统计信息
         """
-        if not signals:
-            return {}
-        
         # 转换为DataFrame便于计算
-        df = pd.DataFrame(signals)
+        if isinstance(signals, pd.DataFrame):
+            df = signals
+        else:
+            if not signals:
+                return {}
+            df = pd.DataFrame(signals)
+        
+        if df.empty:
+            return {}
         
         # 基本统计
         total_count = len(df)
@@ -117,14 +122,24 @@ class ResultAnalyzer:
         # 开盘收盘组合统计
         high_open_high_close_count = 0  # 高开高走 (次日开盘上涨且收盘高于开盘)
         high_open_low_close_count = 0   # 高开低走 (次日开盘上涨且收盘低于开盘)
+        high_open_flat_close_count = 0  # 高开平走 (次日开盘上涨且收盘等于开盘)
         low_open_close_up_count = 0     # 低开高走 (次日开盘下跌且收盘高于开盘)
         low_open_low_close_count = 0    # 低开低走 (次日开盘下跌且收盘低于开盘)
+        low_open_flat_close_count = 0   # 低开平走 (次日开盘下跌且收盘等于开盘)
+        flat_open_close_up_count = 0    # 平开高走 (次日开盘平盘且收盘上涨)
+        flat_open_close_down_count = 0  # 平开低走 (次日开盘平盘且收盘下跌)
+        flat_open_flat_close_count = 0  # 平开平走 (次日开盘平盘且收盘平盘)
         
         if 'next_open_change_pct' in df.columns and 'next_intraday_change_pct' in df.columns:
             high_open_high_close_count = len(df[(df['next_open_change_pct'] > 0) & (df['next_intraday_change_pct'] > 0)])
             high_open_low_close_count = len(df[(df['next_open_change_pct'] > 0) & (df['next_intraday_change_pct'] < 0)])
+            high_open_flat_close_count = len(df[(df['next_open_change_pct'] > 0) & (df['next_intraday_change_pct'] == 0)])
             low_open_close_up_count = len(df[(df['next_open_change_pct'] < 0) & (df['next_intraday_change_pct'] > 0)])
             low_open_low_close_count = len(df[(df['next_open_change_pct'] < 0) & (df['next_intraday_change_pct'] < 0)])
+            low_open_flat_close_count = len(df[(df['next_open_change_pct'] < 0) & (df['next_intraday_change_pct'] == 0)])
+            flat_open_close_up_count = len(df[(df['next_open_change_pct'] == 0) & (df['next_intraday_change_pct'] > 0)])
+            flat_open_close_down_count = len(df[(df['next_open_change_pct'] == 0) & (df['next_intraday_change_pct'] < 0)])
+            flat_open_flat_close_count = len(df[(df['next_open_change_pct'] == 0) & (df['next_intraday_change_pct'] == 0)])
         
         # 中长期表现统计 - 只统计有完整数据的交易日
         day3_up_count = len(df[(df.get('day3_change_pct', 0) > 0) & pd.notna(df.get('day3_change_pct'))]) if 'day3_change_pct' in df.columns else 0
@@ -192,6 +207,76 @@ class ResultAnalyzer:
             if 'day10_from_next_change_pct' in df.columns:
                 low_open_low_close_day10_up = len(low_open_low_close_signals[(low_open_low_close_signals['day10_from_next_change_pct'] > 0) & pd.notna(low_open_low_close_signals['day10_from_next_change_pct'])])
         
+        # 计算高开平走股票的后续表现
+        high_open_flat_close_day3_up = 0
+        high_open_flat_close_day5_up = 0
+        high_open_flat_close_day10_up = 0
+        
+        if high_open_flat_close_count > 0:
+            high_open_flat_close_signals = df[(df.get('next_open_change_pct', 0) > 0) & (df.get('next_intraday_change_pct', 0) == 0)]
+            if 'day3_from_next_change_pct' in df.columns:
+                high_open_flat_close_day3_up = len(high_open_flat_close_signals[(high_open_flat_close_signals['day3_from_next_change_pct'] > 0) & pd.notna(high_open_flat_close_signals['day3_from_next_change_pct'])])
+            if 'day5_from_next_change_pct' in df.columns:
+                high_open_flat_close_day5_up = len(high_open_flat_close_signals[(high_open_flat_close_signals['day5_from_next_change_pct'] > 0) & pd.notna(high_open_flat_close_signals['day5_from_next_change_pct'])])
+            if 'day10_from_next_change_pct' in df.columns:
+                high_open_flat_close_day10_up = len(high_open_flat_close_signals[(high_open_flat_close_signals['day10_from_next_change_pct'] > 0) & pd.notna(high_open_flat_close_signals['day10_from_next_change_pct'])])
+        
+        # 计算低开平走股票的后续表现
+        low_open_flat_close_day3_up = 0
+        low_open_flat_close_day5_up = 0
+        low_open_flat_close_day10_up = 0
+        
+        if low_open_flat_close_count > 0:
+            low_open_flat_close_signals = df[(df.get('next_open_change_pct', 0) < 0) & (df.get('next_intraday_change_pct', 0) == 0)]
+            if 'day3_from_next_change_pct' in df.columns:
+                low_open_flat_close_day3_up = len(low_open_flat_close_signals[(low_open_flat_close_signals['day3_from_next_change_pct'] > 0) & pd.notna(low_open_flat_close_signals['day3_from_next_change_pct'])])
+            if 'day5_from_next_change_pct' in df.columns:
+                low_open_flat_close_day5_up = len(low_open_flat_close_signals[(low_open_flat_close_signals['day5_from_next_change_pct'] > 0) & pd.notna(low_open_flat_close_signals['day5_from_next_change_pct'])])
+            if 'day10_from_next_change_pct' in df.columns:
+                low_open_flat_close_day10_up = len(low_open_flat_close_signals[(low_open_flat_close_signals['day10_from_next_change_pct'] > 0) & pd.notna(low_open_flat_close_signals['day10_from_next_change_pct'])])
+        
+        # 计算平开高走股票的后续表现
+        flat_open_close_up_day3_up = 0
+        flat_open_close_up_day5_up = 0
+        flat_open_close_up_day10_up = 0
+        
+        if flat_open_close_up_count > 0:
+            flat_open_close_up_signals = df[(df.get('next_open_change_pct', 0) == 0) & (df.get('next_intraday_change_pct', 0) > 0)]
+            if 'day3_from_next_change_pct' in df.columns:
+                flat_open_close_up_day3_up = len(flat_open_close_up_signals[(flat_open_close_up_signals['day3_from_next_change_pct'] > 0) & pd.notna(flat_open_close_up_signals['day3_from_next_change_pct'])])
+            if 'day5_from_next_change_pct' in df.columns:
+                flat_open_close_up_day5_up = len(flat_open_close_up_signals[(flat_open_close_up_signals['day5_from_next_change_pct'] > 0) & pd.notna(flat_open_close_up_signals['day5_from_next_change_pct'])])
+            if 'day10_from_next_change_pct' in df.columns:
+                flat_open_close_up_day10_up = len(flat_open_close_up_signals[(flat_open_close_up_signals['day10_from_next_change_pct'] > 0) & pd.notna(flat_open_close_up_signals['day10_from_next_change_pct'])])
+        
+        # 计算平开低走股票的后续表现
+        flat_open_close_down_day3_up = 0
+        flat_open_close_down_day5_up = 0
+        flat_open_close_down_day10_up = 0
+        
+        if flat_open_close_down_count > 0:
+            flat_open_close_down_signals = df[(df.get('next_open_change_pct', 0) == 0) & (df.get('next_intraday_change_pct', 0) < 0)]
+            if 'day3_from_next_change_pct' in df.columns:
+                flat_open_close_down_day3_up = len(flat_open_close_down_signals[(flat_open_close_down_signals['day3_from_next_change_pct'] > 0) & pd.notna(flat_open_close_down_signals['day3_from_next_change_pct'])])
+            if 'day5_from_next_change_pct' in df.columns:
+                flat_open_close_down_day5_up = len(flat_open_close_down_signals[(flat_open_close_down_signals['day5_from_next_change_pct'] > 0) & pd.notna(flat_open_close_down_signals['day5_from_next_change_pct'])])
+            if 'day10_from_next_change_pct' in df.columns:
+                flat_open_close_down_day10_up = len(flat_open_close_down_signals[(flat_open_close_down_signals['day10_from_next_change_pct'] > 0) & pd.notna(flat_open_close_down_signals['day10_from_next_change_pct'])])
+        
+        # 计算平开平走股票的后续表现
+        flat_open_flat_close_day3_up = 0
+        flat_open_flat_close_day5_up = 0
+        flat_open_flat_close_day10_up = 0
+        
+        if flat_open_flat_close_count > 0:
+            flat_open_flat_close_signals = df[(df.get('next_open_change_pct', 0) == 0) & (df.get('next_intraday_change_pct', 0) == 0)]
+            if 'day3_from_next_change_pct' in df.columns:
+                flat_open_flat_close_day3_up = len(flat_open_flat_close_signals[(flat_open_flat_close_signals['day3_from_next_change_pct'] > 0) & pd.notna(flat_open_flat_close_signals['day3_from_next_change_pct'])])
+            if 'day5_from_next_change_pct' in df.columns:
+                flat_open_flat_close_day5_up = len(flat_open_flat_close_signals[(flat_open_flat_close_signals['day5_from_next_change_pct'] > 0) & pd.notna(flat_open_flat_close_signals['day5_from_next_change_pct'])])
+            if 'day10_from_next_change_pct' in df.columns:
+                flat_open_flat_close_day10_up = len(flat_open_flat_close_signals[(flat_open_flat_close_signals['day10_from_next_change_pct'] > 0) & pd.notna(flat_open_flat_close_signals['day10_from_next_change_pct'])])
+        
         # 计算百分比
         def safe_percentage(numerator, denominator):
             return (numerator / denominator * 100) if denominator > 0 else 0.0
@@ -205,6 +290,10 @@ class ResultAnalyzer:
                                                     pd.notna(df.get('day3_from_next_change_pct')) & 
                                                     pd.notna(df.get('day5_from_next_change_pct')) & 
                                                     pd.notna(df.get('day10_from_next_change_pct'))])
+        high_open_flat_close_with_data_count = len(df[(df.get('next_open_change_pct', 0) > 0) & (df.get('next_intraday_change_pct', 0) == 0) & 
+                                                     pd.notna(df.get('day3_from_next_change_pct')) & 
+                                                     pd.notna(df.get('day5_from_next_change_pct')) & 
+                                                     pd.notna(df.get('day10_from_next_change_pct'))])
         low_open_close_up_with_data_count = len(df[(df.get('next_open_change_pct', 0) < 0) & (df.get('next_intraday_change_pct', 0) > 0) & 
                                                   pd.notna(df.get('day3_from_next_change_pct')) & 
                                                   pd.notna(df.get('day5_from_next_change_pct')) & 
@@ -213,6 +302,22 @@ class ResultAnalyzer:
                                                    pd.notna(df.get('day3_from_next_change_pct')) & 
                                                    pd.notna(df.get('day5_from_next_change_pct')) & 
                                                    pd.notna(df.get('day10_from_next_change_pct'))])
+        low_open_flat_close_with_data_count = len(df[(df.get('next_open_change_pct', 0) < 0) & (df.get('next_intraday_change_pct', 0) == 0) & 
+                                                    pd.notna(df.get('day3_from_next_change_pct')) & 
+                                                    pd.notna(df.get('day5_from_next_change_pct')) & 
+                                                    pd.notna(df.get('day10_from_next_change_pct'))])
+        flat_open_close_up_with_data_count = len(df[(df.get('next_open_change_pct', 0) == 0) & (df.get('next_intraday_change_pct', 0) > 0) & 
+                                                   pd.notna(df.get('day3_from_next_change_pct')) & 
+                                                   pd.notna(df.get('day5_from_next_change_pct')) & 
+                                                   pd.notna(df.get('day10_from_next_change_pct'))])
+        flat_open_close_down_with_data_count = len(df[(df.get('next_open_change_pct', 0) == 0) & (df.get('next_intraday_change_pct', 0) < 0) & 
+                                                     pd.notna(df.get('day3_from_next_change_pct')) & 
+                                                     pd.notna(df.get('day5_from_next_change_pct')) & 
+                                                     pd.notna(df.get('day10_from_next_change_pct'))])
+        flat_open_flat_close_with_data_count = len(df[(df.get('next_open_change_pct', 0) == 0) & (df.get('next_intraday_change_pct', 0) == 0) & 
+                                                     pd.notna(df.get('day3_from_next_change_pct')) & 
+                                                     pd.notna(df.get('day5_from_next_change_pct')) & 
+                                                     pd.notna(df.get('day10_from_next_change_pct'))])
 
         return {
             'total_count': total_count,
@@ -221,12 +326,22 @@ class ResultAnalyzer:
             'next_close_up_count': next_close_up_count,
             'high_open_high_close_count': high_open_high_close_count,
             'high_open_low_close_count': high_open_low_close_count,
+            'high_open_flat_close_count': high_open_flat_close_count,
             'low_open_close_up_count': low_open_close_up_count,
             'low_open_low_close_count': low_open_low_close_count,
+            'low_open_flat_close_count': low_open_flat_close_count,
+            'flat_open_close_up_count': flat_open_close_up_count,
+            'flat_open_close_down_count': flat_open_close_down_count,
+            'flat_open_flat_close_count': flat_open_flat_close_count,
             'high_open_high_close_with_data_count': high_open_high_close_with_data_count,
             'high_open_low_close_with_data_count': high_open_low_close_with_data_count,
+            'high_open_flat_close_with_data_count': high_open_flat_close_with_data_count,
             'low_open_close_up_with_data_count': low_open_close_up_with_data_count,
             'low_open_low_close_with_data_count': low_open_low_close_with_data_count,
+            'low_open_flat_close_with_data_count': low_open_flat_close_with_data_count,
+            'flat_open_close_up_with_data_count': flat_open_close_up_with_data_count,
+            'flat_open_close_down_with_data_count': flat_open_close_down_with_data_count,
+            'flat_open_flat_close_with_data_count': flat_open_flat_close_with_data_count,
             'day3_up_count': day3_up_count,
             'day5_up_count': day5_up_count,
             'day10_up_count': day10_up_count,
@@ -245,12 +360,32 @@ class ResultAnalyzer:
             'low_open_low_close_day3_up': low_open_low_close_day3_up,
             'low_open_low_close_day5_up': low_open_low_close_day5_up,
             'low_open_low_close_day10_up': low_open_low_close_day10_up,
+            'high_open_flat_close_day3_up': high_open_flat_close_day3_up,
+            'high_open_flat_close_day5_up': high_open_flat_close_day5_up,
+            'high_open_flat_close_day10_up': high_open_flat_close_day10_up,
+            'low_open_flat_close_day3_up': low_open_flat_close_day3_up,
+            'low_open_flat_close_day5_up': low_open_flat_close_day5_up,
+            'low_open_flat_close_day10_up': low_open_flat_close_day10_up,
+            'flat_open_close_up_day3_up': flat_open_close_up_day3_up,
+            'flat_open_close_up_day5_up': flat_open_close_up_day5_up,
+            'flat_open_close_up_day10_up': flat_open_close_up_day10_up,
+            'flat_open_close_down_day3_up': flat_open_close_down_day3_up,
+            'flat_open_close_down_day5_up': flat_open_close_down_day5_up,
+            'flat_open_close_down_day10_up': flat_open_close_down_day10_up,
+            'flat_open_flat_close_day3_up': flat_open_flat_close_day3_up,
+            'flat_open_flat_close_day5_up': flat_open_flat_close_day5_up,
+            'flat_open_flat_close_day10_up': flat_open_flat_close_day10_up,
             'next_open_up_pct': safe_percentage(next_open_up_count, total_count),
             'next_close_up_pct': safe_percentage(next_close_up_count, total_count),
             'high_open_high_close_pct': safe_percentage(high_open_high_close_count, total_count),
             'high_open_low_close_pct': safe_percentage(high_open_low_close_count, total_count),
+            'high_open_flat_close_pct': safe_percentage(high_open_flat_close_count, total_count),
             'low_open_close_up_pct': safe_percentage(low_open_close_up_count, total_count),
             'low_open_low_close_pct': safe_percentage(low_open_low_close_count, total_count),
+            'low_open_flat_close_pct': safe_percentage(low_open_flat_close_count, total_count),
+            'flat_open_close_up_pct': safe_percentage(flat_open_close_up_count, total_count),
+            'flat_open_close_down_pct': safe_percentage(flat_open_close_down_count, total_count),
+            'flat_open_flat_close_pct': safe_percentage(flat_open_flat_close_count, total_count),
             'day3_up_pct': safe_percentage(day3_up_count, day3_total_count),
             'day5_up_pct': safe_percentage(day5_up_count, day5_total_count),
             'day10_up_pct': safe_percentage(day10_up_count, day10_total_count),
@@ -265,7 +400,22 @@ class ResultAnalyzer:
             'low_open_close_up_day10_up_pct': safe_percentage(low_open_close_up_day10_up, low_open_close_up_with_data_count),
             'low_open_low_close_day3_up_pct': safe_percentage(low_open_low_close_day3_up, low_open_low_close_with_data_count),
             'low_open_low_close_day5_up_pct': safe_percentage(low_open_low_close_day5_up, low_open_low_close_with_data_count),
-            'low_open_low_close_day10_up_pct': safe_percentage(low_open_low_close_day10_up, low_open_low_close_with_data_count)
+            'low_open_low_close_day10_up_pct': safe_percentage(low_open_low_close_day10_up, low_open_low_close_with_data_count),
+            'high_open_flat_close_day3_up_pct': safe_percentage(high_open_flat_close_day3_up, high_open_flat_close_with_data_count),
+            'high_open_flat_close_day5_up_pct': safe_percentage(high_open_flat_close_day5_up, high_open_flat_close_with_data_count),
+            'high_open_flat_close_day10_up_pct': safe_percentage(high_open_flat_close_day10_up, high_open_flat_close_with_data_count),
+            'low_open_flat_close_day3_up_pct': safe_percentage(low_open_flat_close_day3_up, low_open_flat_close_with_data_count),
+            'low_open_flat_close_day5_up_pct': safe_percentage(low_open_flat_close_day5_up, low_open_flat_close_with_data_count),
+            'low_open_flat_close_day10_up_pct': safe_percentage(low_open_flat_close_day10_up, low_open_flat_close_with_data_count),
+            'flat_open_close_up_day3_up_pct': safe_percentage(flat_open_close_up_day3_up, flat_open_close_up_with_data_count),
+            'flat_open_close_up_day5_up_pct': safe_percentage(flat_open_close_up_day5_up, flat_open_close_up_with_data_count),
+            'flat_open_close_up_day10_up_pct': safe_percentage(flat_open_close_up_day10_up, flat_open_close_up_with_data_count),
+            'flat_open_close_down_day3_up_pct': safe_percentage(flat_open_close_down_day3_up, flat_open_close_down_with_data_count),
+            'flat_open_close_down_day5_up_pct': safe_percentage(flat_open_close_down_day5_up, flat_open_close_down_with_data_count),
+            'flat_open_close_down_day10_up_pct': safe_percentage(flat_open_close_down_day10_up, flat_open_close_down_with_data_count),
+            'flat_open_flat_close_day3_up_pct': safe_percentage(flat_open_flat_close_day3_up, flat_open_flat_close_with_data_count),
+            'flat_open_flat_close_day5_up_pct': safe_percentage(flat_open_flat_close_day5_up, flat_open_flat_close_with_data_count),
+            'flat_open_flat_close_day10_up_pct': safe_percentage(flat_open_flat_close_day10_up, flat_open_flat_close_with_data_count)
         }
     
     def filter_high_open_flat_signals(self, signals: List[Dict[str, Any]], 
@@ -314,17 +464,84 @@ class ResultAnalyzer:
                         f"被过滤信号数 {filtered_count}")
         
         return filtered_signals, filtered_count
-    
+
+    def select_daily_signals(self, signals: List[Dict[str, Any]], 
+                           selection_strategy: str = 'lowest_return') -> List[Dict[str, Any]]:
+        """
+        处理同一天的多个信号，根据策略选择信号
+        
+        Args:
+            signals: 信号列表
+            selection_strategy: 选择策略
+                - 'lowest_return': 选择收益率最低的信号
+                - 'highest_return': 选择收益率最高的信号
+                - 'first': 选择第一个信号
+                - 'all': 保留所有信号（不过滤）
+            
+        Returns:
+            List[Dict[str, Any]]: 过滤后的信号列表
+        """
+        if not signals or selection_strategy == 'all':
+            return signals
+        
+        # 转换为DataFrame便于处理
+        df = pd.DataFrame(signals)
+        if 'date' not in df.columns or 'next_day_return' not in df.columns:
+            return signals
+        
+        # 过滤掉没有收益率数据的信号
+        df = df.dropna(subset=['next_day_return'])
+        if df.empty:
+            return []
+        
+        # 转换日期格式
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # 按日期分组，每天只选择一个信号
+        selected_signals = []
+        
+        for date, group in df.groupby(df['date'].dt.date):
+            if len(group) == 1:
+                # 如果该天只有一个信号，直接添加
+                selected_signals.append(group.iloc[0].to_dict())
+            else:
+                # 如果该天有多个信号，根据策略选择
+                if selection_strategy == 'lowest_return':
+                    # 选择收益率最低的信号
+                    selected_row = group.loc[group['next_day_return'].idxmin()]
+                    self.logger.info(f"日期 {date}: 从 {len(group)} 个信号中选择收益率最低的 "
+                                   f"({selected_row['stock_code']}: {selected_row['next_day_return']:.2f}%)")
+                elif selection_strategy == 'highest_return':
+                    # 选择收益率最高的信号
+                    selected_row = group.loc[group['next_day_return'].idxmax()]
+                    self.logger.info(f"日期 {date}: 从 {len(group)} 个信号中选择收益率最高的 "
+                                   f"({selected_row['stock_code']}: {selected_row['next_day_return']:.2f}%)")
+                elif selection_strategy == 'first':
+                    # 选择第一个信号（按原始顺序）
+                    selected_row = group.iloc[0]
+                    self.logger.info(f"日期 {date}: 从 {len(group)} 个信号中选择第一个 "
+                                   f"({selected_row['stock_code']}: {selected_row['next_day_return']:.2f}%)")
+                else:
+                    # 默认选择第一个
+                    selected_row = group.iloc[0]
+                
+                selected_signals.append(selected_row.to_dict())
+        
+        self.logger.info(f"信号选择完成: 原始信号数 {len(signals)}, 选择后信号数 {len(selected_signals)}")
+        return selected_signals
+
     def calculate_portfolio_performance(self, signals: List[Dict[str, Any]], 
                                       initial_capital: float = 100000,
-                                      position_size: float = 0.1) -> Dict[str, Any]:
+                                      position_size: float = 1.0,
+                                      daily_selection_strategy: str = 'lowest_return') -> Dict[str, Any]:
         """
-        计算投资组合表现
+        计算投资组合表现 - 满仓/空仓策略
         
         Args:
             signals: 信号列表
             initial_capital: 初始资金
-            position_size: 每次投资占总资金的比例
+            position_size: 每次投资占总资金的比例（默认1.0表示满仓）
+            daily_selection_strategy: 同一天多信号选择策略
             
         Returns:
             Dict[str, Any]: 投资组合表现
@@ -332,8 +549,13 @@ class ResultAnalyzer:
         if not signals:
             return {"error": "没有信号数据"}
         
+        # 先进行同一天信号选择
+        selected_signals = self.select_daily_signals(signals, daily_selection_strategy)
+        if not selected_signals:
+            return {"error": "信号选择后没有有效数据"}
+        
         # 转换为DataFrame并按日期排序
-        df = pd.DataFrame(signals)
+        df = pd.DataFrame(selected_signals)
         if 'next_day_return' not in df.columns:
             return {"error": "缺少收益率数据"}
         
@@ -344,25 +566,27 @@ class ResultAnalyzer:
         df['date'] = pd.to_datetime(df['date'])
         df = df.sort_values('date').reset_index(drop=True)
         
-        # 计算投资组合表现
+        # 计算投资组合表现 - 满仓/空仓策略
         capital = initial_capital
         portfolio_values = [capital]
         returns = []
         
         for _, row in df.iterrows():
-            # 每次投资固定金额，而不是按比例投资
-            investment_amount = min(capital * position_size, capital)  # 确保不超过现有资金
-            
-            if investment_amount <= 0:  # 如果资金不足，跳过这次投资
+            if capital <= 0:  # 如果资金不足，跳过这次投资
                 returns.append(0)
                 portfolio_values.append(capital)
                 continue
                 
             return_rate = row['next_day_return'] / 100  # 转换为小数
-            profit = investment_amount * return_rate
             
-            # 更新资金：原资金 - 投资金额 + 投资收益
-            capital = capital - investment_amount + investment_amount * (1 + return_rate)
+            if position_size >= 1.0:
+                # 满仓策略：资金直接按收益率变化
+                capital = capital * (1 + return_rate)
+            else:
+                # 部分仓位策略：只投资部分资金
+                investment_amount = capital * position_size
+                profit = investment_amount * return_rate
+                capital = capital + profit
             
             portfolio_values.append(capital)
             returns.append(return_rate)
@@ -405,14 +629,134 @@ class ResultAnalyzer:
         else:
             return {"error": "没有有效的交易数据"}
     
+    def calculate_yearly_returns(self, signals: List[Dict[str, Any]], 
+                                initial_capital: float = 100000,
+                                position_size: float = 1.0,
+                                daily_selection_strategy: str = 'lowest_return') -> Dict[str, Any]:
+        """
+        计算各年度收益率统计 - 满仓/空仓策略
+        
+        Args:
+            signals: 信号列表
+            initial_capital: 初始资金
+            position_size: 每次投资占总资金的比例（默认1.0表示满仓）
+            daily_selection_strategy: 同一天多信号选择策略
+            
+        Returns:
+            Dict[str, Any]: 年度收益率统计
+        """
+        if not signals:
+            return {"error": "没有信号数据"}
+        
+        # 先进行同一天信号选择
+        selected_signals = self.select_daily_signals(signals, daily_selection_strategy)
+        if not selected_signals:
+            return {"error": "信号选择后没有有效数据"}
+        
+        # 转换为DataFrame
+        df = pd.DataFrame(selected_signals)
+        
+        # 检查必要字段
+        if 'date' not in df.columns or 'next_day_return' not in df.columns:
+            return {"error": "缺少必要的日期或收益率字段"}
+        
+        # 转换日期并过滤有效收益率
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.dropna(subset=['next_day_return'])
+        
+        if df.empty:
+            return {"error": "没有有效的收益率数据"}
+        
+        # 按日期排序，确保按时间顺序处理
+        df = df.sort_values('date').reset_index(drop=True)
+        
+        # 添加年份列
+        df['year'] = df['date'].dt.year
+        
+        # 模拟投资过程，计算每年年末的账户余额
+        current_capital = initial_capital
+        yearly_capital = {}  # 记录每年年末的账户余额
+        
+        # 按年份分组统计
+        yearly_stats = {}
+        
+        for year in sorted(df['year'].unique()):
+            year_data = df[df['year'] == year].copy()
+            
+            if len(year_data) == 0:
+                continue
+            
+            year_start_capital = current_capital
+            
+            # 按日期顺序处理该年的每个信号
+            for _, row in year_data.iterrows():
+                if current_capital <= 0:
+                    continue
+                    
+                return_rate = row['next_day_return'] / 100  # 转换为小数
+                
+                if position_size >= 1.0:
+                    # 满仓策略：资金直接按收益率变化
+                    current_capital = current_capital * (1 + return_rate)
+                else:
+                    # 部分仓位策略：只投资部分资金
+                    investment_amount = current_capital * position_size
+                    profit = investment_amount * return_rate
+                    current_capital = current_capital + profit
+            
+            # 记录年末账户余额
+            yearly_capital[year] = current_capital
+            
+            returns = year_data['next_day_return']
+            
+            yearly_stats[year] = {
+                'total_signals': len(year_data),
+                'mean_return': returns.mean(),
+                'median_return': returns.median(),
+                'std_return': returns.std(),
+                'min_return': returns.min(),
+                'max_return': returns.max(),
+                'positive_return_ratio': (returns > 0).mean(),
+                'negative_return_ratio': (returns < 0).mean(),
+                'win_rate': (returns > 0).mean() * 100,
+                'total_return': returns.sum(),
+                'cumulative_return': (1 + returns / 100).prod() - 1,
+                'unique_stocks': year_data['stock_code'].nunique() if 'stock_code' in year_data.columns else 0,
+                'year_start_capital': year_start_capital,
+                'year_end_capital': current_capital,
+                'year_profit': current_capital - year_start_capital,
+                'year_return_rate': ((current_capital - year_start_capital) / year_start_capital) * 100 if year_start_capital > 0 else 0
+            }
+        
+        # 计算总体统计
+        overall_stats = {
+            'total_years': len(yearly_stats),
+            'years_with_positive_return': sum(1 for stats in yearly_stats.values() if stats['total_return'] > 0),
+            'years_with_negative_return': sum(1 for stats in yearly_stats.values() if stats['total_return'] < 0),
+            'best_year': max(yearly_stats.items(), key=lambda x: x[1]['total_return']) if yearly_stats else None,
+            'worst_year': min(yearly_stats.items(), key=lambda x: x[1]['total_return']) if yearly_stats else None,
+            'avg_yearly_signals': np.mean([stats['total_signals'] for stats in yearly_stats.values()]) if yearly_stats else 0,
+            'avg_yearly_return': np.mean([stats['total_return'] for stats in yearly_stats.values()]) if yearly_stats else 0,
+            'initial_capital': initial_capital,
+            'final_capital': current_capital
+        }
+        
+        return {
+            'yearly_stats': yearly_stats,
+            'overall_stats': overall_stats,
+            'yearly_capital': yearly_capital
+        }
+    
     def generate_performance_report(self, signals: List[Dict[str, Any]], 
-                                  output_file: str = None) -> str:
+                                  output_file: str = None, 
+                                  strategy_description: str = None) -> str:
         """
         生成性能报告
         
         Args:
             signals: 信号列表
             output_file: 输出文件路径
+            strategy_description: 策略条件描述
             
         Returns:
             str: 报告内容
@@ -430,6 +774,16 @@ class ResultAnalyzer:
         report_lines.append("=" * 60)
         report_lines.append(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         report_lines.append("")
+        
+        # 添加策略条件描述
+        if strategy_description:
+            report_lines.append("使用的策略条件:")
+            # 将策略描述按行分割并添加缩进
+            strategy_lines = strategy_description.strip().split('\n')
+            for line in strategy_lines:
+                if line.strip():  # 跳过空行
+                    report_lines.append(f"  {line.strip()}")
+            report_lines.append("")
         
         # 基本统计
         if 'basic_stats' in analysis:
@@ -476,6 +830,52 @@ class ResultAnalyzer:
                 report_lines.append(f"  时间范围: {date_range.get('start_date')} 至 {date_range.get('end_date')}")
                 report_lines.append("")
         
+        # 年度收益率统计
+        yearly_returns = self.calculate_yearly_returns(signals)
+        if 'error' not in yearly_returns and yearly_returns.get('yearly_stats'):
+            yearly_stats = yearly_returns['yearly_stats']
+            overall_stats = yearly_returns['overall_stats']
+            
+            report_lines.append("年度收益率统计:")
+            report_lines.append(f"  统计年份数: {overall_stats.get('total_years', 0)}")
+            report_lines.append(f"  盈利年份数: {overall_stats.get('years_with_positive_return', 0)}")
+            report_lines.append(f"  亏损年份数: {overall_stats.get('years_with_negative_return', 0)}")
+            report_lines.append(f"  年均信号数: {overall_stats.get('avg_yearly_signals', 0):.1f}")
+            report_lines.append(f"  年均收益率: {overall_stats.get('avg_yearly_return', 0):.2f}%")
+            
+            # 最佳和最差年份
+            if overall_stats.get('best_year'):
+                best_year, best_stats = overall_stats['best_year']
+                report_lines.append(f"  最佳年份: {best_year} (收益率: {best_stats['total_return']:.2f}%, 信号数: {best_stats['total_signals']})")
+            
+            if overall_stats.get('worst_year'):
+                worst_year, worst_stats = overall_stats['worst_year']
+                report_lines.append(f"  最差年份: {worst_year} (收益率: {worst_stats['total_return']:.2f}%, 信号数: {worst_stats['total_signals']})")
+            
+            report_lines.append("")
+            
+            # 详细年度数据
+            report_lines.append("各年度详细统计:")
+            report_lines.append("年份      信号数    平均收益率    胜率      总收益率    累计收益率    涉及股票    账户余额(万元)")
+            report_lines.append("=" * 98)
+            
+            for year in sorted(yearly_stats.keys()):
+                stats = yearly_stats[year]
+                # 使用固定宽度格式化，确保对齐
+                year_str = f"{year:<8}"
+                signals_str = f"{stats['total_signals']:>8}"
+                mean_return_str = f"{stats['mean_return']:>9.2f}%"
+                win_rate_str = f"{stats['win_rate']:>8.1f}%"
+                total_return_str = f"{stats['total_return']:>10.2f}%"
+                cumulative_return_str = f"{stats['cumulative_return']*100:>10.2f}%"
+                stocks_str = f"{stats['unique_stocks']:>8}"
+                # 添加账户余额列，以万元为单位显示
+                capital_str = f"{stats['year_end_capital']/10000:>15.2f}"
+                
+                report_lines.append(f"{year_str}{signals_str}{mean_return_str}{win_rate_str}{total_return_str}{cumulative_return_str}{stocks_str}{capital_str}")
+            
+            report_lines.append("")
+        
         # 股票分布
         if 'stock_analysis' in analysis and analysis['stock_analysis']:
             stock_info = analysis['stock_analysis']
@@ -500,8 +900,13 @@ class ResultAnalyzer:
             report_lines.append(f"  收盘上涨: {detailed_stats['next_close_up_count']}/{detailed_stats['total_count']} = {detailed_stats['next_close_up_pct']:.2f}%")
             report_lines.append(f"  高开高走: {detailed_stats['high_open_high_close_count']}/{detailed_stats['total_count']} = {detailed_stats['high_open_high_close_pct']:.2f}%")
             report_lines.append(f"  高开低走: {detailed_stats['high_open_low_close_count']}/{detailed_stats['total_count']} = {detailed_stats['high_open_low_close_pct']:.2f}%")
+            report_lines.append(f"  高开平走: {detailed_stats['high_open_flat_close_count']}/{detailed_stats['total_count']} = {detailed_stats['high_open_flat_close_pct']:.2f}%")
             report_lines.append(f"  低开高走: {detailed_stats['low_open_close_up_count']}/{detailed_stats['total_count']} = {detailed_stats['low_open_close_up_pct']:.2f}%")
             report_lines.append(f"  低开低走: {detailed_stats['low_open_low_close_count']}/{detailed_stats['total_count']} = {detailed_stats['low_open_low_close_pct']:.2f}%")
+            report_lines.append(f"  低开平走: {detailed_stats['low_open_flat_close_count']}/{detailed_stats['total_count']} = {detailed_stats['low_open_flat_close_pct']:.2f}%")
+            report_lines.append(f"  平开高走: {detailed_stats['flat_open_close_up_count']}/{detailed_stats['total_count']} = {detailed_stats['flat_open_close_up_pct']:.2f}%")
+            report_lines.append(f"  平开低走: {detailed_stats['flat_open_close_down_count']}/{detailed_stats['total_count']} = {detailed_stats['flat_open_close_down_pct']:.2f}%")
+            report_lines.append(f"  平开平走: {detailed_stats['flat_open_flat_close_count']}/{detailed_stats['total_count']} = {detailed_stats['flat_open_flat_close_pct']:.2f}%")
             
             # 中长期表现关键比例
             report_lines.append("\n中长期表现关键比例:")
@@ -534,50 +939,112 @@ class ResultAnalyzer:
                 report_lines.append(f"  5日收盘上涨: {detailed_stats['low_open_low_close_day5_up']}/{detailed_stats['low_open_low_close_with_data_count']} = {detailed_stats['low_open_low_close_day5_up_pct']:.2f}%")
                 report_lines.append(f"  10日收盘上涨: {detailed_stats['low_open_low_close_day10_up']}/{detailed_stats['low_open_low_close_with_data_count']} = {detailed_stats['low_open_low_close_day10_up_pct']:.2f}%")
             
+            if detailed_stats['high_open_flat_close_count'] > 0:
+                report_lines.append("\n高开平走情况下的后续表现:")
+                report_lines.append(f"  3日收盘上涨: {detailed_stats['high_open_flat_close_day3_up']}/{detailed_stats['high_open_flat_close_with_data_count']} = {detailed_stats['high_open_flat_close_day3_up_pct']:.2f}%")
+                report_lines.append(f"  5日收盘上涨: {detailed_stats['high_open_flat_close_day5_up']}/{detailed_stats['high_open_flat_close_with_data_count']} = {detailed_stats['high_open_flat_close_day5_up_pct']:.2f}%")
+                report_lines.append(f"  10日收盘上涨: {detailed_stats['high_open_flat_close_day10_up']}/{detailed_stats['high_open_flat_close_with_data_count']} = {detailed_stats['high_open_flat_close_day10_up_pct']:.2f}%")
+            
+            if detailed_stats['low_open_flat_close_count'] > 0:
+                report_lines.append("\n低开平走情况下的后续表现:")
+                report_lines.append(f"  3日收盘上涨: {detailed_stats['low_open_flat_close_day3_up']}/{detailed_stats['low_open_flat_close_with_data_count']} = {detailed_stats['low_open_flat_close_day3_up_pct']:.2f}%")
+                report_lines.append(f"  5日收盘上涨: {detailed_stats['low_open_flat_close_day5_up']}/{detailed_stats['low_open_flat_close_with_data_count']} = {detailed_stats['low_open_flat_close_day5_up_pct']:.2f}%")
+                report_lines.append(f"  10日收盘上涨: {detailed_stats['low_open_flat_close_day10_up']}/{detailed_stats['low_open_flat_close_with_data_count']} = {detailed_stats['low_open_flat_close_day10_up_pct']:.2f}%")
+            
+            if detailed_stats['flat_open_close_up_count'] > 0:
+                report_lines.append("\n平开高走情况下的后续表现:")
+                report_lines.append(f"  3日收盘上涨: {detailed_stats['flat_open_close_up_day3_up']}/{detailed_stats['flat_open_close_up_with_data_count']} = {detailed_stats['flat_open_close_up_day3_up_pct']:.2f}%")
+                report_lines.append(f"  5日收盘上涨: {detailed_stats['flat_open_close_up_day5_up']}/{detailed_stats['flat_open_close_up_with_data_count']} = {detailed_stats['flat_open_close_up_day5_up_pct']:.2f}%")
+                report_lines.append(f"  10日收盘上涨: {detailed_stats['flat_open_close_up_day10_up']}/{detailed_stats['flat_open_close_up_with_data_count']} = {detailed_stats['flat_open_close_up_day10_up_pct']:.2f}%")
+            
+            if detailed_stats['flat_open_close_down_count'] > 0:
+                report_lines.append("\n平开低走情况下的后续表现:")
+                report_lines.append(f"  3日收盘上涨: {detailed_stats['flat_open_close_down_day3_up']}/{detailed_stats['flat_open_close_down_with_data_count']} = {detailed_stats['flat_open_close_down_day3_up_pct']:.2f}%")
+                report_lines.append(f"  5日收盘上涨: {detailed_stats['flat_open_close_down_day5_up']}/{detailed_stats['flat_open_close_down_with_data_count']} = {detailed_stats['flat_open_close_down_day5_up_pct']:.2f}%")
+                report_lines.append(f"  10日收盘上涨: {detailed_stats['flat_open_close_down_day10_up']}/{detailed_stats['flat_open_close_down_with_data_count']} = {detailed_stats['flat_open_close_down_day10_up_pct']:.2f}%")
+            
+            if detailed_stats['flat_open_flat_close_count'] > 0:
+                report_lines.append("\n平开平走情况下的后续表现:")
+                report_lines.append(f"  3日收盘上涨: {detailed_stats['flat_open_flat_close_day3_up']}/{detailed_stats['flat_open_flat_close_with_data_count']} = {detailed_stats['flat_open_flat_close_day3_up_pct']:.2f}%")
+                report_lines.append(f"  5日收盘上涨: {detailed_stats['flat_open_flat_close_day5_up']}/{detailed_stats['flat_open_flat_close_with_data_count']} = {detailed_stats['flat_open_flat_close_day5_up_pct']:.2f}%")
+                report_lines.append(f"  10日收盘上涨: {detailed_stats['flat_open_flat_close_day10_up']}/{detailed_stats['flat_open_flat_close_with_data_count']} = {detailed_stats['flat_open_flat_close_day10_up_pct']:.2f}%")
+            
             report_lines.append("")
         
-        # 添加最近10条3日上涨和下跌数据
+        # 按年份显示所有交易信号
         if signals:
             # 转换为DataFrame以便处理
             df = pd.DataFrame(signals)
             
-            # 筛选有效的3日涨跌幅数据
-            if 'day3_change_pct' in df.columns:
-                valid_day3_data = df[pd.notna(df['day3_change_pct'])]
+            if 'date' in df.columns and len(df) > 0:
+                # 添加年份列
+                df['year'] = pd.to_datetime(df['date']).dt.year
                 
-                if len(valid_day3_data) > 0:
-                    # 按日期排序，获取最近的数据
-                    if 'date' in valid_day3_data.columns:
-                        valid_day3_data = valid_day3_data.sort_values('date', ascending=False)
+                # 按年份分组
+                years = sorted(df['year'].unique(), reverse=True)
+                
+                for year in years:
+                    year_data = df[df['year'] == year].sort_values('date', ascending=False)
                     
-                    # 最近10条3日上涨数据
-                    day3_up_data = valid_day3_data[valid_day3_data['day3_change_pct'] > 0].head(10)
-                    if len(day3_up_data) > 0:
-                        report_lines.append("最近10条3日上涨数据:")
-                        report_lines.append(f"{'股票代码':<10} {'日期':<12} {'收盘价':<10} {'3日涨跌幅':<12} {'3日后价格':<12}")
-                        report_lines.append("-" * 60)
-                        for _, row in day3_up_data.iterrows():
+                    if len(year_data) > 0:
+                        report_lines.append(f"{year}年交易信号 (共{len(year_data)}条):")
+                        # 使用简单直接的表格格式化方法
+                        # 构建表头
+                        header = f"{'股票代码':<10} {'日期':<10} {'买入价':<6} {'买入时涨幅':<8} {'第一种策略':<9} {'卖出价':<7} {'盈亏比例':<8} {'3日涨跌幅':<8}"
+                        
+                        report_lines.append(header)
+                        report_lines.append("=" * len(header))
+                        
+                        for _, row in year_data.iterrows():
                             stock_code = row.get('stock_code', 'N/A')
                             date = row.get('date', 'N/A')
-                            close_price = f"{row.get('close', 0):.2f}" if pd.notna(row.get('close')) else 'N/A'
-                            day3_change = f"{row['day3_change_pct']:.2f}%"
-                            day3_close = f"{row.get('day3_close', 0):.2f}" if pd.notna(row.get('day3_close')) else 'N/A'
-                            report_lines.append(f"{stock_code:<10} {date:<12} {close_price:<10} {day3_change:<12} {day3_close:<12}")
-                        report_lines.append("")
-                    
-                    # 最近10条3日下跌数据
-                    day3_down_data = valid_day3_data[valid_day3_data['day3_change_pct'] < 0].head(10)
-                    if len(day3_down_data) > 0:
-                        report_lines.append("最近10条3日下跌数据:")
-                        report_lines.append(f"{'股票代码':<10} {'日期':<12} {'收盘价':<10} {'3日涨跌幅':<12} {'3日后价格':<12}")
-                        report_lines.append("-" * 60)
-                        for _, row in day3_down_data.iterrows():
-                            stock_code = row.get('stock_code', 'N/A')
-                            date = row.get('date', 'N/A')
-                            close_price = f"{row.get('close', 0):.2f}" if pd.notna(row.get('close')) else 'N/A'
-                            day3_change = f"{row['day3_change_pct']:.2f}%"
-                            day3_close = f"{row.get('day3_close', 0):.2f}" if pd.notna(row.get('day3_close')) else 'N/A'
-                            report_lines.append(f"{stock_code:<10} {date:<12} {close_price:<10} {day3_change:<12} {day3_close:<12}")
+                            
+                            # 格式化各列数据
+                            # 买入价格
+                            if pd.notna(row.get('close')):
+                                buy_price = f"{row.get('close', 0):.2f}"
+                            else:
+                                buy_price = "N/A"
+                            
+                            # 买入时涨幅 (相对于上一交易日收盘价)
+                            buy_gain = "N/A"
+                            if pd.notna(row.get('close')):
+                                close_val = row.get('close', 0)
+                                stock_code_val = row.get('stock_code', '')
+                                date_val = row.get('date', '')
+                                
+                                # 获取前一日收盘价
+                                prev_close = self._get_previous_close_price(stock_code_val, date_val)
+                                if prev_close is not None and prev_close > 0:
+                                    buy_gain_val = ((close_val - prev_close) / prev_close) * 100
+                                    buy_gain = f"{buy_gain_val:+.2f}%"
+                            
+                            # 卖出价格和盈亏比例
+                            if pd.notna(row.get('day3_close')) and pd.notna(row.get('close')):
+                                sell_price = f"{row.get('day3_close', 0):.2f}"
+                                # 计算盈亏比例
+                                buy_val = row.get('close', 0)
+                                sell_val = row.get('day3_close', 0)
+                                if buy_val > 0:
+                                    profit_loss_val = ((sell_val - buy_val) / buy_val) * 100
+                                    profit_loss = f"{profit_loss_val:+.2f}%"
+                                else:
+                                    profit_loss = "N/A"
+                            else:
+                                sell_price = "N/A"
+                                profit_loss = "N/A"
+                            
+                            # 3日涨跌幅
+                            if pd.notna(row.get('day3_change_pct')):
+                                day3_change = f"{row['day3_change_pct']:+.2f}%"
+                            else:
+                                day3_change = "N/A"
+                            
+                            # 组合数据行 - 使用与表头相同的格式
+                            data_row = f"{stock_code:<10} {date:<12} {buy_price:>8} {buy_gain:>10} {'':<12} {sell_price:>8} {profit_loss:>10} {day3_change:>10}"
+                            
+                            report_lines.append(data_row)
+                        
                         report_lines.append("")
         
         report_lines.append("=" * 60)
@@ -622,8 +1089,14 @@ class ResultAnalyzer:
   次日高开比例: {stats.get('next_open_up_count', 0)}/{stats.get('total_count', 0)} ({stats.get('next_open_up_pct', 0):.2f}%)
   次日收盘上涨比例: {stats.get('next_close_up_count', 0)}/{stats.get('total_count', 0)} ({stats.get('next_close_up_pct', 0):.2f}%)
   次日高开高走比例: {stats.get('high_open_high_close_count', 0)}/{stats.get('total_count', 0)} ({stats.get('high_open_high_close_pct', 0):.2f}%)
+  次日高开低走比例: {stats.get('high_open_low_close_count', 0)}/{stats.get('total_count', 0)} ({stats.get('high_open_low_close_pct', 0):.2f}%)
+  次日高开平走比例: {stats.get('high_open_flat_close_count', 0)}/{stats.get('total_count', 0)} ({stats.get('high_open_flat_close_pct', 0):.2f}%)
   次日低开收盘上涨比例: {stats.get('low_open_close_up_count', 0)}/{stats.get('total_count', 0)} ({stats.get('low_open_close_up_pct', 0):.2f}%)
   次日低开低走比例: {stats.get('low_open_low_close_count', 0)}/{stats.get('total_count', 0)} ({stats.get('low_open_low_close_pct', 0):.2f}%)
+  次日低开平走比例: {stats.get('low_open_flat_close_count', 0)}/{stats.get('total_count', 0)} ({stats.get('low_open_flat_close_pct', 0):.2f}%)
+  次日平开高走比例: {stats.get('flat_open_close_up_count', 0)}/{stats.get('total_count', 0)} ({stats.get('flat_open_close_up_pct', 0):.2f}%)
+  次日平开低走比例: {stats.get('flat_open_close_down_count', 0)}/{stats.get('total_count', 0)} ({stats.get('flat_open_close_down_pct', 0):.2f}%)
+  次日平开平走比例: {stats.get('flat_open_flat_close_count', 0)}/{stats.get('total_count', 0)} ({stats.get('flat_open_flat_close_pct', 0):.2f}%)
 中长期表现:
   3日收盘上涨比例: {stats.get('day3_up_count', 0)}/{stats.get('day3_total_count', 0)} ({stats.get('day3_up_pct', 0):.2f}%)
   5日收盘上涨比例: {stats.get('day5_up_count', 0)}/{stats.get('day5_total_count', 0)} ({stats.get('day5_up_pct', 0):.2f}%)
@@ -671,6 +1144,64 @@ class ResultAnalyzer:
             
         except Exception as e:
             self.logger.error(f"写入final_result文件失败: {e}")
+    
+    def _get_previous_close_price(self, stock_code: str, date_str: str) -> Optional[float]:
+        """
+        获取指定股票在指定日期的前一交易日收盘价
+        
+        Args:
+            stock_code: 股票代码
+            date_str: 日期字符串 (格式: YYYY-MM-DD)
+            
+        Returns:
+            Optional[float]: 前一交易日收盘价，如果无法获取则返回None
+        """
+        try:
+            from data_loader import StockDataLoader
+            import os
+            
+            # 获取数据文件夹路径
+            data_folder = r"c:\Users\17701\github\my_first_repo\stockapi\stock_base_info\all_stocks_data"
+            
+            # 创建数据加载器
+            data_loader = StockDataLoader(data_folder)
+            
+            # 加载股票数据
+            stock_data = data_loader.load_stock_data(stock_code)
+            if stock_data is None or stock_data.empty:
+                return None
+            
+            # 确保日期列为datetime类型
+            if 'datetime' in stock_data.columns:
+                stock_data['datetime'] = pd.to_datetime(stock_data['datetime'])
+                stock_data = stock_data.sort_values('datetime')
+            else:
+                return None
+            
+            # 转换目标日期
+            target_date = pd.to_datetime(date_str)
+            
+            # 找到目标日期的索引
+            target_mask = stock_data['datetime'].dt.date == target_date.date()
+            target_indices = stock_data[target_mask].index
+            
+            if len(target_indices) == 0:
+                return None
+            
+            target_index = target_indices[0]
+            
+            # 找到前一个交易日的数据
+            prev_data = stock_data[stock_data.index < target_index]
+            if prev_data.empty:
+                return None
+            
+            # 获取最近的前一个交易日的收盘价
+            prev_close = prev_data.iloc[-1]['close']
+            return float(prev_close) if pd.notna(prev_close) else None
+            
+        except Exception as e:
+            self.logger.warning(f"获取前一日收盘价失败 {stock_code} {date_str}: {e}")
+            return None
 
 
 class ResultExporter:
