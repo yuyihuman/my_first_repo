@@ -151,19 +151,7 @@ class BacktestingSystem:
             os.makedirs(self.output_folder, exist_ok=True)
             print(f"创建输出文件夹: {self.output_folder}")
     
-    def clear_process_logs(self):
-        """清理进程日志文件夹"""
-        process_logs_dir = os.path.join(current_dir, "process_logs")
-        if os.path.exists(process_logs_dir):
-            try:
-                shutil.rmtree(process_logs_dir)
-                self.logger.info(f"已清理进程日志文件夹: {process_logs_dir}")
-            except Exception as e:
-                self.logger.warning(f"清理进程日志文件夹失败: {e}")
-        
-        # 重新创建进程日志文件夹
-        os.makedirs(process_logs_dir, exist_ok=True)
-        self.logger.info(f"已创建进程日志文件夹: {process_logs_dir}")
+
     
 
     
@@ -185,9 +173,8 @@ class BacktestingSystem:
         # 配置日志系统
         self._setup_logging()
         
-        # 清空输出文件夹和进程日志
+        # 清空输出文件夹
         self.clear_output_folder()
-        self.clear_process_logs()
         
         self.logger.info(f"开始单股票测试: {stock_code}")
         
@@ -265,9 +252,8 @@ class BacktestingSystem:
         # 配置日志系统
         self._setup_logging()
         
-        # 清空输出文件夹和进程日志
+        # 清空输出文件夹
         self.clear_output_folder()
-        self.clear_process_logs()
 
         self.logger.info(f"开始批量测试 {len(stock_codes)} 个股票")
         
@@ -375,9 +361,8 @@ class BacktestingSystem:
         # 配置日志系统
         self._setup_logging()
         
-        # 清空输出文件夹和进程日志
+        # 清空输出文件夹
         self.clear_output_folder()
-        self.clear_process_logs()
 
         self.logger.info(f"开始全量测试，进程数: {num_processes}")
         
