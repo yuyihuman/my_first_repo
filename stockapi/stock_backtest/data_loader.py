@@ -4,6 +4,7 @@
 
 数据来源：
 - 股票历史数据来源于：c:/Users/17701/github/my_first_repo/stockapi/stock_base_info/all_stocks_data/
+- 财务数据来源于：c:/Users/17701/github/my_first_repo/stockapi/stock_base_info/financial_data/
 - 使用数据源中的预计算均线和成交量数据，不进行重复计算
 """
 
@@ -16,15 +17,24 @@ from typing import Optional, List, Dict, Any
 class StockDataLoader:
     """股票数据加载器"""
     
-    def __init__(self, data_folder: str):
+    def __init__(self, data_folder: str, financial_data_folder: str = None):
         """
         初始化数据加载器
         
         Args:
             data_folder: 股票数据文件夹路径
+            financial_data_folder: 财务数据文件夹路径，如果不提供则自动推断
         """
         self.data_folder = data_folder
         self.logger = logging.getLogger(__name__)
+        
+        # 设置财务数据文件夹路径
+        if financial_data_folder is None:
+            # 自动推断财务数据路径
+            base_path = os.path.dirname(os.path.dirname(data_folder))  # 回到stockapi目录
+            self.financial_data_folder = os.path.join(base_path, "stock_base_info", "financial_data")
+        else:
+            self.financial_data_folder = financial_data_folder
         
         # 定义必需的列
         self.basic_cols = ['datetime', 'open', 'close', 'high', 'low', 'volume']
@@ -34,6 +44,11 @@ class StockDataLoader:
         # 验证数据文件夹
         if not os.path.exists(data_folder):
             raise ValueError(f"数据文件夹不存在: {data_folder}")
+        
+        # 检查财务数据文件夹是否存在
+        if not os.path.exists(self.financial_data_folder):
+            self.logger.warning(f"财务数据文件夹不存在: {self.financial_data_folder}，财报发布标记功能将不可用")
+            self.financial_data_folder = None
     
     def get_stock_file_path(self, stock_code: str) -> str:
         """
@@ -48,6 +63,128 @@ class StockDataLoader:
         stock_folder = f"stock_{stock_code}_data"
         return os.path.join(self.data_folder, stock_folder, f"{stock_code}_daily_history.csv")
     
+    def get_financial_file_path(self, stock_code: str, file_type: str = "Balance") -> str:
+        """
+        获取财务数据文件路径
+        
+        Args:
+            stock_code: 股票代码
+            file_type: 财务报表类型（Balance, Income, CashFlow等）
+            
+        Returns:
+            str: 财务数据文件路径
+        """
+        if self.financial_data_folder is None:
+            return None
+        return os.path.join(self.financial_data_folder, stock_code, f"{file_type}.csv")
+    
+    def load_financial_announcement_dates(self, stock_code: str) -> Optional[pd.DataFrame]:
+        """
+        加载股票的财报公告日期数据
+        
+        Args:
+            stock_code: 股票代码
+            
+        Returns:
+            DataFrame: 包含财报公告日期的数据，列包括['m_timetag', 'm_anntime']
+        """
+        if self.financial_data_folder is None:
+            return None
+            
+        balance_file = self.get_financial_file_path(stock_code, "Balance")
+        
+        try:
+            if not os.path.exists(balance_file):
+                self.logger.debug(f"财务数据文件不存在: {balance_file}")
+                return None
+            
+            # 只读取需要的列
+            df = pd.read_csv(balance_file, usecols=['m_timetag', 'm_anntime'])
+            
+            # 过滤掉空值
+            df = df.dropna(subset=['m_timetag', 'm_anntime'])
+            
+            if df.empty:
+                self.logger.debug(f"财务数据为空: {balance_file}")
+                return None
+            
+            # 转换日期格式
+            df['m_timetag'] = pd.to_datetime(df['m_timetag'].astype(str), format='%Y%m%d', errors='coerce')
+            df['m_anntime'] = pd.to_datetime(df['m_anntime'].astype(str), format='%Y%m%d', errors='coerce')
+            
+            # 过滤掉转换失败的数据
+            df = df.dropna(subset=['m_timetag', 'm_anntime'])
+            
+            if df.empty:
+                self.logger.debug(f"财务数据日期转换后为空: {balance_file}")
+                return None
+            
+            # 按公告日期排序
+            df = df.sort_values('m_anntime').reset_index(drop=True)
+            
+            self.logger.debug(f"成功加载财务数据 {balance_file}，共 {len(df)} 条记录")
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"加载财务数据失败 {balance_file}: {e}")
+            return None
+    
+    def add_financial_announcement_flag(self, stock_df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
+        """
+        为股票数据添加财报发布标记
+        
+        Args:
+            stock_df: 股票日线数据
+            stock_code: 股票代码
+            
+        Returns:
+            DataFrame: 添加了财报发布标记的股票数据
+        """
+        # 添加默认的财报发布标记列
+        stock_df = stock_df.copy()
+        stock_df['financial_announcement'] = False
+        
+        # 转换股票代码格式以匹配财务数据文件夹
+        # 股票数据使用格式如"000001"，财务数据使用格式如"000001.SZ"
+        financial_stock_code = stock_code
+        if not stock_code.endswith('.SZ') and not stock_code.endswith('.SH'):
+            # 根据股票代码判断交易所
+            if stock_code.startswith('00') or stock_code.startswith('30'):
+                financial_stock_code = f"{stock_code}.SZ"  # 深交所
+            elif stock_code.startswith('60') or stock_code.startswith('68'):
+                financial_stock_code = f"{stock_code}.SH"  # 上交所
+            else:
+                financial_stock_code = f"{stock_code}.SZ"  # 默认深交所
+        
+        # 加载财务数据
+        financial_df = self.load_financial_announcement_dates(financial_stock_code)
+        
+        if financial_df is None or financial_df.empty:
+            self.logger.debug(f"股票 {stock_code} 无财务数据，所有日期的财报发布标记为False")
+            return stock_df
+        
+        try:
+            # 确保股票数据的日期列是datetime类型
+            if not pd.api.types.is_datetime64_any_dtype(stock_df['datetime']):
+                stock_df['datetime'] = pd.to_datetime(stock_df['datetime'])
+            
+            # 获取所有财报公告日期
+            announcement_dates = set(financial_df['m_anntime'].dt.date)
+            
+            # 标记财报发布日期
+            stock_df['financial_announcement'] = stock_df['datetime'].dt.date.isin(announcement_dates)
+            
+            # 统计标记的数量
+            announcement_count = stock_df['financial_announcement'].sum()
+            self.logger.debug(f"股票 {stock_code} 共标记了 {announcement_count} 个财报发布日期")
+            
+            return stock_df
+            
+        except Exception as e:
+            self.logger.error(f"添加财报发布标记失败 {stock_code}: {e}")
+            # 返回带有默认False标记的数据
+            return stock_df
+
     def load_stock_data(self, stock_code: str) -> Optional[pd.DataFrame]:
         """
         加载单个股票的数据
@@ -158,6 +295,9 @@ class StockDataLoader:
                 if col in df.columns:
                     df.drop(col, axis=1, inplace=True)
             
+            # 添加财报发布标记
+            df = self.add_financial_announcement_flag(df, stock_code)
+            
             # 最终数据验证
             if len(df) < 41:  # 至少需要41天数据
                 self.logger.warning(f"文件 {csv_file_path} 数据量不足（{len(df)}条），需要至少41条数据")
@@ -169,7 +309,7 @@ class StockDataLoader:
         except Exception as e:
             self.logger.error(f"加载数据失败 {csv_file_path}: {e}")
             return None
-    
+
     def get_available_stocks(self) -> List[str]:
         """
         获取所有可用的股票代码列表

@@ -185,7 +185,8 @@ class StrategyEngine:
             PriceAboveOneCondition(),
             HighOpenAbovePrevHighCondition(),
             MovingAverageSpreadCondition(),
-            VolumeLimitCondition()
+            VolumeLimitCondition(),
+            CloseNotHighCondition()
         ]
     
     def get_strategy_description(self) -> str:
@@ -345,17 +346,49 @@ class StrategyEngine:
                 day10_close = None
                 day10_change_pct = None
                 
+                # 收集每日最低价数据用于回撤计算
+                day2_low = None
+                day3_low = None
+                day4_low = None
+                day5_low = None
+                day6_low = None
+                day7_low = None
+                day8_low = None
+                day9_low = None
+                day10_low = None
+                
+                if idx + 2 < len(df):
+                    day2_low = df.iloc[idx + 2]['low']
+                
                 if idx + 3 < len(df):
                     day3_close = df.iloc[idx + 3]['close']
                     day3_change_pct = (day3_close - current_close) / current_close * 100
+                    day3_low = df.iloc[idx + 3]['low']
+                
+                if idx + 4 < len(df):
+                    day4_low = df.iloc[idx + 4]['low']
                 
                 if idx + 5 < len(df):
                     day5_close = df.iloc[idx + 5]['close']
                     day5_change_pct = (day5_close - current_close) / current_close * 100
+                    day5_low = df.iloc[idx + 5]['low']
+                
+                if idx + 6 < len(df):
+                    day6_low = df.iloc[idx + 6]['low']
+                
+                if idx + 7 < len(df):
+                    day7_low = df.iloc[idx + 7]['low']
+                
+                if idx + 8 < len(df):
+                    day8_low = df.iloc[idx + 8]['low']
+                
+                if idx + 9 < len(df):
+                    day9_low = df.iloc[idx + 9]['low']
                 
                 if idx + 10 < len(df):
                     day10_close = df.iloc[idx + 10]['close']
                     day10_change_pct = (day10_close - current_close) / current_close * 100
+                    day10_low = df.iloc[idx + 10]['low']
                 
                 # 基于次日收盘价的3日、5日、10日涨跌幅计算
                 day3_from_next_change_pct = None
@@ -363,14 +396,20 @@ class StrategyEngine:
                 day10_from_next_change_pct = None
                 
                 if next_day_close is not None:
-                    if idx + 3 < len(df):
-                        day3_from_next_change_pct = (day3_close - next_day_close) / next_day_close * 100 if day3_close is not None else None
+                    # 基于次日收盘价计算3日后（即第4日）的涨跌幅
+                    if idx + 4 < len(df):
+                        day4_close = df.iloc[idx + 4]['close']
+                        day3_from_next_change_pct = (day4_close - next_day_close) / next_day_close * 100
                     
-                    if idx + 5 < len(df):
-                        day5_from_next_change_pct = (day5_close - next_day_close) / next_day_close * 100 if day5_close is not None else None
+                    # 基于次日收盘价计算5日后（即第6日）的涨跌幅
+                    if idx + 6 < len(df):
+                        day6_close = df.iloc[idx + 6]['close']
+                        day5_from_next_change_pct = (day6_close - next_day_close) / next_day_close * 100
                     
-                    if idx + 10 < len(df):
-                        day10_from_next_change_pct = (day10_close - next_day_close) / next_day_close * 100 if day10_close is not None else None
+                    # 基于次日收盘价计算10日后（即第11日）的涨跌幅
+                    if idx + 11 < len(df):
+                        day11_close = df.iloc[idx + 11]['close']
+                        day10_from_next_change_pct = (day11_close - next_day_close) / next_day_close * 100
                 
                 signal = {
                     "stock_code": stock_code,
@@ -394,7 +433,17 @@ class StrategyEngine:
                     "day10_change_pct": day10_change_pct,
                     "day3_from_next_change_pct": day3_from_next_change_pct,
                     "day5_from_next_change_pct": day5_from_next_change_pct,
-                    "day10_from_next_change_pct": day10_from_next_change_pct
+                    "day10_from_next_change_pct": day10_from_next_change_pct,
+                    # 添加每日最低价数据用于回撤计算
+                    "day2_low": day2_low,
+                    "day3_low": day3_low,
+                    "day4_low": day4_low,
+                    "day5_low": day5_low,
+                    "day6_low": day6_low,
+                    "day7_low": day7_low,
+                    "day8_low": day8_low,
+                    "day9_low": day9_low,
+                    "day10_low": day10_low
                 }
                 
                 signals.append(signal)
@@ -525,3 +574,20 @@ class VolumeLimitCondition(StrategyCondition):
     
     def get_description(self) -> str:
         return "当日成交量小于之前一个交易日10日成交量均值的1.5倍"
+
+
+class CloseNotHighCondition(StrategyCondition):
+    """收盘价不是最高价条件：当日收盘价不能是全天最高价"""
+    
+    def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
+        current_data = df.iloc[current_idx]
+        close_price = current_data['close']
+        high_price = current_data['high']
+        
+        # 检查收盘价是否不等于最高价
+        # 使用小的容差来处理浮点数精度问题
+        tolerance = 1e-6
+        return abs(close_price - high_price) > tolerance
+    
+    def get_description(self) -> str:
+        return "当日收盘价不能是全天最高价"

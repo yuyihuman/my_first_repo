@@ -418,52 +418,7 @@ class ResultAnalyzer:
             'flat_open_flat_close_day10_up_pct': safe_percentage(flat_open_flat_close_day10_up, flat_open_flat_close_with_data_count)
         }
     
-    def filter_high_open_flat_signals(self, signals: List[Dict[str, Any]], 
-                                     open_threshold: float = 4.5) -> Tuple[List[Dict[str, Any]], int]:
-        """
-        过滤掉次日开盘涨幅>4.5%且次日开盘价和收盘价一致的信号
-        
-        Args:
-            signals: 原始信号列表
-            open_threshold: 开盘涨幅阈值，默认4.5%
-            
-        Returns:
-            Tuple[List[Dict[str, Any]], int]: (过滤后的信号列表, 被过滤掉的信号数量)
-        """
-        if not signals:
-            return signals, 0
-        
-        filtered_signals = []
-        filtered_count = 0
-        
-        for signal in signals:
-            # 获取次日开盘涨幅
-            next_open_change_pct = signal.get('next_open_change_pct')
-            next_open = signal.get('next_open')
-            next_close = signal.get('next_close')
-            
-            # 如果没有次日数据，保留信号
-            if next_open_change_pct is None or next_open is None or next_close is None:
-                filtered_signals.append(signal)
-                continue
-            
-            # 检查是否满足过滤条件：次日开盘涨幅>4.5% 且 次日开盘价=收盘价
-            high_open = next_open_change_pct > open_threshold
-            flat_trading = abs(next_open - next_close) < 0.001  # 考虑浮点数精度，使用小的阈值
-            
-            # 如果满足过滤条件，则剔除该信号
-            if high_open and flat_trading:
-                filtered_count += 1
-                self.logger.info(f"过滤信号: {signal.get('stock_code', 'N/A')} {signal.get('date', 'N/A')} "
-                               f"次日开盘涨幅: {next_open_change_pct:.2f}% "
-                               f"次日开盘价: {next_open:.4f} 收盘价: {next_close:.4f}")
-            else:
-                filtered_signals.append(signal)
-        
-        self.logger.info(f"信号过滤完成: 原始信号数 {len(signals)}, 过滤后信号数 {len(filtered_signals)}, "
-                        f"被过滤信号数 {filtered_count}")
-        
-        return filtered_signals, filtered_count
+
 
     def select_daily_signals(self, signals: List[Dict[str, Any]], 
                            selection_strategy: str = 'lowest_return') -> List[Dict[str, Any]]:
@@ -629,148 +584,7 @@ class ResultAnalyzer:
         else:
             return {"error": "没有有效的交易数据"}
     
-    def calculate_portfolio_performance_with_stop_loss(self, signals: List[Dict[str, Any]], 
-                                                     initial_capital: float = 100000,
-                                                     position_size: float = 1.0,
-                                                     stop_loss_threshold: float = -1.0,
-                                                     daily_selection_strategy: str = 'lowest_return') -> Dict[str, Any]:
-        """
-        计算带止损策略的投资组合表现
-        
-        Args:
-            signals: 信号列表
-            initial_capital: 初始资金
-            position_size: 每次投资占总资金的比例（默认1.0表示满仓）
-            stop_loss_threshold: 止损阈值，默认-1.0表示回撤超过-1%就卖出
-            daily_selection_strategy: 同一天多信号选择策略
-            
-        Returns:
-            Dict[str, Any]: 投资组合表现
-        """
-        if not signals:
-            return {"error": "没有信号数据"}
-        
-        # 先进行同一天信号选择
-        selected_signals = self.select_daily_signals(signals, daily_selection_strategy)
-        if not selected_signals:
-            return {"error": "信号选择后没有有效数据"}
-        
-        # 转换为DataFrame并按日期排序
-        df = pd.DataFrame(selected_signals)
-        required_fields = ['close', 'next_open', 'next_close']
-        missing_fields = [field for field in required_fields if field not in df.columns]
-        if missing_fields:
-            return {"error": f"缺少必要字段: {missing_fields}"}
-        
-        df = df.dropna(subset=required_fields)
-        if df.empty:
-            return {"error": "没有有效的交易数据"}
-        
-        df['date'] = pd.to_datetime(df['date'])
-        df = df.sort_values('date').reset_index(drop=True)
-        
-        # 计算投资组合表现 - 带止损策略
-        capital = initial_capital
-        portfolio_values = [capital]
-        returns = []
-        stop_loss_triggered_list = []
-        
-        for _, row in df.iterrows():
-            if capital <= 0:  # 如果资金不足，跳过这次投资
-                returns.append(0)
-                portfolio_values.append(capital)
-                stop_loss_triggered_list.append(False)
-                continue
-            
-            buy_price = row.get('close', 0)
-            next_open = row.get('next_open', buy_price)
-            next_close = row.get('next_close', next_open)
-            next_low = row.get('next_low', min(next_open, next_close))
-            
-            if buy_price <= 0:
-                returns.append(0)
-                portfolio_values.append(capital)
-                stop_loss_triggered_list.append(False)
-                continue
-            
-            # 计算次日开盘时的回撤
-            open_drawdown = (next_open - buy_price) / buy_price * 100
-            
-            # 计算次日最低价的回撤
-            low_drawdown = (next_low - buy_price) / buy_price * 100
-            
-            # 判断是否触发止损
-            stop_loss_triggered = False
-            actual_sell_price = next_close  # 默认收盘卖出
-            
-            # 如果开盘就跌破止损线
-            if open_drawdown <= stop_loss_threshold:
-                stop_loss_triggered = True
-                actual_sell_price = next_open
-            # 如果盘中跌破止损线（假设在最低价时卖出）
-            elif low_drawdown <= stop_loss_threshold:
-                stop_loss_triggered = True
-                actual_sell_price = next_low
-            
-            # 计算实际收益率
-            return_rate = (actual_sell_price - buy_price) / buy_price
-            
-            if position_size >= 1.0:
-                # 满仓策略：资金直接按收益率变化
-                capital = capital * (1 + return_rate)
-            else:
-                # 部分仓位策略：只投资部分资金
-                investment_amount = capital * position_size
-                profit = investment_amount * return_rate
-                capital = capital + profit
-            
-            portfolio_values.append(capital)
-            returns.append(return_rate)
-            stop_loss_triggered_list.append(stop_loss_triggered)
-        
-        # 计算性能指标
-        total_return = (capital - initial_capital) / initial_capital
-        num_trades = len(returns)
-        stop_loss_count = sum(stop_loss_triggered_list)
-        
-        if num_trades > 0:
-            avg_return = np.mean(returns)
-            std_return = np.std(returns)
-            win_rate = sum(1 for r in returns if r > 0) / num_trades
-            
-            # 计算最大回撤
-            portfolio_series = pd.Series(portfolio_values)
-            running_max = portfolio_series.expanding().max()
-            drawdown = (portfolio_series - running_max) / running_max
-            max_drawdown = drawdown.min()
-            
-            # 计算夏普比率（假设无风险利率为0）
-            sharpe_ratio = avg_return / std_return if std_return > 0 else 0
-            
-            return {
-                'strategy_name': f'回撤超{stop_loss_threshold}%止损策略',
-                'stop_loss_threshold': stop_loss_threshold,
-                'initial_capital': initial_capital,
-                'final_capital': capital,
-                'total_return': total_return,
-                'total_return_pct': total_return * 100,
-                'num_trades': num_trades,
-                'stop_loss_triggered_count': stop_loss_count,
-                'stop_loss_triggered_ratio': stop_loss_count / num_trades * 100 if num_trades > 0 else 0,
-                'avg_return_per_trade': avg_return,
-                'avg_return_per_trade_pct': avg_return * 100,
-                'win_rate': win_rate,
-                'win_rate_pct': win_rate * 100,
-                'max_drawdown': max_drawdown,
-                'max_drawdown_pct': max_drawdown * 100,
-                'sharpe_ratio': sharpe_ratio,
-                'volatility': std_return,
-                'portfolio_values': portfolio_values,
-                'dates': ['Initial'] + df['date'].dt.strftime('%Y-%m-%d').tolist(),
-                'stop_loss_triggered_list': stop_loss_triggered_list
-            }
-        else:
-            return {"error": "没有有效的交易数据"}
+
     
     def calculate_yearly_returns(self, signals: List[Dict[str, Any]], 
                                 initial_capital: float = 100000,
@@ -892,13 +706,13 @@ class ResultAnalyzer:
     
     def calculate_profitable_stocks_drawdown_stats(self, signals: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        计算盈利股票的最大回撤统计
+        计算3日上涨、5日上涨、10日上涨股票的最大回撤统计
         
         Args:
             signals: 信号列表
             
         Returns:
-            Dict[str, Any]: 盈利股票回撤统计结果
+            Dict[str, Any]: 股票回撤统计结果
         """
         if not signals:
             return {"error": "没有信号数据"}
@@ -907,58 +721,74 @@ class ResultAnalyzer:
         df = pd.DataFrame(signals)
         
         # 检查必要的字段
-        if 'next_day_return' not in df.columns:
-            return {"error": "缺少next_day_return字段"}
+        required_fields = ['day3_change_pct', 'day5_change_pct', 'day10_change_pct']
+        for field in required_fields:
+            if field not in df.columns:
+                return {"error": f"缺少{field}字段"}
         
-        # 过滤出盈利的股票（次日收益率 > 0）
-        profitable_df = df[df['next_day_return'] > 0].copy()
-        
-        if profitable_df.empty:
-            return {
-                'total_profitable_count': 0,
-                'drawdown_lt_1pct_count': 0,
-                'drawdown_lt_2pct_count': 0,
-                'drawdown_lt_3pct_count': 0,
-                'drawdown_lt_1pct_ratio': 0.0,
-                'drawdown_lt_2pct_ratio': 0.0,
-                'drawdown_lt_3pct_ratio': 0.0
-            }
-        
-        total_profitable_count = len(profitable_df)
-        
-        # 计算每个盈利股票的最大回撤
-        # 这里我们需要模拟从买入到卖出期间的价格走势来计算最大回撤
-        # 由于我们使用的是第一种策略（次日收盘卖出），最大回撤就是次日的最大跌幅
-        
-        drawdown_lt_1pct_count = 0
-        drawdown_lt_2pct_count = 0
-        drawdown_lt_3pct_count = 0
-        
-        for _, row in profitable_df.iterrows():
-            # 对于第一种策略（次日收盘卖出），我们需要计算次日的最大回撤
-            # 最大回撤 = (次日最低价 - 买入价) / 买入价 * 100
+        def calculate_drawdown_for_group(group_df, group_name, target_days):
+            """
+            计算特定组的回撤统计
             
-            # 获取买入价（当日收盘价）和次日的开盘价、最低价、收盘价
-            buy_price = row.get('close', 0)
-            next_open = row.get('next_open', buy_price)
-            next_low = row.get('next_low', next_open)  # 如果没有next_low字段，使用next_open
-            next_close = row.get('next_close', next_open)
+            Args:
+                group_df: 股票数据DataFrame
+                group_name: 组名称
+                target_days: 目标天数（3, 5, 或 10）
+            """
+            if group_df.empty:
+                return {
+                    f'{group_name}_total_count': 0,
+                    f'{group_name}_drawdown_lt_1pct_count': 0,
+                    f'{group_name}_drawdown_lt_2pct_count': 0,
+                    f'{group_name}_drawdown_lt_3pct_count': 0,
+                    f'{group_name}_drawdown_lt_1pct_ratio': 0.0,
+                    f'{group_name}_drawdown_lt_2pct_ratio': 0.0,
+                    f'{group_name}_drawdown_lt_3pct_ratio': 0.0
+                }
             
-            # 计算从买入价到次日最低价的回撤
-            if buy_price > 0:
-                # 次日最大回撤 = min(开盘价相对买入价的变化, 最低价相对买入价的变化)
-                open_drawdown = (next_open - buy_price) / buy_price * 100
+            total_count = len(group_df)
+            drawdown_lt_1pct_count = 0
+            drawdown_lt_2pct_count = 0
+            drawdown_lt_3pct_count = 0
+            
+            for _, row in group_df.iterrows():
+                # 买入价格（当日收盘价）
+                buy_price = row.get('close', 0)
+                if buy_price <= 0:
+                    continue
                 
-                # 如果有next_low字段，使用它；否则假设最低价就是开盘价和收盘价中的较低者
-                if 'next_low' in row and pd.notna(row['next_low']):
-                    low_drawdown = (next_low - buy_price) / buy_price * 100
+                # 收集从次日到目标天数期间的所有最低价
+                min_prices = []
+                
+                # 次日开盘价
+                next_open = row.get('next_open')
+                if pd.notna(next_open):
+                    min_prices.append(next_open)
+                
+                # 次日最低价（如果有的话）
+                next_low = row.get('next_low')
+                if pd.notna(next_low):
+                    min_prices.append(next_low)
                 else:
-                    # 如果没有next_low，使用开盘价和收盘价中的较低者
-                    next_min_price = min(next_open, next_close)
-                    low_drawdown = (next_min_price - buy_price) / buy_price * 100
+                    # 如果没有次日最低价，使用次日收盘价作为备选
+                    next_close = row.get('next_close')
+                    if pd.notna(next_close):
+                        min_prices.append(next_close)
                 
-                # 最大回撤是最小的那个值（最大的负值）
-                max_drawdown = min(open_drawdown, low_drawdown, 0)  # 确保不大于0
+                # 收集每日的最低价
+                for day in range(2, target_days + 1):
+                    day_low_field = f'day{day}_low'
+                    if day_low_field in row and pd.notna(row[day_low_field]):
+                        min_prices.append(row[day_low_field])
+                
+                if not min_prices:
+                    continue
+                
+                # 找到期间内的最低价
+                period_min_price = min(min_prices)
+                
+                # 计算最大回撤（从买入价到期间最低价）
+                max_drawdown = (period_min_price - buy_price) / buy_price * 100
                 
                 # 统计回撤程度
                 if max_drawdown < -3.0:
@@ -970,174 +800,41 @@ class ResultAnalyzer:
                     drawdown_lt_1pct_count += 1
                 elif max_drawdown < -1.0:
                     drawdown_lt_1pct_count += 1
-        
-        # 计算比例
-        drawdown_lt_1pct_ratio = drawdown_lt_1pct_count / total_profitable_count * 100 if total_profitable_count > 0 else 0
-        drawdown_lt_2pct_ratio = drawdown_lt_2pct_count / total_profitable_count * 100 if total_profitable_count > 0 else 0
-        drawdown_lt_3pct_ratio = drawdown_lt_3pct_count / total_profitable_count * 100 if total_profitable_count > 0 else 0
-        
-        return {
-            'total_profitable_count': total_profitable_count,
-            'drawdown_lt_1pct_count': drawdown_lt_1pct_count,
-            'drawdown_lt_2pct_count': drawdown_lt_2pct_count,
-            'drawdown_lt_3pct_count': drawdown_lt_3pct_count,
-            'drawdown_lt_1pct_ratio': drawdown_lt_1pct_ratio,
-            'drawdown_lt_2pct_ratio': drawdown_lt_2pct_ratio,
-            'drawdown_lt_3pct_ratio': drawdown_lt_3pct_ratio
-        }
-    
-    def calculate_drawdown_stop_loss_strategy(self, signals: List[Dict[str, Any]], 
-                                            stop_loss_threshold: float = -1.0) -> Dict[str, Any]:
-        """
-        计算回撤超过阈值就卖出的策略表现
-        
-        Args:
-            signals: 信号列表
-            stop_loss_threshold: 止损阈值，默认-1.0表示回撤超过-1%就卖出
             
-        Returns:
-            Dict[str, Any]: 止损策略分析结果
-        """
-        if not signals:
-            return {"error": "没有信号数据"}
-        
-        # 转换为DataFrame
-        df = pd.DataFrame(signals)
-        
-        # 检查必要的字段
-        required_fields = ['close', 'next_open', 'next_close']
-        missing_fields = [field for field in required_fields if field not in df.columns]
-        if missing_fields:
-            return {"error": f"缺少必要字段: {missing_fields}"}
-        
-        total_signals = len(df)
-        stop_loss_triggered_count = 0
-        normal_exit_count = 0
-        
-        # 策略收益统计
-        stop_loss_returns = []
-        normal_exit_returns = []
-        all_strategy_returns = []
-        
-        # 详细统计
-        stop_loss_profitable_count = 0
-        normal_exit_profitable_count = 0
-        
-        for _, row in df.iterrows():
-            buy_price = row.get('close', 0)
-            next_open = row.get('next_open', buy_price)
-            next_close = row.get('next_close', next_open)
-            next_low = row.get('next_low', min(next_open, next_close))  # 如果没有next_low，使用开盘和收盘的较低值
+            # 计算比例
+            drawdown_lt_1pct_ratio = drawdown_lt_1pct_count / total_count * 100 if total_count > 0 else 0
+            drawdown_lt_2pct_ratio = drawdown_lt_2pct_count / total_count * 100 if total_count > 0 else 0
+            drawdown_lt_3pct_ratio = drawdown_lt_3pct_count / total_count * 100 if total_count > 0 else 0
             
-            if buy_price <= 0:
-                continue
-            
-            # 计算次日开盘时的回撤
-            open_drawdown = (next_open - buy_price) / buy_price * 100
-            
-            # 计算次日最低价的回撤
-            low_drawdown = (next_low - buy_price) / buy_price * 100
-            
-            # 判断是否触发止损
-            stop_loss_triggered = False
-            actual_sell_price = next_close  # 默认收盘卖出
-            
-            # 如果开盘就跌破止损线
-            if open_drawdown <= stop_loss_threshold:
-                stop_loss_triggered = True
-                actual_sell_price = next_open
-                stop_loss_triggered_count += 1
-            # 如果盘中跌破止损线（假设在最低价时卖出）
-            elif low_drawdown <= stop_loss_threshold:
-                stop_loss_triggered = True
-                # 实际卖出价格应该是触发止损的价格，这里简化为最低价
-                actual_sell_price = next_low
-                stop_loss_triggered_count += 1
-            else:
-                # 正常收盘卖出
-                normal_exit_count += 1
-            
-            # 计算实际收益率
-            actual_return = (actual_sell_price - buy_price) / buy_price * 100
-            all_strategy_returns.append(actual_return)
-            
-            if stop_loss_triggered:
-                stop_loss_returns.append(actual_return)
-                if actual_return > 0:
-                    stop_loss_profitable_count += 1
-            else:
-                normal_exit_returns.append(actual_return)
-                if actual_return > 0:
-                    normal_exit_profitable_count += 1
-        
-        # 计算统计指标
-        def calculate_stats(returns_list):
-            if not returns_list:
-                return {
-                    'count': 0,
-                    'mean_return': 0.0,
-                    'total_return': 0.0,
-                    'profitable_count': 0,
-                    'profitable_ratio': 0.0,
-                    'max_return': 0.0,
-                    'min_return': 0.0,
-                    'std_return': 0.0
-                }
-            
-            returns_array = np.array(returns_list)
             return {
-                'count': len(returns_list),
-                'mean_return': float(np.mean(returns_array)),
-                'total_return': float(np.sum(returns_array)),
-                'profitable_count': int(np.sum(returns_array > 0)),
-                'profitable_ratio': float(np.mean(returns_array > 0) * 100),
-                'max_return': float(np.max(returns_array)),
-                'min_return': float(np.min(returns_array)),
-                'std_return': float(np.std(returns_array))
+                f'{group_name}_total_count': total_count,
+                f'{group_name}_drawdown_lt_1pct_count': drawdown_lt_1pct_count,
+                f'{group_name}_drawdown_lt_2pct_count': drawdown_lt_2pct_count,
+                f'{group_name}_drawdown_lt_3pct_count': drawdown_lt_3pct_count,
+                f'{group_name}_drawdown_lt_1pct_ratio': drawdown_lt_1pct_ratio,
+                f'{group_name}_drawdown_lt_2pct_ratio': drawdown_lt_2pct_ratio,
+                f'{group_name}_drawdown_lt_3pct_ratio': drawdown_lt_3pct_ratio
             }
         
-        # 计算各种情况的统计
-        stop_loss_stats = calculate_stats(stop_loss_returns)
-        normal_exit_stats = calculate_stats(normal_exit_returns)
-        overall_stats = calculate_stats(all_strategy_returns)
+        # 分别过滤出3日上涨、5日上涨、10日上涨的股票
+        day3_up_df = df[(df['day3_change_pct'] > 0) & pd.notna(df['day3_change_pct'])].copy()
+        day5_up_df = df[(df['day5_change_pct'] > 0) & pd.notna(df['day5_change_pct'])].copy()
+        day10_up_df = df[(df['day10_change_pct'] > 0) & pd.notna(df['day10_change_pct'])].copy()
         
-        # 与原策略（次日收盘卖出）的比较
-        original_returns = []
-        for _, row in df.iterrows():
-            buy_price = row.get('close', 0)
-            next_close = row.get('next_close', buy_price)
-            if buy_price > 0:
-                original_return = (next_close - buy_price) / buy_price * 100
-                original_returns.append(original_return)
+        # 计算各组的回撤统计
+        day3_stats = calculate_drawdown_for_group(day3_up_df, 'day3_up', 3)
+        day5_stats = calculate_drawdown_for_group(day5_up_df, 'day5_up', 5)
+        day10_stats = calculate_drawdown_for_group(day10_up_df, 'day10_up', 10)
         
-        original_stats = calculate_stats(original_returns)
+        # 合并结果
+        result = {}
+        result.update(day3_stats)
+        result.update(day5_stats)
+        result.update(day10_stats)
         
-        return {
-            'strategy_name': f'回撤超{stop_loss_threshold}%止损策略',
-            'stop_loss_threshold': stop_loss_threshold,
-            'total_signals': total_signals,
-            'stop_loss_triggered_count': stop_loss_triggered_count,
-            'stop_loss_triggered_ratio': stop_loss_triggered_count / total_signals * 100 if total_signals > 0 else 0,
-            'normal_exit_count': normal_exit_count,
-            'normal_exit_ratio': normal_exit_count / total_signals * 100 if total_signals > 0 else 0,
-            
-            # 止损情况统计
-            'stop_loss_stats': stop_loss_stats,
-            
-            # 正常退出情况统计
-            'normal_exit_stats': normal_exit_stats,
-            
-            # 整体策略统计
-            'overall_stats': overall_stats,
-            
-            # 与原策略对比
-            'original_strategy_stats': original_stats,
-            'strategy_improvement': {
-                'mean_return_diff': overall_stats['mean_return'] - original_stats['mean_return'],
-                'profitable_ratio_diff': overall_stats['profitable_ratio'] - original_stats['profitable_ratio'],
-                'total_return_diff': overall_stats['total_return'] - original_stats['total_return']
-            }
-        }
+        return result
+    
+
     
     def generate_performance_report(self, signals: List[Dict[str, Any]], 
                                   output_file: str = None, 
@@ -1363,74 +1060,38 @@ class ResultAnalyzer:
             
             report_lines.append("")
         
-        # 盈利股票最大回撤统计
+        # 3日、5日、10日上涨股票最大回撤统计
         drawdown_stats = self.calculate_profitable_stocks_drawdown_stats(signals)
         if 'error' not in drawdown_stats:
-            report_lines.append("盈利股票最大回撤统计 (第一种策略 - 次日收盘卖出):")
-            report_lines.append(f"  总盈利股票数量: {drawdown_stats['total_profitable_count']}")
-            report_lines.append(f"  最大回撤 < -1%: {drawdown_stats['drawdown_lt_1pct_count']}/{drawdown_stats['total_profitable_count']} = {drawdown_stats['drawdown_lt_1pct_ratio']:.2f}%")
-            report_lines.append(f"  最大回撤 < -2%: {drawdown_stats['drawdown_lt_2pct_count']}/{drawdown_stats['total_profitable_count']} = {drawdown_stats['drawdown_lt_2pct_ratio']:.2f}%")
-            report_lines.append(f"  最大回撤 < -3%: {drawdown_stats['drawdown_lt_3pct_count']}/{drawdown_stats['total_profitable_count']} = {drawdown_stats['drawdown_lt_3pct_ratio']:.2f}%")
+            report_lines.append("3日、5日、10日上涨股票最大回撤统计 (从买入价到目标期间的最大回撤):")
+            
+            # 3日上涨股票回撤统计
+            if 'day3_up_total_count' in drawdown_stats and drawdown_stats['day3_up_total_count'] > 0:
+                report_lines.append(f"  3日上涨股票:")
+                report_lines.append(f"    总数量: {drawdown_stats['day3_up_total_count']}")
+                report_lines.append(f"    最大回撤 < -1%: {drawdown_stats['day3_up_drawdown_lt_1pct_count']}/{drawdown_stats['day3_up_total_count']} = {drawdown_stats['day3_up_drawdown_lt_1pct_ratio']:.2f}%")
+                report_lines.append(f"    最大回撤 < -2%: {drawdown_stats['day3_up_drawdown_lt_2pct_count']}/{drawdown_stats['day3_up_total_count']} = {drawdown_stats['day3_up_drawdown_lt_2pct_ratio']:.2f}%")
+                report_lines.append(f"    最大回撤 < -3%: {drawdown_stats['day3_up_drawdown_lt_3pct_count']}/{drawdown_stats['day3_up_total_count']} = {drawdown_stats['day3_up_drawdown_lt_3pct_ratio']:.2f}%")
+            
+            # 5日上涨股票回撤统计
+            if 'day5_up_total_count' in drawdown_stats and drawdown_stats['day5_up_total_count'] > 0:
+                report_lines.append(f"  5日上涨股票:")
+                report_lines.append(f"    总数量: {drawdown_stats['day5_up_total_count']}")
+                report_lines.append(f"    最大回撤 < -1%: {drawdown_stats['day5_up_drawdown_lt_1pct_count']}/{drawdown_stats['day5_up_total_count']} = {drawdown_stats['day5_up_drawdown_lt_1pct_ratio']:.2f}%")
+                report_lines.append(f"    最大回撤 < -2%: {drawdown_stats['day5_up_drawdown_lt_2pct_count']}/{drawdown_stats['day5_up_total_count']} = {drawdown_stats['day5_up_drawdown_lt_2pct_ratio']:.2f}%")
+                report_lines.append(f"    最大回撤 < -3%: {drawdown_stats['day5_up_drawdown_lt_3pct_count']}/{drawdown_stats['day5_up_total_count']} = {drawdown_stats['day5_up_drawdown_lt_3pct_ratio']:.2f}%")
+            
+            # 10日上涨股票回撤统计
+            if 'day10_up_total_count' in drawdown_stats and drawdown_stats['day10_up_total_count'] > 0:
+                report_lines.append(f"  10日上涨股票:")
+                report_lines.append(f"    总数量: {drawdown_stats['day10_up_total_count']}")
+                report_lines.append(f"    最大回撤 < -1%: {drawdown_stats['day10_up_drawdown_lt_1pct_count']}/{drawdown_stats['day10_up_total_count']} = {drawdown_stats['day10_up_drawdown_lt_1pct_ratio']:.2f}%")
+                report_lines.append(f"    最大回撤 < -2%: {drawdown_stats['day10_up_drawdown_lt_2pct_count']}/{drawdown_stats['day10_up_total_count']} = {drawdown_stats['day10_up_drawdown_lt_2pct_ratio']:.2f}%")
+                report_lines.append(f"    最大回撤 < -3%: {drawdown_stats['day10_up_drawdown_lt_3pct_count']}/{drawdown_stats['day10_up_total_count']} = {drawdown_stats['day10_up_drawdown_lt_3pct_ratio']:.2f}%")
+            
             report_lines.append("")
         
-        # 回撤超-1%卖出策略分析
-        stop_loss_stats = self.calculate_drawdown_stop_loss_strategy(signals, stop_loss_threshold=-1.0)
-        if 'error' not in stop_loss_stats:
-            report_lines.append("回撤超-1%卖出策略分析:")
-            report_lines.append(f"  总信号数量: {stop_loss_stats['total_signals']}")
-            report_lines.append(f"  触发止损信号数: {stop_loss_stats['stop_loss_triggered_count']}")
-            report_lines.append(f"  止损触发率: {stop_loss_stats['stop_loss_triggered_ratio']:.2f}%")
-            report_lines.append("")
-            
-            # 止损策略收益统计
-            if 'stop_loss_stats' in stop_loss_stats:
-                sl_returns = stop_loss_stats['stop_loss_stats']
-                report_lines.append("  止损策略收益统计:")
-                report_lines.append(f"    平均收益率: {sl_returns['mean_return']:.2f}%")
-                report_lines.append(f"    胜率: {sl_returns['profitable_ratio']:.2f}%")
-                report_lines.append(f"    最大收益: {sl_returns['max_return']:.2f}%")
-                report_lines.append(f"    最大亏损: {sl_returns['min_return']:.2f}%")
-                report_lines.append("")
-            
-            # 正常退出策略收益统计
-            if 'normal_exit_stats' in stop_loss_stats:
-                ne_returns = stop_loss_stats['normal_exit_stats']
-                report_lines.append("  正常退出策略收益统计:")
-                report_lines.append(f"    平均收益率: {ne_returns['mean_return']:.2f}%")
-                report_lines.append(f"    胜率: {ne_returns['profitable_ratio']:.2f}%")
-                report_lines.append(f"    最大收益: {ne_returns['max_return']:.2f}%")
-                report_lines.append(f"    最大亏损: {ne_returns['min_return']:.2f}%")
-                report_lines.append("")
-            
-            # 策略对比
-            if 'strategy_improvement' in stop_loss_stats:
-                comparison = stop_loss_stats['strategy_improvement']
-                report_lines.append("  策略对比 (止损策略 vs 原策略):")
-                report_lines.append(f"    平均收益率差异: {comparison['mean_return_diff']:.2f}%")
-                report_lines.append(f"    胜率差异: {comparison['profitable_ratio_diff']:.2f}%")
-                report_lines.append(f"    总收益率差异: {comparison['total_return_diff']:.2f}%")
-                report_lines.append("")
-        
-        # 回撤超-1%卖出策略的投资组合表现
-        portfolio_stop_loss = self.calculate_portfolio_performance_with_stop_loss(
-            signals, 
-            initial_capital=100000, 
-            position_size=1.0, 
-            stop_loss_threshold=-1.0,
-            daily_selection_strategy='lowest_return'
-        )
-        if 'error' not in portfolio_stop_loss:
-            report_lines.append("回撤超-1%卖出策略投资组合表现:")
-            report_lines.append(f"  初始资金: {portfolio_stop_loss['initial_capital']:,.0f} 元")
-            report_lines.append(f"  最终资金: {portfolio_stop_loss['final_capital']:,.0f} 元")
-            report_lines.append(f"  总收益率: {portfolio_stop_loss['total_return_pct']:.2f}%")
-            report_lines.append(f"  交易次数: {portfolio_stop_loss['num_trades']}")
-            report_lines.append(f"  平均收益率: {portfolio_stop_loss['avg_return_per_trade_pct']:.2f}%")
-            report_lines.append(f"  胜率: {portfolio_stop_loss['win_rate_pct']:.2f}%")
-            report_lines.append(f"  最大回撤: {portfolio_stop_loss['max_drawdown_pct']:.2f}%")
-            if portfolio_stop_loss.get('sharpe_ratio') is not None:
-                report_lines.append(f"  夏普比率: {portfolio_stop_loss['sharpe_ratio']:.3f}")
-            report_lines.append("")
+
         
         # 按年份显示所有交易信号
         if signals:
@@ -1451,7 +1112,7 @@ class ResultAnalyzer:
                         report_lines.append(f"{year}年交易信号 (共{len(year_data)}条):")
                         # 使用简单直接的表格格式化方法
                         # 构建表头
-                        header = f"{'股票代码':<10} {'日期':<10} {'买入价':<6} {'买入时涨幅':<8} {'第一种策略':<9} {'卖出价':<7} {'盈亏比例':<8} {'3日涨跌幅':<8}"
+                        header = f"{'股票代码':<10} {'日期':<10} {'买入价':<6} {'买入时涨幅':<8} {'次日开盘卖出':<10} {'卖出价':<7} {'盈亏比例':<8}"
                         
                         report_lines.append(header)
                         report_lines.append("=" * len(header))
@@ -1481,11 +1142,11 @@ class ResultAnalyzer:
                                     buy_gain = f"{buy_gain_val:+.2f}%"
                             
                             # 卖出价格和盈亏比例
-                            if pd.notna(row.get('day3_close')) and pd.notna(row.get('close')):
-                                sell_price = f"{row.get('day3_close', 0):.2f}"
+                            if pd.notna(row.get('next_open')) and pd.notna(row.get('close')):
+                                sell_price = f"{row.get('next_open', 0):.2f}"
                                 # 计算盈亏比例
                                 buy_val = row.get('close', 0)
-                                sell_val = row.get('day3_close', 0)
+                                sell_val = row.get('next_open', 0)
                                 if buy_val > 0:
                                     profit_loss_val = ((sell_val - buy_val) / buy_val) * 100
                                     profit_loss = f"{profit_loss_val:+.2f}%"
@@ -1495,14 +1156,8 @@ class ResultAnalyzer:
                                 sell_price = "N/A"
                                 profit_loss = "N/A"
                             
-                            # 3日涨跌幅
-                            if pd.notna(row.get('day3_change_pct')):
-                                day3_change = f"{row['day3_change_pct']:+.2f}%"
-                            else:
-                                day3_change = "N/A"
-                            
                             # 组合数据行 - 使用与表头相同的格式
-                            data_row = f"{stock_code:<10} {date:<12} {buy_price:>8} {buy_gain:>10} {'':<12} {sell_price:>8} {profit_loss:>10} {day3_change:>10}"
+                            data_row = f"{stock_code:<10} {date:<12} {buy_price:>8} {buy_gain:>10} {'':<12} {sell_price:>8} {profit_loss:>10}"
                             
                             report_lines.append(data_row)
                         

@@ -292,13 +292,6 @@ class BacktestingSystem:
             # 转换为信号列表
             signals = result_df.to_dict('records')
             
-            # 应用过滤条件：剔除次日开盘涨幅>4.5%且开盘价等于收盘价的信号
-            original_count = len(signals)
-            signals, filtered_count = self.result_analyzer.filter_high_open_flat_signals(signals)
-            
-            if filtered_count > 0:
-                self.logger.info(f"过滤掉 {filtered_count} 个次日高开平盘信号，剩余 {len(signals)} 个信号")
-            
             # 分析结果
             analysis = self.result_analyzer.analyze_signals(signals)
             portfolio_perf = self.result_analyzer.calculate_portfolio_performance(signals)
@@ -409,13 +402,6 @@ class BacktestingSystem:
             
             # 转换为信号列表
             signals = result_df.to_dict('records')
-            
-            # 应用过滤条件：剔除次日开盘涨幅>4.5%且开盘价等于收盘价的信号
-            original_count = len(signals)
-            signals, filtered_count = self.result_analyzer.filter_high_open_flat_signals(signals)
-            
-            if filtered_count > 0:
-                self.logger.info(f"过滤掉 {filtered_count} 个次日高开平盘信号，剩余 {len(signals)} 个信号")
             
             # 分析结果
             analysis = self.result_analyzer.analyze_signals(signals)
