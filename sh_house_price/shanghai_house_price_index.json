@@ -1,5 +1,5 @@
 {
-  "latest_data_date": "2025.09.14",
+  "latest_data_date": "2025.09.28",
   "base_period": "2016-01",
   "base_index": 100,
   "description": "上海房价指数 (以2016年1月为基数100)",
@@ -1283,13 +1283,13 @@
     "2025-09": {
       "year": 2025,
       "month": 9,
-      "price_index": 173.02,
-      "yoy_change": -4.15,
-      "total_price": 579248988,
-      "total_area": 13261,
-      "avg_price": 43680.64,
-      "valid_days": 14,
-      "total_records": 134
+      "price_index": 171.72,
+      "yoy_change": -4.34,
+      "total_price": 1159659897,
+      "total_area": 26750,
+      "avg_price": 43351.77,
+      "valid_days": 28,
+      "total_records": 270
     }
   }
 }
