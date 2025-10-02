@@ -126,6 +126,17 @@
                 <canvas id="dailyFlowChart"></canvas>
             </div>
 
+            <!-- 新增：美国利率与恒生指数对比图表 -->
+            <div class="chart-container">
+                <div id="usRateHsiChartLoading" class="loading-overlay">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">加载中...</p>
+                </div>
+                <canvas id="usRateHsiChart"></canvas>
+            </div>
+
 
         </div>
     </div>
@@ -140,6 +151,8 @@
         document.addEventListener('DOMContentLoaded', function() {
             // 页面加载完成后立即获取数据
             fetchHKStockData();
+            // 获取美国利率数据
+            fetchUSInterestRateData();
         });
         
         function fetchHKStockData() {
@@ -170,6 +183,7 @@
                     document.getElementById('cumulativeChartLoading').style.display = 'none';
                     document.getElementById('dailyFlowChartLoading').style.display = 'none';  // 新增
                     document.getElementById('monthlyChartLoading').style.display = 'none';
+                    document.getElementById('usRateHsiChartLoading').style.display = 'none';  // 新增
 
                 });
         }
@@ -631,6 +645,134 @@
                 const dailyFlowChartContainer = document.getElementById('dailyFlowChart').parentNode;
                 dailyFlowChartContainer.style.marginTop = '100px';
             }
+        }
+
+        // 获取美国利率数据
+        function fetchUSInterestRateData() {
+            fetch('/api/us_interest_rate')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('网络响应不正常');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // 获取恒生指数历史数据
+                    fetch('/api/hsi_historical')
+                        .then(response => response.json())
+                        .then(hsiData => {
+                            renderUSRateHSIChart(data.rate_data, hsiData.hsi_data);
+                        })
+                        .catch(error => {
+                            console.error('获取恒生指数数据失败:', error);
+                            document.getElementById('usRateHsiChartLoading').style.display = 'none';
+                        });
+                })
+                .catch(error => {
+                    console.error('获取美国利率数据失败:', error);
+                    document.getElementById('usRateHsiChartLoading').style.display = 'none';
+                });
+        }
+
+        // 绘制美国利率与恒生指数对比图表
+        function renderUSRateHSIChart(rateData, hsiData) {
+            // 隐藏加载动画
+            document.getElementById('usRateHsiChartLoading').style.display = 'none';
+            
+            // 准备数据 - 找到共同的日期范围
+            const hsiDataMap = {};
+            hsiData.forEach(item => {
+                hsiDataMap[item['日期']] = item['收盘价'];
+            });
+            
+            // 过滤出有恒生指数数据的利率数据
+            const combinedData = rateData.filter(item => hsiDataMap[item['日期']]).map(item => ({
+                date: item['日期'],
+                rate: item['利率'],
+                hsi: hsiDataMap[item['日期']]
+            }));
+            
+            // 按日期排序
+            combinedData.sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            const dates = combinedData.map(item => item.date);
+            const rates = combinedData.map(item => item.rate);
+            const hsiValues = combinedData.map(item => item.hsi);
+            
+            // 创建图表
+            const ctx = document.getElementById('usRateHsiChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [
+                        {
+                            label: '美国利率(%)',
+                            data: rates,
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 2,
+                            yAxisID: 'y',
+                            tension: 0.1
+                        },
+                        {
+                            label: '恒生指数',
+                            data: hsiValues,
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 2,
+                            yAxisID: 'y1',
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '美国利率与恒生指数对比图'
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '日期'
+                            },
+                            ticks: {
+                                maxTicksLimit: 10
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: '美国利率(%)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '恒生指数'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
         }
         
 

@@ -9,6 +9,7 @@ from data import (
     fetch_macro_china_money_supply,
     institutional_holdings_data
 )
+from data.hkstock_data import get_us_interest_rate_data
 import os
 import logging
 # 从logging.handlers中移除RotatingFileHandler导入
@@ -128,7 +129,30 @@ def api_hkstock_info(stock_code):
         return jsonify(data)
     except Exception as e:
         app.logger.error(f"获取港股个股信息出错: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({'error': str(e)}), 500
+
+# API路由 - 美国利率数据
+@app.route('/api/us_interest_rate')
+def api_us_interest_rate():
+    """获取美国利率数据API"""
+    try:
+        data = get_us_interest_rate_data()
+        return jsonify(data)
+    except Exception as e:
+        app.logger.error(f"获取美国利率数据出错: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# API路由 - 恒生指数历史数据
+@app.route('/api/hsi_historical')
+def api_hsi_historical():
+    """获取恒生指数历史数据API"""
+    try:
+        from data.hkstock_data import get_hsi_historical_data
+        data = get_hsi_historical_data()
+        return jsonify(data)
+    except Exception as e:
+        app.logger.error(f"获取恒生指数历史数据出错: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # API路由 - 中国货币供应量数据
 @app.route('/api/macro/money_supply')
