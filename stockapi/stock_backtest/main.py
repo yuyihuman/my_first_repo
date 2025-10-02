@@ -294,7 +294,7 @@ class BacktestingSystem:
             
             # 分析结果
             analysis = self.result_analyzer.analyze_signals(signals)
-            portfolio_perf = self.result_analyzer.calculate_portfolio_performance(signals)
+            portfolio_perf = self.result_analyzer.calculate_portfolio_performance(signals, daily_selection_strategy='all')
             
             # 显示摘要
             print(f"\n批量测试完成:")
@@ -405,7 +405,7 @@ class BacktestingSystem:
             
             # 分析结果
             analysis = self.result_analyzer.analyze_signals(signals)
-            portfolio_perf = self.result_analyzer.calculate_portfolio_performance(signals)
+            portfolio_perf = self.result_analyzer.calculate_portfolio_performance(signals, daily_selection_strategy='all')
             
             # 显示摘要
             print(f"\n全量测试完成:")

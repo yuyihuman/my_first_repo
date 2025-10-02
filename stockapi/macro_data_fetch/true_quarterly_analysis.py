@@ -114,6 +114,18 @@ def save_cache(data, cache_type):
         cache_type: 缓存类型 ('daily_data' 或 'shares_data')
     """
     logger = logging.getLogger(__name__)
+    
+    # 数据有效性检查
+    if cache_type == 'daily_data':
+        if not data or (isinstance(data, dict) and len(data) == 0):
+            logger.warning(f"⚠️ {cache_type} 数据为空，跳过缓存保存")
+            return
+        logger.info(f"📊 准备缓存 {len(data)} 只股票的日线数据")
+    elif cache_type == 'shares_data':
+        if not data or (isinstance(data, (list, pd.DataFrame)) and len(data) == 0):
+            logger.warning(f"⚠️ {cache_type} 数据为空，跳过缓存保存")
+            return
+    
     cache_data = {}
     if os.path.exists(CACHE_FILE):
         try:
@@ -651,8 +663,14 @@ def get_all_stocks_daily_data(stock_codes, start_date, end_date):
     if failed_examples:
         logger.warning(f"失败示例: {failed_examples}")
     
-    # 保存到缓存
-    save_cache(all_daily_data, 'daily_data')
+    # 检查获取结果，只有成功获取到数据才保存缓存
+    if success_count > 0:
+        logger.info(f"📈 成功获取 {success_count} 只股票的日线数据，保存到缓存")
+        save_cache(all_daily_data, 'daily_data')
+    else:
+        logger.error(f"❌ 所有股票的日线数据获取都失败了，不保存空缓存")
+        logger.error(f"建议检查网络连接和akshare API状态")
+    
     return all_daily_data
 
 def calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_data, quarterly_stats):

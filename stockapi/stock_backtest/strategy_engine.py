@@ -183,10 +183,8 @@ class StrategyEngine:
         self.logger = logging.getLogger(__name__)
         self.conditions = [
             PriceAboveOneCondition(),
-            HighOpenAbovePrevHighCondition(),
-            MovingAverageSpreadCondition(),
-            VolumeLimitCondition(),
-            CloseNotHighCondition()
+            FinancialAnnouncementCondition(),
+            HighOpenLowCloseCondition()
         ]
     
     def get_strategy_description(self) -> str:
@@ -333,7 +331,8 @@ class StrategyEngine:
                     next_day_data = df.iloc[idx + 1]
                     next_open = next_day_data['open']
                     next_day_close = next_day_data['close']
-                    next_day_return = (next_day_close - current_close) / current_close * 100
+                    # 修改：次日收益率改为从次日开盘价买入到次日收盘价卖出的收益
+                    next_day_return = (next_day_close - next_open) / next_open * 100 if next_open != 0 else None
                     next_open_change_pct = (next_open - current_close) / current_close * 100
                     next_close_change_pct = (next_day_close - current_close) / current_close * 100
                     next_intraday_change_pct = (next_day_close - next_open) / next_open * 100 if next_open != 0 else None
@@ -480,9 +479,16 @@ class StrategyEngine:
         Returns:
             str: 策略描述
         """
-        description = "当前策略条件：\n"
+        description = "买入策略条件：\n"
         for i, condition in enumerate(self.conditions, 1):
-            description += f"{i}、{condition.get_description()}\n"
+            description += f"  {i}、{condition.get_description()}\n"
+        description += f"  {len(self.conditions) + 1}、买入时机：次日开盘价买入\n"
+        description += f"  {len(self.conditions) + 2}、如遇跌停或停牌等无法交易情况，按实际可交易价格执行\n"
+        
+        description += "\n卖出策略条件：\n"
+        description += "  1、卖出时机：次日收盘价卖出\n"
+        description += "  2、无其他卖出条件（持有至收盘）\n"
+        
         return description
 
 
@@ -576,6 +582,28 @@ class VolumeLimitCondition(StrategyCondition):
         return "当日成交量小于之前一个交易日10日成交量均值的1.5倍"
 
 
+class FinancialAnnouncementCondition(StrategyCondition):
+    """财报发布日条件：前一天是财报发布日"""
+    
+    def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
+        # 检查是否有财报发布标记列
+        if 'financial_announcement' not in df.columns:
+            return False
+        
+        # 检查是否有前一个交易日的数据
+        if current_idx == 0:
+            return False
+        
+        # 获取前一个交易日的数据
+        prev_data = df.iloc[current_idx - 1]
+        
+        # 检查前一日是否为财报发布日
+        return bool(prev_data['financial_announcement'])
+    
+    def get_description(self) -> str:
+        return "前一天是财报发布日"
+
+
 class CloseNotHighCondition(StrategyCondition):
     """收盘价不是最高价条件：当日收盘价不能是全天最高价"""
     
@@ -591,3 +619,37 @@ class CloseNotHighCondition(StrategyCondition):
     
     def get_description(self) -> str:
         return "当日收盘价不能是全天最高价"
+
+
+class HighOpenLowCloseCondition(StrategyCondition):
+    """高开超过5%低走且收盘价不低于前一天收盘价条件：当天高开超过5%，低走且收盘价不能低于前一天的收盘价"""
+    
+    def check(self, df: pd.DataFrame, current_idx: int, **kwargs) -> bool:
+        current_data = df.iloc[current_idx]
+        
+        # 获取前一个交易日的收盘价
+        if current_idx == 0:
+            return False
+        
+        prev_data = df.iloc[current_idx - 1]
+        prev_close = prev_data['close']
+        
+        # 当前交易日的价格数据
+        open_price = current_data['open']
+        close_price = current_data['close']
+        
+        # 检查高开超过5%：开盘价相对于前一日收盘价上涨超过5%
+        open_change_pct = (open_price - prev_close) / prev_close * 100
+        is_high_open = open_change_pct > 5.0
+        
+        # 检查低走：收盘价 < 开盘价
+        is_low_close = close_price < open_price
+        
+        # 检查收盘价不低于前一天的收盘价
+        is_close_not_below_prev = close_price >= prev_close
+        
+        # 三个条件都满足才返回True
+        return is_high_open and is_low_close and is_close_not_below_prev
+    
+    def get_description(self) -> str:
+        return "当天高开超过5%，低走且收盘价不能低于前一天的收盘价"
