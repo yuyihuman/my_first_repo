@@ -134,16 +134,7 @@
                 <canvas id="m1Hs300Chart"></canvas>
             </div>
             
-            <!-- 新增：M1同比增幅和中证商品期货指数图表 -->
-            <div class="chart-container">
-                <div id="m1CcidxChartLoading" class="loading-overlay">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2">加载中...</p>
-                </div>
-                <canvas id="m1CcidxChart"></canvas>
-            </div>
+
             
             <!-- 新增：M1同比增幅与非银行滚动4Q净利润对比图表 -->
             <div class="chart-container">
@@ -234,7 +225,6 @@
         let moneySupplyChart = null;
         let indexComparisonChart = null;
         let m1Hs300Chart = null;
-        let m1CcidxChart = null;
         let m1NonBankProfitChart = null;
         let hs300PeChart = null;
         let hs300ProfitChart = null;
@@ -255,7 +245,6 @@
             document.getElementById('moneySupplyChartLoading').style.display = 'flex';
             document.getElementById('indexComparisonChartLoading').style.display = 'flex';
             document.getElementById('m1Hs300ChartLoading').style.display = 'flex';
-            document.getElementById('m1CcidxChartLoading').style.display = 'flex';
             document.getElementById('m1NonBankProfitChartLoading').style.display = 'flex';
             document.getElementById('hs300PeChartLoading').style.display = 'flex';
             document.getElementById('hs300ProfitChartLoading').style.display = 'flex';
@@ -285,7 +274,7 @@
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
                         document.getElementById('m1Hs300ChartLoading').style.display = 'none';
-                        document.getElementById('m1CcidxChartLoading').style.display = 'none';
+
                         document.getElementById('m1NonBankProfitChartLoading').style.display = 'none';
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
@@ -307,7 +296,6 @@
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
                         document.getElementById('m1Hs300ChartLoading').style.display = 'none';
-                        document.getElementById('m1CcidxChartLoading').style.display = 'none';
                         document.getElementById('m1NonBankProfitChartLoading').style.display = 'none';
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
@@ -342,7 +330,7 @@
             });
             
             // 创建图表
-            createMoneySupplyChart(months, m2Growth, m1Growth, secondHandHousingData);
+            createMoneySupplyChart(sortedData);
             
             // 创建指数对比图表
                         createIndexComparisonChart(sortedData);
@@ -352,8 +340,7 @@
                         // 创建M1同比增幅和沪深300指数图表
                         createM1Hs300Chart(sortedData);
                         
-                        // 创建M1同比增幅和中证商品期货指数图表
-                        createM1CcidxChart(sortedData);
+
                         
                         // 创建M1同比增幅与非银行滚动4Q净利润对比图表
                         createM1NonBankProfitChart(sortedData);
@@ -377,7 +364,6 @@
                         document.getElementById('moneySupplyChartLoading').style.display = 'none';
                         document.getElementById('indexComparisonChartLoading').style.display = 'none';
                         document.getElementById('m1Hs300ChartLoading').style.display = 'none';
-                        document.getElementById('m1CcidxChartLoading').style.display = 'none';
                         document.getElementById('m1NonBankProfitChartLoading').style.display = 'none';
                         document.getElementById('hs300PeChartLoading').style.display = 'none';
                         document.getElementById('hs300ProfitChartLoading').style.display = 'none';
@@ -387,13 +373,28 @@
         }
         
         // 创建货币供应量图表
-        function createMoneySupplyChart(months, m2Growth, m1Growth, secondHandHousingData) {
+        function createMoneySupplyChart(data) {
             const ctx = document.getElementById('moneySupplyChart').getContext('2d');
             
             // 销毁旧图表（如果存在）
             if (moneySupplyChart) {
                 moneySupplyChart.destroy();
             }
+            
+            // 提取数据
+            const labels = data.map(item => item.月份);
+            const m2Growth = data.map(item => {
+                return item.货币和准货币_广义货币M2_同比 !== null ? 
+                    item.货币和准货币_广义货币M2_同比 : null;
+            });
+            const m1Growth = data.map(item => {
+                return item.货币_狭义货币M1_同比 !== null ? 
+                    item.货币_狭义货币M1_同比 : null;
+            });
+            const secondHandHousingData = data.map(item => {
+                return item.上海二手住宅价格指数_同比 !== null ? 
+                    item.上海二手住宅价格指数_同比 : null;
+            });
             
             // 定义重要时间节点
             const timePoints = ['2002.2', '2005.5', '2008.12', '2012.1', '2015.3', '2019.1', '2021.11', '2024.9'];
@@ -420,24 +421,47 @@
                 };
             });
             
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
+            // 添加年月标注
+            timePoints.forEach((point, index) => {
+                annotations[`dateLabel${index}`] = {
                     type: 'label',
-                    xValue: midPoint,
+                    xValue: point,
                     yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    content: point,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
                     borderColor: 'rgba(128, 128, 128, 0.8)',
                     borderWidth: 1,
                     font: {
-                        size: 10
+                        size: 11,
+                        weight: 'bold'
                     },
                     position: 'start',
-                    yAdjust: -20
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw'
+                };
+            });
+            
+            // 添加间隔月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = (labels.indexOf(timePoints[i]) + labels.indexOf(timePoints[i + 1])) / 2;
+                const midDate = labels[Math.round(midPoint)];
+                
+                annotations[`monthLabel${i}`] = {
+                    type: 'label',
+                    xValue: midDate,
+                    yValue: 'max',
+                    content: `${monthsBetween}个月`,
+                    backgroundColor: 'rgba(255, 255, 0, 0.8)',
+                    borderColor: 'rgba(255, 165, 0, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10,
+                        weight: 'normal'
+                    },
+                    position: 'start',
+                    yAdjust: -45,
+                    drawTime: 'beforeDatasetsDraw'
                 };
             }
             
@@ -445,7 +469,7 @@
             moneySupplyChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: months,
+                    labels: labels,
                     datasets: [
                         {
                             label: 'M2同比增长(%)',
@@ -578,24 +602,47 @@
                 };
             });
             
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
+            // 添加年月标注
+            timePoints.forEach((point, index) => {
+                annotations[`dateLabel${index}`] = {
                     type: 'label',
-                    xValue: midPoint,
+                    xValue: point,
                     yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    content: point,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
                     borderColor: 'rgba(128, 128, 128, 0.8)',
                     borderWidth: 1,
                     font: {
-                        size: 10
+                        size: 11,
+                        weight: 'bold'
                     },
                     position: 'start',
-                    yAdjust: -20
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw'
+                };
+            });
+            
+            // 添加间隔月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = (labels.indexOf(timePoints[i]) + labels.indexOf(timePoints[i + 1])) / 2;
+                const midDate = labels[Math.round(midPoint)];
+                
+                annotations[`monthLabel${i}`] = {
+                    type: 'label',
+                    xValue: midDate,
+                    yValue: 'max',
+                    content: `${monthsBetween}个月`,
+                    backgroundColor: 'rgba(255, 255, 0, 0.8)',
+                    borderColor: 'rgba(255, 165, 0, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10,
+                        weight: 'normal'
+                    },
+                    position: 'start',
+                    yAdjust: -45,
+                    drawTime: 'beforeDatasetsDraw'
                 };
             }
             
@@ -718,24 +765,47 @@
                 };
             });
             
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
+            // 添加年月标注
+            timePoints.forEach((point, index) => {
+                annotations[`dateLabel${index}`] = {
                     type: 'label',
-                    xValue: midPoint,
+                    xValue: point,
                     yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    content: point,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
                     borderColor: 'rgba(128, 128, 128, 0.8)',
                     borderWidth: 1,
                     font: {
-                        size: 10
+                        size: 11,
+                        weight: 'bold'
                     },
                     position: 'start',
-                    yAdjust: -20
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw'
+                };
+            });
+            
+            // 添加间隔月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = (labels.indexOf(timePoints[i]) + labels.indexOf(timePoints[i + 1])) / 2;
+                const midDate = labels[Math.round(midPoint)];
+                
+                annotations[`monthLabel${i}`] = {
+                    type: 'label',
+                    xValue: midDate,
+                    yValue: 'max',
+                    content: `${monthsBetween}个月`,
+                    backgroundColor: 'rgba(255, 255, 0, 0.8)',
+                    borderColor: 'rgba(255, 165, 0, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10,
+                        weight: 'normal'
+                    },
+                    position: 'start',
+                    yAdjust: -45,
+                    drawTime: 'beforeDatasetsDraw'
                 };
             }
             
@@ -850,157 +920,7 @@
             });
         }
         
-        // 创建M1同比增幅和上海二手住宅价格指数同比图表
-        function createM1CcidxChart(data) {
-            const ctx = document.getElementById('m1CcidxChart').getContext('2d');
-            
-            // 提取数据
-            const labels = data.map(item => item.月份);
-            const m1Data = data.map(item => item.货币_狭义货币M1_同比);
-            const houseData = data.map(item => item.上海二手住宅价格指数_同比);
-            
-            // 调试：输出上海二手住宅价格指数同比数据
-            console.log('上海二手住宅价格指数同比数据样本:', houseData.slice(0, 10));
-            console.log('非空上海二手住宅价格指数同比数据数量:', houseData.filter(val => val !== null && val !== undefined).length);
-            console.log('总数据条数:', houseData.length);
-            console.log('数据样本:', data.slice(0, 3));
-            
-            // 定义重要时间节点
-            const timePoints = ['2002.2', '2005.5', '2008.12', '2012.1', '2015.3', '2019.1', '2021.11', '2024.9'];
-            
-            // 计算相邻时间点间的月数
-            function calculateMonthsBetween(date1, date2) {
-                const [year1, month1] = date1.split('.').map(Number);
-                const [year2, month2] = date2.split('.').map(Number);
-                return (year2 - year1) * 12 + (month2 - month1);
-            }
-            
-            // 创建注释配置
-            const annotations = {};
-            
-            // 添加垂直线
-            timePoints.forEach((point, index) => {
-                annotations[`line${index}`] = {
-                    type: 'line',
-                    xMin: point,
-                    xMax: point,
-                    borderColor: 'rgba(128, 128, 128, 0.8)',
-                    borderWidth: 2,
-                    borderDash: [5, 5]
-                };
-            });
-            
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
-                    type: 'label',
-                    xValue: midPoint,
-                    yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                    borderColor: 'rgba(128, 128, 128, 0.8)',
-                    borderWidth: 1,
-                    font: {
-                        size: 10
-                    },
-                    position: 'start',
-                    yAdjust: -20
-                };
-            }
-            
-            new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'M1同比增幅 (%)',
-                            data: m1Data,
-                            borderColor: 'rgba(54, 162, 235, 1)',
-                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                            borderWidth: 2,
-                            pointRadius: 1,
-                            tension: 0.1,
-                            spanGaps: true,
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: '上海二手住宅价格指数同比 (%)',
-                            data: houseData,
-                            borderColor: 'rgba(255, 165, 0, 1)',
-                            backgroundColor: 'rgba(255, 165, 0, 0.2)',
-                            borderWidth: 2,
-                            pointRadius: 1,
-                            tension: 0.1,
-                            spanGaps: true,
-                            yAxisID: 'y'
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        mode: 'index',
-                        intersect: false
-                    },
-                    plugins: {
-                        title: {
-                            display: true,
-                            text: 'M1同比增幅与上海二手住宅价格指数同比对比',
-                            font: {
-                                size: 16
-                            }
-                        },
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false
-                        },
-                        annotation: {
-                            annotations: annotations
-                        }
-                    },
-                    scales: {
-                        x: {
-                            ticks: {
-                                maxRotation: 45,
-                                minRotation: 45
-                            },
-                            title: {
-                                display: true,
-                                text: '月份'
-                            }
-                        },
-                        y: {
-                            type: 'linear',
-                            display: true,
-                            position: 'left',
-                            title: {
-                                display: true,
-                                text: '同比增幅 (%)'
-                            },
-                            grid: {
-                                color: function(context) {
-                                    if (context.tick.value === 0) {
-                                        return 'rgba(0, 0, 0, 0.8)';
-                                    }
-                                    return 'rgba(0, 0, 0, 0.1)';
-                                },
-                                lineWidth: function(context) {
-                                    if (context.tick.value === 0) {
-                                        return 2;
-                                    }
-                                    return 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
+
         
         // 创建M1同比增幅与非银行滚动4Q净利润对比图表
         function createM1NonBankProfitChart(data) {
@@ -1036,24 +956,47 @@
                 };
             });
             
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
+            // 添加年月标注
+            timePoints.forEach((point, index) => {
+                annotations[`dateLabel${index}`] = {
                     type: 'label',
-                    xValue: midPoint,
+                    xValue: point,
                     yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    content: point,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
                     borderColor: 'rgba(128, 128, 128, 0.8)',
                     borderWidth: 1,
                     font: {
-                        size: 10
+                        size: 11,
+                        weight: 'bold'
                     },
                     position: 'start',
-                    yAdjust: -20
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw'
+                };
+            });
+            
+            // 添加间隔月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = (labels.indexOf(timePoints[i]) + labels.indexOf(timePoints[i + 1])) / 2;
+                const midDate = labels[Math.round(midPoint)];
+                
+                annotations[`monthLabel${i}`] = {
+                    type: 'label',
+                    xValue: midDate,
+                    yValue: 'max',
+                    content: `${monthsBetween}个月`,
+                    backgroundColor: 'rgba(255, 255, 0, 0.8)',
+                    borderColor: 'rgba(255, 165, 0, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10,
+                        weight: 'normal'
+                    },
+                    position: 'start',
+                    yAdjust: -45,
+                    drawTime: 'beforeDatasetsDraw'
                 };
             }
             
@@ -1230,24 +1173,47 @@
                 };
             });
             
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
+            // 添加年月标注
+            timePoints.forEach((point, index) => {
+                annotations[`dateLabel${index}`] = {
                     type: 'label',
-                    xValue: midPoint,
+                    xValue: point,
                     yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    content: point,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
                     borderColor: 'rgba(128, 128, 128, 0.8)',
                     borderWidth: 1,
                     font: {
-                        size: 10
+                        size: 11,
+                        weight: 'bold'
                     },
                     position: 'start',
-                    yAdjust: -20
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw'
+                };
+            });
+            
+            // 添加间隔月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = (filteredLabels.indexOf(timePoints[i]) + filteredLabels.indexOf(timePoints[i + 1])) / 2;
+                const midDate = filteredLabels[Math.round(midPoint)];
+                
+                annotations[`monthLabel${i}`] = {
+                    type: 'label',
+                    xValue: midDate,
+                    yValue: 'max',
+                    content: `${monthsBetween}个月`,
+                    backgroundColor: 'rgba(255, 255, 0, 0.8)',
+                    borderColor: 'rgba(255, 165, 0, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10,
+                        weight: 'normal'
+                    },
+                    position: 'start',
+                    yAdjust: -45,
+                    drawTime: 'beforeDatasetsDraw'
                 };
             }
             
@@ -1392,7 +1358,7 @@
         // 创建沪深300指数和滚动4Q净利润图表
         function createHs300ProfitChart(data) {
             // 提取数据
-            const months = data.map(item => item.月份);
+            const labels = data.map(item => item.月份);
             const hs300Index = data.map(item => item.沪深300指数);
             const rolling4qProfit = data.map(item => item.滚动4Q净利润);
             const bankRolling4qProfit = data.map(item => item.银行滚动4Q净利润);
@@ -1400,11 +1366,11 @@
             
             // 过滤数据，以沪深300指数的起点作为x轴起点
             const filteredData = [];
-            for (let i = 0; i < months.length; i++) {
+            for (let i = 0; i < labels.length; i++) {
                 // 只保留沪深300指数不为null的月份
                 if (hs300Index[i] !== null) {
                     filteredData.push({
-                        month: months[i],
+                        month: labels[i],
                         hs300: hs300Index[i],
                         profit: rolling4qProfit[i],
                         bankProfit: bankRolling4qProfit[i],
@@ -1445,25 +1411,50 @@
                 };
             });
             
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
+            // 添加年月标注
+            timePoints.forEach((point, index) => {
+                annotations[`dateLabel${index}`] = {
                     type: 'label',
-                    xValue: midPoint,
+                    xValue: point,
                     yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    content: point,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
                     borderColor: 'rgba(128, 128, 128, 0.8)',
                     borderWidth: 1,
                     font: {
-                        size: 10
+                        size: 11,
+                        weight: 'bold'
                     },
                     position: 'start',
-                    yAdjust: -20
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw'
                 };
+            });
+            
+            // 添加间隔月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = (filteredData.map(d => d.month).indexOf(timePoints[i]) + filteredData.map(d => d.month).indexOf(timePoints[i + 1])) / 2;
+                const midDate = filteredData[Math.round(midPoint)]?.month;
+                
+                if (midDate) {
+                    annotations[`monthLabel${i}`] = {
+                        type: 'label',
+                        xValue: midDate,
+                        yValue: 'max',
+                        content: `${monthsBetween}个月`,
+                        backgroundColor: 'rgba(255, 255, 0, 0.8)',
+                        borderColor: 'rgba(255, 165, 0, 0.8)',
+                        borderWidth: 1,
+                        font: {
+                            size: 10,
+                            weight: 'normal'
+                        },
+                        position: 'start',
+                        yAdjust: -45,
+                        drawTime: 'beforeDatasetsDraw'
+                    };
+                }
             }
             
             hs300ProfitChart = new Chart(ctx, {
@@ -1590,7 +1581,7 @@
             
             // 过滤数据，以沪深300指数的起点作为x轴起点
             const filteredData = data.filter(item => item.沪深300指数 !== null);
-            const months = filteredData.map(item => item.月份);
+            const labels = filteredData.map(item => item.月份);
             const nonBankProfit = filteredData.map(item => item.非银行滚动4Q净利润);
             const commodityIndex = filteredData.map(item => item.商品价格指数);
             const hs300Index = filteredData.map(item => item.沪深300指数);
@@ -1620,24 +1611,47 @@
                 };
             });
             
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
+            // 添加年月标注
+            timePoints.forEach((point, index) => {
+                annotations[`dateLabel${index}`] = {
                     type: 'label',
-                    xValue: midPoint,
+                    xValue: point,
                     yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    content: point,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
                     borderColor: 'rgba(128, 128, 128, 0.8)',
                     borderWidth: 1,
                     font: {
-                        size: 10
+                        size: 11,
+                        weight: 'bold'
                     },
                     position: 'start',
-                    yAdjust: -20
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw'
+                };
+            });
+            
+            // 添加间隔月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = (labels.indexOf(timePoints[i]) + labels.indexOf(timePoints[i + 1])) / 2;
+                const midDate = labels[Math.round(midPoint)];
+                
+                annotations[`monthLabel${i}`] = {
+                    type: 'label',
+                    xValue: midDate,
+                    yValue: 'max',
+                    content: `${monthsBetween}个月`,
+                    backgroundColor: 'rgba(255, 255, 0, 0.8)',
+                    borderColor: 'rgba(255, 165, 0, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10,
+                        weight: 'normal'
+                    },
+                    position: 'start',
+                    yAdjust: -45,
+                    drawTime: 'beforeDatasetsDraw'
                 };
             }
             
@@ -1645,7 +1659,7 @@
             nonBankProfitCommodityChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: months,
+                    labels: labels,
                     datasets: [
                         {
                             label: '非银行滚动4Q净利润',
@@ -1770,7 +1784,7 @@
         function createNonBankProfitPmiChart(data) {
             // 过滤数据，以新订单指数的起点作为x轴起点
             const filteredData = data.filter(item => item['新订单指数(%)'] !== null);
-            const months = filteredData.map(item => item.月份);
+            const labels = filteredData.map(item => item.月份);
             const nonBankProfit = filteredData.map(item => item.非银行滚动4Q净利润);
             const newOrderIndex = filteredData.map(item => item['新订单指数(%)']);
             const newExportOrderIndex = filteredData.map(item => item['新出口订单指数(%)']);
@@ -1800,24 +1814,47 @@
                 };
             });
             
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
+            // 添加年月标注
+            timePoints.forEach((point, index) => {
+                annotations[`dateLabel${index}`] = {
                     type: 'label',
-                    xValue: midPoint,
+                    xValue: point,
                     yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    content: point,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
                     borderColor: 'rgba(128, 128, 128, 0.8)',
                     borderWidth: 1,
                     font: {
-                        size: 10
+                        size: 11,
+                        weight: 'bold'
                     },
                     position: 'start',
-                    yAdjust: -20
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw'
+                };
+            });
+            
+            // 添加间隔月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = (labels.indexOf(timePoints[i]) + labels.indexOf(timePoints[i + 1])) / 2;
+                const midDate = labels[Math.round(midPoint)];
+                
+                annotations[`monthLabel${i}`] = {
+                    type: 'label',
+                    xValue: midDate,
+                    yValue: 'max',
+                    content: `${monthsBetween}个月`,
+                    backgroundColor: 'rgba(255, 255, 0, 0.8)',
+                    borderColor: 'rgba(255, 165, 0, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10,
+                        weight: 'normal'
+                    },
+                    position: 'start',
+                    yAdjust: -45,
+                    drawTime: 'beforeDatasetsDraw'
                 };
             }
             
@@ -1842,7 +1879,7 @@
             nonBankProfitPmiChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: months,
+                    labels: labels,
                     datasets: [{
                         label: '非银行滚动4Q净利润 (亿元)',
                         data: nonBankProfit,
@@ -2013,24 +2050,47 @@
                 };
             });
             
-            // 添加月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const months = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = timePoints[i]; // 在起始点附近显示
-                
-                annotations[`label${i}`] = {
+            // 添加年月标注
+            timePoints.forEach((point, index) => {
+                annotations[`dateLabel${index}`] = {
                     type: 'label',
-                    xValue: midPoint,
+                    xValue: point,
                     yValue: 'max',
-                    content: `${months}个月`,
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    content: point,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
                     borderColor: 'rgba(128, 128, 128, 0.8)',
                     borderWidth: 1,
                     font: {
-                        size: 10
+                        size: 11,
+                        weight: 'bold'
                     },
                     position: 'start',
-                    yAdjust: -20
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw'
+                };
+            });
+            
+            // 添加间隔月数标注
+            for (let i = 0; i < timePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
+                const midPoint = (labels.indexOf(timePoints[i]) + labels.indexOf(timePoints[i + 1])) / 2;
+                const midDate = labels[Math.round(midPoint)];
+                
+                annotations[`monthLabel${i}`] = {
+                    type: 'label',
+                    xValue: midDate,
+                    yValue: 'max',
+                    content: `${monthsBetween}个月`,
+                    backgroundColor: 'rgba(255, 255, 0, 0.8)',
+                    borderColor: 'rgba(255, 165, 0, 0.8)',
+                    borderWidth: 1,
+                    font: {
+                        size: 10,
+                        weight: 'normal'
+                    },
+                    position: 'start',
+                    yAdjust: -45,
+                    drawTime: 'beforeDatasetsDraw'
                 };
             }
             
