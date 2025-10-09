@@ -7,6 +7,8 @@ import logging
 import multiprocessing
 from multiprocessing import Pool, Lock
 import math
+import shutil
+import akshare as ak
 
 # 全局变量，用于存储每个进程的日志记录器
 process_loggers = {}
@@ -146,6 +148,96 @@ def get_stock_data(stock_code, stock_name, base_folder="all_stocks_data"):
     
     safe_log(f"  股票 {stock_code} 数据下载完成，成功率: {success_count}/{total_attempts}")
     return success_count > 0
+
+def is_valid_stock_code(stock_code):
+    """检查股票代码是否符合要求（只保留0、3、60开头的股票）
+    
+    Args:
+        stock_code: 股票代码字符串
+    
+    Returns:
+        bool: 如果股票代码符合要求返回True，否则返回False
+    """
+    stock_code_str = str(stock_code).zfill(6)
+    
+    # 只保留0、3、60开头的股票
+    if stock_code_str.startswith('0') or stock_code_str.startswith('3') or stock_code_str.startswith('60'):
+        return True
+    
+    return False
+
+def has_st_in_history(stock_code):
+    """检查股票历史曾用名中是否包含ST
+    
+    Args:
+        stock_code: 股票代码字符串
+    
+    Returns:
+        bool: 如果曾用名中包含ST返回True，否则返回False
+    """
+    try:
+        # 使用akshare获取股票曾用名信息
+        stock_info_change_name_list = ak.stock_info_change_name(symbol=str(stock_code).zfill(6))
+        
+        # 检查所有曾用名中是否包含ST
+        if stock_info_change_name_list is not None and not stock_info_change_name_list.empty:
+            # 检查name列中的所有曾用名
+            if 'name' in stock_info_change_name_list.columns:
+                for _, row in stock_info_change_name_list.iterrows():
+                    name_value = str(row['name'])
+                    if 'ST' in name_value.upper():
+                        safe_log(f"股票 {stock_code} 曾用名 '{name_value}' 包含ST，需要过滤", "info")
+                        return True
+            else:
+                # 如果没有name列，检查所有列
+                for _, row in stock_info_change_name_list.iterrows():
+                    for col in stock_info_change_name_list.columns:
+                        name_value = str(row[col])
+                        if 'ST' in name_value.upper():
+                            safe_log(f"股票 {stock_code} 曾用名 '{name_value}' 包含ST，需要过滤", "info")
+                            return True
+        
+        return False
+        
+    except Exception as e:
+        # 如果获取曾用名失败，为了安全起见，不过滤该股票
+        safe_log(f"获取股票 {stock_code} 曾用名失败: {e}，跳过ST过滤", "warning")
+        return False
+
+def clean_all_stocks_data_folder(folder_path):
+    """清空all_stocks_data文件夹中的所有内容
+    
+    Args:
+        folder_path: 要清空的文件夹路径
+    """
+    if not os.path.exists(folder_path):
+        print(f"文件夹 {folder_path} 不存在，无需清空")
+        return
+    
+    deleted_count = 0
+    deleted_folders = 0
+    
+    try:
+        # 遍历文件夹中的所有内容
+        for item in os.listdir(folder_path):
+            item_path = os.path.join(folder_path, item)
+            
+            try:
+                if os.path.isfile(item_path):
+                    # 删除文件
+                    os.remove(item_path)
+                    deleted_count += 1
+                elif os.path.isdir(item_path):
+                    # 删除文件夹及其所有内容
+                    shutil.rmtree(item_path)
+                    deleted_folders += 1
+            except Exception as e:
+                print(f"删除 {item_path} 失败: {e}")
+        
+        print(f"已清空 all_stocks_data 文件夹，删除了 {deleted_count} 个文件和 {deleted_folders} 个文件夹")
+        
+    except Exception as e:
+        print(f"清空文件夹时发生错误: {e}")
 
 def clean_old_logs(logs_dir="logs", keep_days=7):
     """清理旧的日志文件
@@ -348,8 +440,43 @@ def main():
         df = df[~df['代码'].astype(str).str.startswith('8')]
         logging.info(f"过滤8开头股票后剩余 {len(df)} 只股票")  # 主进程日志，不需要使用safe_log
         
+        # 过滤股票代码：只保留0、3、60开头的股票
+        original_count = len(df)
+        df = df[df['代码'].astype(str).apply(is_valid_stock_code)]
+        logging.info(f"过滤股票代码后剩余 {len(df)} 只股票（从 {original_count} 只减少到 {len(df)} 只）")
+        
+        # 过滤ST股票：检查曾用名中是否包含ST
+        logging.info("开始检查股票曾用名中是否包含ST...")
+        filtered_stocks = []
+        st_filtered_count = 0
+        
+        for index, row in df.iterrows():
+            stock_code = str(row['代码']).zfill(6)
+            stock_name = row['名称']
+            
+            # 检查是否为ST股票
+            if has_st_in_history(stock_code):
+                logging.info(f"过滤ST股票: {stock_code} - {stock_name}")
+                st_filtered_count += 1
+            else:
+                filtered_stocks.append(row)
+        
+        # 重新构建DataFrame
+        if filtered_stocks:
+            df = pd.DataFrame(filtered_stocks)
+            df.reset_index(drop=True, inplace=True)
+        else:
+            df = pd.DataFrame()
+        
+        logging.info(f"过滤ST股票后剩余 {len(df)} 只股票（过滤掉 {st_filtered_count} 只ST股票）")
+        
         # 创建总的数据文件夹（在脚本所在目录下）
         base_folder = os.path.join(script_dir, "all_stocks_data")
+        
+        # 清空all_stocks_data文件夹
+        logging.info("开始清空 all_stocks_data 文件夹...")
+        clean_all_stocks_data_folder(base_folder)
+        
         if not os.path.exists(base_folder):
             os.makedirs(base_folder)
             logging.info(f"创建总文件夹: {base_folder}")  # 主进程日志，不需要使用safe_log
