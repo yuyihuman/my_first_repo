@@ -8,7 +8,6 @@ import multiprocessing
 from multiprocessing import Pool, Lock
 import math
 import shutil
-import akshare as ak
 
 # 全局变量，用于存储每个进程的日志记录器
 process_loggers = {}
@@ -166,43 +165,7 @@ def is_valid_stock_code(stock_code):
     
     return False
 
-def has_st_in_history(stock_code):
-    """检查股票历史曾用名中是否包含ST
-    
-    Args:
-        stock_code: 股票代码字符串
-    
-    Returns:
-        bool: 如果曾用名中包含ST返回True，否则返回False
-    """
-    try:
-        # 使用akshare获取股票曾用名信息
-        stock_info_change_name_list = ak.stock_info_change_name(symbol=str(stock_code).zfill(6))
-        
-        # 检查所有曾用名中是否包含ST
-        if stock_info_change_name_list is not None and not stock_info_change_name_list.empty:
-            # 检查name列中的所有曾用名
-            if 'name' in stock_info_change_name_list.columns:
-                for _, row in stock_info_change_name_list.iterrows():
-                    name_value = str(row['name'])
-                    if 'ST' in name_value.upper():
-                        safe_log(f"股票 {stock_code} 曾用名 '{name_value}' 包含ST，需要过滤", "info")
-                        return True
-            else:
-                # 如果没有name列，检查所有列
-                for _, row in stock_info_change_name_list.iterrows():
-                    for col in stock_info_change_name_list.columns:
-                        name_value = str(row[col])
-                        if 'ST' in name_value.upper():
-                            safe_log(f"股票 {stock_code} 曾用名 '{name_value}' 包含ST，需要过滤", "info")
-                            return True
-        
-        return False
-        
-    except Exception as e:
-        # 如果获取曾用名失败，为了安全起见，不过滤该股票
-        safe_log(f"获取股票 {stock_code} 曾用名失败: {e}，跳过ST过滤", "warning")
-        return False
+
 
 def clean_all_stocks_data_folder(folder_path):
     """清空all_stocks_data文件夹中的所有内容
@@ -444,31 +407,6 @@ def main():
         original_count = len(df)
         df = df[df['代码'].astype(str).apply(is_valid_stock_code)]
         logging.info(f"过滤股票代码后剩余 {len(df)} 只股票（从 {original_count} 只减少到 {len(df)} 只）")
-        
-        # 过滤ST股票：检查曾用名中是否包含ST
-        logging.info("开始检查股票曾用名中是否包含ST...")
-        filtered_stocks = []
-        st_filtered_count = 0
-        
-        for index, row in df.iterrows():
-            stock_code = str(row['代码']).zfill(6)
-            stock_name = row['名称']
-            
-            # 检查是否为ST股票
-            if has_st_in_history(stock_code):
-                logging.info(f"过滤ST股票: {stock_code} - {stock_name}")
-                st_filtered_count += 1
-            else:
-                filtered_stocks.append(row)
-        
-        # 重新构建DataFrame
-        if filtered_stocks:
-            df = pd.DataFrame(filtered_stocks)
-            df.reset_index(drop=True, inplace=True)
-        else:
-            df = pd.DataFrame()
-        
-        logging.info(f"过滤ST股票后剩余 {len(df)} 只股票（过滤掉 {st_filtered_count} 只ST股票）")
         
         # 创建总的数据文件夹（在脚本所在目录下）
         base_folder = os.path.join(script_dir, "all_stocks_data")

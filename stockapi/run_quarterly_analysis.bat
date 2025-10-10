@@ -13,6 +13,7 @@ python stock_base_info\save_stocks_to_csv.py
 python stock_base_info\download_financial_data.py
 python stock_base_info\check_data_structure.py
 python stock_base_info\financial_data_structure_reader.py
+python stock_base_info\check_and_update_names.py
 python macro_data_fetch\commodity_price_index.py
 python macro_data_fetch\true_quarterly_analysis.py
 python macro_data_fetch\pmi_data_fetcher.py

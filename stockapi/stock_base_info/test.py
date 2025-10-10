@@ -1,5 +1,5 @@
 import akshare as ak
 
-# 查询股票代码为 000503 的曾用名
-stock_info_change_name_list = ak.stock_info_change_name(symbol="000503")
-print(stock_info_change_name_list)
+# 获取所有A股股票的代码和名称
+df = ak.stock_info_a_code_name()
+print(df.head()) # 查看前几行数据
