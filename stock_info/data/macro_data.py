@@ -25,12 +25,12 @@ def fetch_macro_china_money_supply():
         os.makedirs(cache_dir, exist_ok=True)
         cache_file = os.path.join(cache_dir, 'money_supply.json')
         
-        # 检查缓存是否存在且在24小时内
+        # 检查缓存是否存在且在2小时内
         if os.path.exists(cache_file):
             file_time = os.path.getmtime(cache_file)
             current_time = datetime.now().timestamp()
-            # 如果缓存文件在24小时内，直接返回缓存数据
-            if current_time - file_time < 24 * 60 * 60:
+            # 如果缓存文件在2小时内，直接返回缓存数据
+            if current_time - file_time < 2 * 60 * 60:
                 try:
                     with open(cache_file, 'r', encoding='utf-8') as f:
                         content = f.read().strip()
