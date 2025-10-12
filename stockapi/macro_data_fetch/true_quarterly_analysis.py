@@ -210,7 +210,7 @@ def load_cache(cache_type):
         return None
 
 # 沪深300成分股列表（已过滤掉2010年之前没有交易数据的股票）
-# 原始数量: 300, 有效数量: 176
+# 原始数量: 300, 有效数量: 175
 CSI300_FILTERED_STOCKS = [
     '000001.SZ', '000002.SZ', '000063.SZ', '000100.SZ', '000157.SZ',
     '000301.SZ', '000338.SZ', '000408.SZ', '000425.SZ', '000538.SZ',
@@ -246,7 +246,7 @@ CSI300_FILTERED_STOCKS = [
     '601607.SH', '601618.SH', '601628.SH', '601668.SH', '601688.SH',
     '601699.SH', '601766.SH', '601788.SH', '601808.SH', '601818.SH',
     '601857.SH', '601872.SH', '601877.SH', '601888.SH', '601898.SH',
-    '601899.SH', '601919.SH', '601939.SH', '601988.SH', '601989.SH',
+    '601899.SH', '601919.SH', '601939.SH', '601988.SH',
     '601998.SH'
 ]
 
@@ -255,7 +255,7 @@ def get_csi300_filtered_stocks():
     获取沪深300成分股列表（已过滤掉2010年之前没有交易数据的股票）
     
     Returns:
-        list: 包含176只股票代码的列表
+        list: 包含175只股票代码的列表
     """
     return CSI300_FILTERED_STOCKS.copy()
 
@@ -617,10 +617,42 @@ def get_all_stocks_daily_data(stock_codes, start_date, end_date):
     Returns:
         dict: 所有股票的日线数据
     """
-    # 尝试从缓存加载数据
+    # 尝试从缓存加载数据，并补齐缺失的股票
     cached_data = load_cache('daily_data')
     if cached_data is not None:
-        return cached_data
+        logger = logging.getLogger(__name__)
+        # 规范化为字典，值为DataFrame
+        all_daily_data = {}
+        for code, df in cached_data.items():
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                # 确保索引为DatetimeIndex且包含收盘价
+                if '日期' in df.columns:
+                    df['日期'] = pd.to_datetime(df['日期'])
+                    df.set_index('日期', inplace=True)
+                all_daily_data[code] = df
+        # 找出缓存中缺失的股票代码
+        missing_codes = [c for c in stock_codes if c not in all_daily_data]
+        if missing_codes:
+            logger.info(f"缓存缺少 {len(missing_codes)} 只股票的日线数据，开始补齐...")
+            for i, stock_code in enumerate(missing_codes, 1):
+                try:
+                    symbol = stock_code.split('.')[0]
+                    daily_data = ak.stock_zh_a_hist(symbol=symbol, period="daily",
+                                                  start_date=start_date, end_date=end_date, adjust="")
+                    if not daily_data.empty:
+                        daily_data['日期'] = pd.to_datetime(daily_data['日期'])
+                        daily_data.set_index('日期', inplace=True)
+                        all_daily_data[stock_code] = daily_data
+                except Exception:
+                    # 忽略个别失败，继续补齐其他股票
+                    continue
+                finally:
+                    if i % 20 == 0:
+                        logger.info(f"补齐进度: {i}/{len(missing_codes)}")
+                    time.sleep(0.05)
+            # 保存合并后的数据回缓存
+            save_cache(all_daily_data, 'daily_data')
+        return all_daily_data
     
     logger = logging.getLogger(__name__)
     logger.info(f"开始获取 {len(stock_codes)} 只股票的日线数据...")
@@ -670,7 +702,8 @@ def get_all_stocks_daily_data(stock_codes, start_date, end_date):
     else:
         logger.error(f"❌ 所有股票的日线数据获取都失败了，不保存空缓存")
         logger.error(f"建议检查网络连接和akshare API状态")
-    
+    # 保存到缓存
+    save_cache(all_daily_data, 'daily_data')
     return all_daily_data
 
 def calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_data, quarterly_stats):
@@ -840,10 +873,57 @@ def get_total_shares_batch(stock_codes):
     Returns:
         dict: 股票代码到总股本的映射
     """
-    # 尝试从缓存加载数据
+    # 尝试从缓存加载数据，并补齐缺失的股票
     cached_data = load_cache('shares_data')
     if cached_data is not None:
-        return cached_data
+        logger = logging.getLogger(__name__)
+        if isinstance(cached_data, pd.DataFrame):
+            # 若缓存为DataFrame，尝试恢复为字典形式：{code: total_shares}
+            shares_data = {}
+            # 尝试常见列名映射
+            code_col = 'code' if 'code' in cached_data.columns else ('stock_code' if 'stock_code' in cached_data.columns else None)
+            value_col = 'total_shares' if 'total_shares' in cached_data.columns else ('value' if 'value' in cached_data.columns else None)
+            if code_col and value_col:
+                for _, row in cached_data.iterrows():
+                    try:
+                        converted = safe_convert_to_float(row[value_col])
+                        if converted is not None and converted > 0:
+                            shares_data[str(row[code_col])] = converted
+                    except Exception:
+                        continue
+            else:
+                shares_data = {}
+        else:
+            shares_data = dict(cached_data)
+
+        # 找出缺失的股票代码
+        missing_codes = [c for c in stock_codes if c not in shares_data or not shares_data.get(c)]
+        if missing_codes:
+            logger.info(f"缓存缺少 {len(missing_codes)} 只股票的总股本数据，开始补齐...")
+            for i, stock_code in enumerate(missing_codes, 1):
+                try:
+                    symbol = stock_code.split('.')[0]
+                    stock_info = ak.stock_individual_info_em(symbol=symbol)
+                    total_shares = None
+                    for _, row in stock_info.iterrows():
+                        item_name = str(row['item'])
+                        if '总股本' in item_name:
+                            total_shares_value = row['value']
+                            converted = safe_convert_to_float(total_shares_value)
+                            if converted is not None and converted > 0:
+                                total_shares = converted
+                            break
+                    if total_shares and total_shares > 0:
+                        shares_data[stock_code] = total_shares
+                except Exception:
+                    continue
+                finally:
+                    if i % 20 == 0:
+                        logger.info(f"补齐进度: {i}/{len(missing_codes)}")
+                    time.sleep(0.05)
+            # 保存合并后的数据回缓存
+            save_cache(shares_data, 'shares_data')
+        return shares_data
     
     logger = logging.getLogger(__name__)
     logger.info(f"开始获取 {len(stock_codes)} 只股票的总股本信息...")
@@ -867,9 +947,9 @@ def get_total_shares_batch(stock_codes):
                 item_name = str(row['item'])
                 if '总股本' in item_name:
                     total_shares_value = row['value']
-                    # 直接使用数值，因为akshare返回的已经是数字格式
-                    if pd.notna(total_shares_value):
-                        total_shares = float(total_shares_value)
+                    converted = safe_convert_to_float(total_shares_value)
+                    if converted is not None and converted > 0:
+                        total_shares = converted
                     break
             
             if total_shares is not None and total_shares > 0:
@@ -907,7 +987,7 @@ def safe_convert_to_float(value):
     Returns:
         float or None: 转换后的数值
     """
-    if pd.isna(value) or value == '' or value == '--':
+    if pd.isna(value) or (isinstance(value, str) and value.strip() in ('', '--', '-')):
         return None
     
     try:
