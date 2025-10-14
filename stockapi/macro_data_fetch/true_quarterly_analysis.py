@@ -12,6 +12,7 @@ import akshare as ak
 import pandas as pd
 import shutil
 from datetime import datetime, timedelta
+from xtquant import xtdata
 
 # 缓存配置
 # 获取脚本所在目录
@@ -554,28 +555,52 @@ def get_stock_market_cap(stock_code, date, max_retries=3):
             
             # 获取指定日期的股价
             try:
-                # 尝试获取指定日期前后的历史数据
-                start_date = (datetime.strptime(date, '%Y-%m-%d') - timedelta(days=10)).strftime('%Y%m%d')
-                end_date = (datetime.strptime(date, '%Y-%m-%d') + timedelta(days=10)).strftime('%Y%m%d')
+                # 使用xtquant获取历史数据
+                start_date_obj = datetime.strptime(date, '%Y-%m-%d') - timedelta(days=10)
+                end_date_obj = datetime.strptime(date, '%Y-%m-%d') + timedelta(days=10)
+                start_date_str = start_date_obj.strftime('%Y%m%d')
+                end_date_str = end_date_obj.strftime('%Y%m%d')
                 
-                hist_data = ak.stock_zh_a_hist(symbol=clean_code, period="daily", 
-                                             start_date=start_date, end_date=end_date, adjust="")
+                # 使用xtquant获取数据
+                hist_data = xtdata.get_market_data(
+                    stock_list=[stock_code],
+                    period='1d',
+                    start_time=start_date_str,
+                    end_time=end_date_str
+                )
                 
-                if hist_data is None or hist_data.empty:
+                if hist_data is None or 'close' not in hist_data or hist_data['close'].empty:
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5)
+                        continue
+                    return None
+                
+                # 检查股票代码是否在数据中
+                if stock_code not in hist_data['close'].index:
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5)
+                        continue
+                    return None
+                
+                # 获取收盘价数据
+                close_data = hist_data['close'].loc[stock_code]
+                if close_data.empty:
                     if attempt < max_retries - 1:
                         time.sleep(0.5)
                         continue
                     return None
                 
                 # 查找最接近目标日期的交易日
-                hist_data['日期'] = pd.to_datetime(hist_data['日期'])
                 target_date = datetime.strptime(date, '%Y-%m-%d')
                 
+                # 将索引转换为datetime
+                close_data.index = pd.to_datetime(close_data.index)
+                
                 # 找到小于等于目标日期的最近交易日
-                valid_data = hist_data[hist_data['日期'] <= target_date]
+                valid_data = close_data[close_data.index <= target_date]
                 if valid_data.empty:
                     # 如果没有小于等于目标日期的数据，取最早的数据
-                    valid_data = hist_data
+                    valid_data = close_data
                 
                 if valid_data.empty:
                     if attempt < max_retries - 1:
@@ -584,8 +609,7 @@ def get_stock_market_cap(stock_code, date, max_retries=3):
                     return None
                 
                 # 取最近的收盘价
-                latest_data = valid_data.iloc[-1]
-                close_price = float(latest_data['收盘'])
+                close_price = float(valid_data.iloc[-1])
                 
                 # 计算市值
                 market_cap = total_shares * close_price
@@ -607,104 +631,135 @@ def get_stock_market_cap(stock_code, date, max_retries=3):
 
 def get_all_stocks_daily_data(stock_codes, start_date, end_date):
     """
-    获取所有股票的日线数据（支持缓存）
+    获取所有股票的日线数据（支持缓存，使用xtquant接口）
     
     Args:
         stock_codes: 股票代码列表
-        start_date: 开始日期
-        end_date: 结束日期
+        start_date: 开始日期 (YYYYMMDD格式)
+        end_date: 结束日期 (YYYYMMDD格式)
     
     Returns:
         dict: 所有股票的日线数据
     """
-    # 尝试从缓存加载数据，并补齐缺失的股票
+    # 尝试从缓存加载数据
     cached_data = load_cache('daily_data')
-    if cached_data is not None:
+    if cached_data is not None and isinstance(cached_data, dict):
         logger = logging.getLogger(__name__)
         # 规范化为字典，值为DataFrame
         all_daily_data = {}
-        for code, df in cached_data.items():
-            if isinstance(df, pd.DataFrame) and not df.empty:
-                # 确保索引为DatetimeIndex且包含收盘价
-                if '日期' in df.columns:
-                    df['日期'] = pd.to_datetime(df['日期'])
-                    df.set_index('日期', inplace=True)
-                all_daily_data[code] = df
-        # 找出缓存中缺失的股票代码
-        missing_codes = [c for c in stock_codes if c not in all_daily_data]
-        if missing_codes:
-            logger.info(f"缓存缺少 {len(missing_codes)} 只股票的日线数据，开始补齐...")
-            for i, stock_code in enumerate(missing_codes, 1):
-                try:
-                    symbol = stock_code.split('.')[0]
-                    daily_data = ak.stock_zh_a_hist(symbol=symbol, period="daily",
-                                                  start_date=start_date, end_date=end_date, adjust="")
-                    if not daily_data.empty:
-                        daily_data['日期'] = pd.to_datetime(daily_data['日期'])
-                        daily_data.set_index('日期', inplace=True)
-                        all_daily_data[stock_code] = daily_data
-                except Exception:
-                    # 忽略个别失败，继续补齐其他股票
-                    continue
-                finally:
-                    if i % 20 == 0:
-                        logger.info(f"补齐进度: {i}/{len(missing_codes)}")
-                    time.sleep(0.05)
-            # 保存合并后的数据回缓存
-            save_cache(all_daily_data, 'daily_data')
-        return all_daily_data
+        try:
+            for code, df in cached_data.items():
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    # 确保索引为DatetimeIndex且包含收盘价
+                    if '日期' in df.columns:
+                        df['日期'] = pd.to_datetime(df['日期'])
+                        df.set_index('日期', inplace=True)
+                    all_daily_data[code] = df
+            
+            # 检查缓存是否包含所有需要的股票
+            missing_codes = [c for c in stock_codes if c not in all_daily_data]
+            if not missing_codes:
+                logger.info(f"📂 使用缓存数据，包含 {len(all_daily_data)} 只股票的日线数据")
+                return all_daily_data
+            else:
+                logger.info(f"缓存缺少 {len(missing_codes)} 只股票的日线数据，将重新获取全部数据")
+        except Exception as e:
+            logger.warning(f"⚠️ 缓存数据处理失败: {e}，将重新获取数据")
     
     logger = logging.getLogger(__name__)
-    logger.info(f"开始获取 {len(stock_codes)} 只股票的日线数据...")
-    all_daily_data = {}
-    success_count = 0
-    failed_count = 0
-    failed_examples = []
+    logger.info(f"开始使用xtquant获取 {len(stock_codes)} 只股票的日线数据...")
     
-    for i, stock_code in enumerate(stock_codes, 1):
-        if i % 20 == 0:
-            logger.info(f"进度: {i}/{len(stock_codes)}")
+    try:
+        # 使用xtquant批量获取所有股票的日线数据
+        # 转换日期格式：从YYYYMMDD转换为YYYYMMDD（xtquant格式）
+        start_time = start_date  # xtquant使用YYYYMMDD格式
         
-        try:
-            # 获取日线数据，akshare需要6位数字代码
-            symbol = stock_code.split('.')[0]  # 去掉后缀，只保留6位数字
-            daily_data = ak.stock_zh_a_hist(symbol=symbol, period="daily", 
-                                          start_date=start_date, end_date=end_date, adjust="")
-            
-            if not daily_data.empty:
-                # 转换日期格式并设置为索引
-                daily_data['日期'] = pd.to_datetime(daily_data['日期'])
-                daily_data.set_index('日期', inplace=True)
-                all_daily_data[stock_code] = daily_data
-                success_count += 1
-            else:
+        # 使用xtdata.get_market_data批量获取数据
+        market_data = xtdata.get_market_data([], stock_codes, period='1d', 
+                                           start_time=start_time, dividend_type='none')
+        
+        if market_data is None or not isinstance(market_data, dict):
+            logger.error("❌ xtquant返回数据为空或格式错误")
+            return {}
+        
+        logger.info(f"✅ xtquant成功返回数据，包含字段: {list(market_data.keys())}")
+        
+        # 转换xtquant数据格式为与原来兼容的格式
+        all_daily_data = {}
+        success_count = 0
+        failed_count = 0
+        failed_examples = []
+        
+        for stock_code in stock_codes:
+            try:
+                # 检查股票是否在返回的数据中
+                if 'close' not in market_data or stock_code not in market_data['close'].index:
+                    failed_count += 1
+                    if len(failed_examples) < 5:
+                        failed_examples.append(f"{stock_code}: 无数据")
+                    continue
+                
+                # 构建DataFrame，包含所有OHLCV数据
+                stock_df_data = {}
+                
+                # 获取各个字段的数据
+                for field_name, xt_field in [('开盘', 'open'), ('最高', 'high'), ('最低', 'low'), 
+                                            ('收盘', 'close'), ('成交量', 'volume'), ('成交额', 'amount')]:
+                    if xt_field in market_data and stock_code in market_data[xt_field].index:
+                        stock_df_data[field_name] = market_data[xt_field].loc[stock_code]
+                    else:
+                        # 如果某个字段缺失，用收盘价填充（对于价格字段）或0填充（对于成交量字段）
+                        if field_name in ['开盘', '最高', '最低'] and 'close' in market_data:
+                            stock_df_data[field_name] = market_data['close'].loc[stock_code]
+                        else:
+                            stock_df_data[field_name] = 0
+                
+                if not stock_df_data:
+                    failed_count += 1
+                    if len(failed_examples) < 5:
+                        failed_examples.append(f"{stock_code}: 数据字段为空")
+                    continue
+                
+                # 创建DataFrame
+                stock_df = pd.DataFrame(stock_df_data)
+                
+                # 确保索引是日期格式
+                if not isinstance(stock_df.index, pd.DatetimeIndex):
+                    stock_df.index = pd.to_datetime(stock_df.index)
+                
+                # 过滤日期范围（如果需要）
+                if not stock_df.empty:
+                    all_daily_data[stock_code] = stock_df
+                    success_count += 1
+                else:
+                    failed_count += 1
+                    if len(failed_examples) < 5:
+                        failed_examples.append(f"{stock_code}: DataFrame为空")
+                
+            except Exception as e:
                 failed_count += 1
                 if len(failed_examples) < 5:
-                    failed_examples.append(f"{stock_code}({symbol}): 空数据")
-                
-        except Exception as e:
-            failed_count += 1
-            if len(failed_examples) < 5:
-                failed_examples.append(f"{stock_code}: {str(e)[:50]}")
-            continue
+                    failed_examples.append(f"{stock_code}: {str(e)[:50]}")
+                continue
         
-        # 添加延迟避免请求过快
-        time.sleep(0.05)
-    
-    logger.info(f"✅ 日线数据获取完成: 成功 {success_count}, 失败 {failed_count}")
-    if failed_examples:
-        logger.warning(f"失败示例: {failed_examples}")
-    
-    # 检查获取结果，只有成功获取到数据才保存缓存
-    if success_count > 0:
-        logger.info(f"📈 成功获取 {success_count} 只股票的日线数据，保存到缓存")
-        save_cache(all_daily_data, 'daily_data')
-    else:
-        logger.error(f"❌ 所有股票的日线数据获取都失败了，不保存空缓存")
-        logger.error(f"建议检查网络连接和akshare API状态")
-    # 保存到缓存
-    save_cache(all_daily_data, 'daily_data')
-    return all_daily_data
+        logger.info(f"✅ 日线数据处理完成: 成功 {success_count}, 失败 {failed_count}")
+        if failed_examples:
+            logger.warning(f"调试信息（前5个失败原因）: {failed_examples}")
+        
+        # 保存到缓存
+        if success_count > 0:
+            logger.info(f"📈 成功获取 {success_count} 只股票的日线数据，保存到缓存")
+            save_cache(all_daily_data, 'daily_data')
+        else:
+            logger.error(f"❌ 所有股票的日线数据获取都失败了")
+        
+        return all_daily_data
+        
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"❌ xtquant获取数据失败: {str(e)}")
+        logger.error(f"建议检查xtquant连接状态")
+        return {}
 
 def calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_data, quarterly_stats):
     """
