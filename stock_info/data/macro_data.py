@@ -1426,8 +1426,8 @@ def get_rolling_4q_profit_data():
             non_bank_pe_ratio = quarter_info.get('non_bank_pe_ratio')
             stock_count = quarter_info.get('stock_count', 0)
             
-            # 检查stock_count是否大于175
-            if stock_count > 175 and (pe_ratio is not None or rolling_4q_profit is not None or bank_rolling_4q_profit is not None or non_bank_rolling_4q_profit is not None or bank_pe_ratio is not None or non_bank_pe_ratio is not None):
+            # 检查stock_count是否大于等于175
+            if stock_count >= 175 and (pe_ratio is not None or rolling_4q_profit is not None or bank_rolling_4q_profit is not None or non_bank_rolling_4q_profit is not None or bank_pe_ratio is not None or non_bank_pe_ratio is not None):
                 # 将季度格式转换为年月格式
                 # 例如：2024-Q1 -> 2024.3, 2024-Q2 -> 2024.6, 2024-Q3 -> 2024.9, 2024-Q4 -> 2024.12
                 year, quarter_num = quarter.split('-Q')
