@@ -1,6 +1,7 @@
 from xtquant import xtdata
 import pandas as pd
 import os
+import shutil
 from datetime import datetime
 import time
 import logging
@@ -348,9 +349,21 @@ def main():
         
         # 创建财务数据输出文件夹（在脚本所在目录下）
         base_output_dir = os.path.join(script_dir, "financial_data")
-        if not os.path.exists(base_output_dir):
-            os.makedirs(base_output_dir)
-            logging.info(f"创建输出文件夹: {base_output_dir}")  # 主进程日志，不需要使用safe_log
+        
+        # 清空financial_data文件夹
+        if os.path.exists(base_output_dir):
+            logging.info(f"正在清空财务数据文件夹: {base_output_dir}")
+            try:
+                # 删除整个文件夹及其内容
+                shutil.rmtree(base_output_dir)
+                logging.info(f"成功清空财务数据文件夹: {base_output_dir}")
+            except Exception as e:
+                logging.error(f"清空财务数据文件夹时发生错误: {e}")
+                return
+        
+        # 重新创建空的财务数据文件夹
+        os.makedirs(base_output_dir)
+        logging.info(f"创建输出文件夹: {base_output_dir}")  # 主进程日志，不需要使用safe_log
         
         # 统计信息
         total_stocks = len(filtered_df)
