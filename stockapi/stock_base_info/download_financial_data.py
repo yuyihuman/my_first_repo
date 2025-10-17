@@ -350,20 +350,24 @@ def main():
         # 创建财务数据输出文件夹（在脚本所在目录下）
         base_output_dir = os.path.join(script_dir, "financial_data")
         
-        # 清空financial_data文件夹
-        if os.path.exists(base_output_dir):
+        # 确保文件夹存在
+        if not os.path.exists(base_output_dir):
+            os.makedirs(base_output_dir)
+            logging.info(f"创建输出文件夹: {base_output_dir}")
+        else:
+            # 清空文件夹内容
             logging.info(f"正在清空财务数据文件夹: {base_output_dir}")
             try:
-                # 删除整个文件夹及其内容
-                shutil.rmtree(base_output_dir)
-                logging.info(f"成功清空财务数据文件夹: {base_output_dir}")
+                for filename in os.listdir(base_output_dir):
+                    file_path = os.path.join(base_output_dir, filename)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                logging.info(f"成功清空财务数据文件夹内容")
             except Exception as e:
                 logging.error(f"清空财务数据文件夹时发生错误: {e}")
                 return
-        
-        # 重新创建空的财务数据文件夹
-        os.makedirs(base_output_dir)
-        logging.info(f"创建输出文件夹: {base_output_dir}")  # 主进程日志，不需要使用safe_log
         
         # 统计信息
         total_stocks = len(filtered_df)

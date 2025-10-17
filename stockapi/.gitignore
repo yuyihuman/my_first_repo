@@ -37,4 +37,5 @@ Thumbs.db
 stock_base_info/all_stocks_data/
 stock_base_info/test_stocks_data/
 stock_base_info/financial_data/
+stock_backtest/data/
 *.csv
