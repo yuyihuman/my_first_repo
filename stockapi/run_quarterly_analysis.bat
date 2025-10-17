@@ -44,4 +44,9 @@ if exist "stock_base_info\stock_name_history.json" (
     echo stock_name_history.json 文件复制完成
 )
 
+if exist "stock_base_info\stock_data.csv" (
+    copy "stock_base_info\stock_data.csv" "stock_backtest\data\" > nul
+    echo stock_data.csv 文件复制完成
+)
+
 echo 数据复制完成！
