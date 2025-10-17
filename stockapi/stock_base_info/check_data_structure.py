@@ -13,7 +13,11 @@ import json
 
 # 配置日志
 script_dir = os.path.dirname(os.path.abspath(__file__))
-log_filename = os.path.join(script_dir, "logs", "data_structure_check.log")
+logs_dir = os.path.join(script_dir, "logs")
+if not os.path.exists(logs_dir):
+    os.makedirs(logs_dir)
+    
+log_filename = os.path.join(logs_dir, "stock_data_structure.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',

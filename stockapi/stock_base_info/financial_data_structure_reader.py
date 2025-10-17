@@ -16,7 +16,7 @@ logs_dir = os.path.join(script_dir, "logs")
 if not os.path.exists(logs_dir):
     os.makedirs(logs_dir)
 
-log_filename = os.path.join(logs_dir, "financial_structure_simple.log")
+log_filename = os.path.join(logs_dir, "financial_data_structure.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',

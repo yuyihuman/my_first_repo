@@ -49,4 +49,15 @@ if exist "stock_base_info\stock_data.csv" (
     echo stock_data.csv 文件复制完成
 )
 
+echo 正在备份日志文件...
+if exist "stock_base_info\logs\stock_data_structure_check.log" (
+    copy "stock_base_info\logs\stock_data_structure_check.log" "stock_backtest\data\" > nul
+    echo stock_data_structure_check.log 文件备份完成
+)
+
+if exist "stock_base_info\logs\financial_data_structure.log" (
+    copy "stock_base_info\logs\financial_data_structure.log" "stock_backtest\data\" > nul
+    echo financial_data_structure.log 文件备份完成
+)
+
 echo 数据复制完成！
