@@ -219,6 +219,235 @@ class PearsonAnalyzer:
         
         return avg_correlation, correlations
     
+    def calculate_future_performance_stats(self, data, high_correlation_periods):
+        """
+        计算高相关性期间的未来交易日表现统计
+        
+        Args:
+            data: 完整的股票数据
+            high_correlation_periods: 高相关性期间列表
+            
+        Returns:
+            dict: 统计结果
+        """
+        if not high_correlation_periods:
+            return None
+        
+        stats = {
+            'total_periods': len(high_correlation_periods),
+            'next_day_gap_up': 0,  # 下1个交易日高开
+            'next_1_day_up': 0,    # 下1个交易日上涨
+            'next_3_day_up': 0,    # 下3个交易日上涨
+            'next_5_day_up': 0,    # 下5个交易日上涨
+            'next_10_day_up': 0,   # 下10个交易日上涨
+            'valid_periods': {
+                'next_day': 0,
+                'next_3_day': 0,
+                'next_5_day': 0,
+                'next_10_day': 0
+            }
+        }
+        
+        for i, period in enumerate(high_correlation_periods, 1):
+            end_date = period['end_date']
+            start_date = period['start_date']
+            avg_correlation = period['avg_correlation']
+            
+            # 找到该期间结束后的数据位置
+            try:
+                end_idx = data.index.get_loc(end_date)
+            except KeyError:
+                continue
+            
+            # 获取期间最后一天的收盘价
+            period_close = data.iloc[end_idx]['close']
+            
+            # Debug模式下记录每个期间的详细信息
+            if self.debug:
+                self.logger.info(f"高相关性期间 #{i}:")
+                self.logger.info(f"  期间: {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}")
+                self.logger.info(f"  相关系数: {avg_correlation:.4f}")
+                self.logger.info(f"  期间收盘价: {period_close:.2f}")
+            
+            # 检查下1个交易日
+            if end_idx + 1 < len(data):
+                next_day_data = data.iloc[end_idx + 1]
+                next_day_date = data.index[end_idx + 1]
+                next_day_open = next_day_data['open']
+                next_day_close = next_day_data['close']
+                
+                stats['valid_periods']['next_day'] += 1
+                
+                # 高开判断
+                gap_up = next_day_open > period_close
+                if gap_up:
+                    stats['next_day_gap_up'] += 1
+                
+                # 下1个交易日上涨判断
+                day_1_up = next_day_close > period_close
+                if day_1_up:
+                    stats['next_1_day_up'] += 1
+                
+                # Debug模式下记录详细信息
+                if self.debug:
+                    gap_up_str = "是" if gap_up else "否"
+                    day_1_up_str = "是" if day_1_up else "否"
+                    self.logger.info(f"  下1日({next_day_date.strftime('%Y-%m-%d')}): 开盘{next_day_open:.2f} 收盘{next_day_close:.2f} | 高开:{gap_up_str} 上涨:{day_1_up_str}")
+            
+            # 检查下3个交易日
+            if end_idx + 3 < len(data):
+                day_3_data = data.iloc[end_idx + 3]
+                day_3_date = data.index[end_idx + 3]
+                day_3_close = day_3_data['close']
+                stats['valid_periods']['next_3_day'] += 1
+                
+                day_3_up = day_3_close > period_close
+                if day_3_up:
+                    stats['next_3_day_up'] += 1
+                
+                # Debug模式下记录详细信息
+                if self.debug:
+                    day_3_up_str = "是" if day_3_up else "否"
+                    self.logger.info(f"  下3日({day_3_date.strftime('%Y-%m-%d')}): 收盘{day_3_close:.2f} | 上涨:{day_3_up_str}")
+            
+            # 检查下5个交易日
+            if end_idx + 5 < len(data):
+                day_5_data = data.iloc[end_idx + 5]
+                day_5_date = data.index[end_idx + 5]
+                day_5_close = day_5_data['close']
+                stats['valid_periods']['next_5_day'] += 1
+                
+                day_5_up = day_5_close > period_close
+                if day_5_up:
+                    stats['next_5_day_up'] += 1
+                
+                # Debug模式下记录详细信息
+                if self.debug:
+                    day_5_up_str = "是" if day_5_up else "否"
+                    self.logger.info(f"  下5日({day_5_date.strftime('%Y-%m-%d')}): 收盘{day_5_close:.2f} | 上涨:{day_5_up_str}")
+            
+            # 检查下10个交易日
+            if end_idx + 10 < len(data):
+                day_10_data = data.iloc[end_idx + 10]
+                day_10_date = data.index[end_idx + 10]
+                day_10_close = day_10_data['close']
+                stats['valid_periods']['next_10_day'] += 1
+                
+                day_10_up = day_10_close > period_close
+                if day_10_up:
+                    stats['next_10_day_up'] += 1
+                
+                # Debug模式下记录详细信息
+                if self.debug:
+                    day_10_up_str = "是" if day_10_up else "否"
+                    self.logger.info(f"  下10日({day_10_date.strftime('%Y-%m-%d')}): 收盘{day_10_close:.2f} | 上涨:{day_10_up_str}")
+            
+            # Debug模式下添加分隔线
+            if self.debug:
+                self.logger.info("  " + "-" * 50)
+        
+        # 计算比例
+        stats['ratios'] = {}
+        if stats['valid_periods']['next_day'] > 0:
+            stats['ratios']['next_day_gap_up'] = stats['next_day_gap_up'] / stats['valid_periods']['next_day']
+            stats['ratios']['next_1_day_up'] = stats['next_1_day_up'] / stats['valid_periods']['next_day']
+        
+        if stats['valid_periods']['next_3_day'] > 0:
+            stats['ratios']['next_3_day_up'] = stats['next_3_day_up'] / stats['valid_periods']['next_3_day']
+        
+        if stats['valid_periods']['next_5_day'] > 0:
+            stats['ratios']['next_5_day_up'] = stats['next_5_day_up'] / stats['valid_periods']['next_5_day']
+        
+        if stats['valid_periods']['next_10_day'] > 0:
+            stats['ratios']['next_10_day_up'] = stats['next_10_day_up'] / stats['valid_periods']['next_10_day']
+        
+        return stats
+    
+    def log_performance_stats(self, stats):
+        """
+        记录统计结果到日志
+        
+        Args:
+            stats: 统计结果字典
+        """
+        if not stats:
+            self.logger.info("无统计数据可输出")
+            return
+        
+        self.logger.info("=" * 60)
+        self.logger.info("高相关性期间未来表现统计")
+        self.logger.info("=" * 60)
+        self.logger.info(f"总高相关性期间数: {stats['total_periods']}")
+        
+        # 简洁的单行输出格式
+        if stats['valid_periods']['next_day'] > 0:
+            self.logger.info(f"下1日高开: {stats['ratios']['next_day_gap_up']:.1%}({stats['next_day_gap_up']}/{stats['valid_periods']['next_day']})")
+            self.logger.info(f"下1日上涨: {stats['ratios']['next_1_day_up']:.1%}({stats['next_1_day_up']}/{stats['valid_periods']['next_day']})")
+        
+        if stats['valid_periods']['next_3_day'] > 0:
+            self.logger.info(f"下3日上涨: {stats['ratios']['next_3_day_up']:.1%}({stats['next_3_day_up']}/{stats['valid_periods']['next_3_day']})")
+        
+        if stats['valid_periods']['next_5_day'] > 0:
+            self.logger.info(f"下5日上涨: {stats['ratios']['next_5_day_up']:.1%}({stats['next_5_day_up']}/{stats['valid_periods']['next_5_day']})")
+        
+        if stats['valid_periods']['next_10_day'] > 0:
+            self.logger.info(f"下10日上涨: {stats['ratios']['next_10_day_up']:.1%}({stats['next_10_day_up']}/{stats['valid_periods']['next_10_day']})")
+    
+    def save_stats_to_file(self, stats):
+        """
+        将统计结果保存到CSV文件
+        
+        Args:
+            stats: 统计结果字典
+        """
+        if not stats:
+            return
+        
+        # 创建统计结果目录
+        stats_dir = os.path.join(self.log_dir, 'stats')
+        os.makedirs(stats_dir, exist_ok=True)
+        
+        # 准备CSV数据
+        csv_data = []
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # 添加基本信息
+        csv_data.append(['股票代码', self.stock_code])
+        csv_data.append(['分析时间', timestamp])
+        csv_data.append(['总高相关性期间数', stats['total_periods']])
+        csv_data.append(['相关系数阈值', self.threshold])
+        csv_data.append([''])  # 空行
+        
+        # 添加统计结果
+        csv_data.append(['统计项目', '有效样本数', '成功次数', '成功比例'])
+        
+        if stats['valid_periods']['next_day'] > 0:
+            csv_data.append(['下1个交易日高开', stats['valid_periods']['next_day'], 
+                           stats['next_day_gap_up'], f"{stats['ratios']['next_day_gap_up']:.2%}"])
+            csv_data.append(['下1个交易日上涨', stats['valid_periods']['next_day'], 
+                           stats['next_1_day_up'], f"{stats['ratios']['next_1_day_up']:.2%}"])
+        
+        if stats['valid_periods']['next_3_day'] > 0:
+            csv_data.append(['下3个交易日上涨', stats['valid_periods']['next_3_day'], 
+                           stats['next_3_day_up'], f"{stats['ratios']['next_3_day_up']:.2%}"])
+        
+        if stats['valid_periods']['next_5_day'] > 0:
+            csv_data.append(['下5个交易日上涨', stats['valid_periods']['next_5_day'], 
+                           stats['next_5_day_up'], f"{stats['ratios']['next_5_day_up']:.2%}"])
+        
+        if stats['valid_periods']['next_10_day'] > 0:
+            csv_data.append(['下10个交易日上涨', stats['valid_periods']['next_10_day'], 
+                           stats['next_10_day_up'], f"{stats['ratios']['next_10_day_up']:.2%}"])
+        
+        # 保存到CSV文件
+        import csv
+        csv_file = os.path.join(stats_dir, f'performance_stats_{self.stock_code}_{timestamp}.csv')
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerows(csv_data)
+        
+        self.logger.info(f"统计结果已保存到: {csv_file}")
+
     def analyze(self):
         """执行Pearson相关性分析"""
         # 加载数据
@@ -366,6 +595,19 @@ class PearsonAnalyzer:
             
             # 绘制K线图对比
             self.plot_kline_comparison(recent_data, historical_data, correlation_info)
+        
+        # 计算并输出统计结果
+        if high_correlation_periods:
+            self.logger.info("=" * 80)
+            self.logger.info("开始计算未来表现统计")
+            self.logger.info("=" * 80)
+            
+            stats = self.calculate_future_performance_stats(data, high_correlation_periods)
+            if stats:
+                self.log_performance_stats(stats)
+                self.save_stats_to_file(stats)
+            else:
+                self.logger.info("无法计算统计数据")
         
         self.logger.info("分析完成")
         
