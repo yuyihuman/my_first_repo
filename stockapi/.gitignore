@@ -9,6 +9,11 @@ true_quarterly_analysis.json
 *.log
 quarterly_analysis_*.log
 
+# 日志文件夹
+logs/
+*/logs/
+stock_backtest/pearson_found/logs/
+
 # Python 缓存
 __pycache__/
 *.pyc
