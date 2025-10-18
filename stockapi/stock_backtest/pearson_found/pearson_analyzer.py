@@ -29,6 +29,8 @@ import matplotlib.pyplot as plt
 import mplfinance as mpf
 import pandas as pd
 from stock_config import get_comparison_stocks
+import time
+from collections import defaultdict
 
 
 class PearsonAnalyzer:
@@ -69,6 +71,10 @@ class PearsonAnalyzer:
         # 存储已加载的股票数据
         self.loaded_stocks_data = {}
         
+        # 性能计时器
+        self.performance_timers = defaultdict(list)
+        self.current_timers = {}
+        
         # 确保日志目录存在
         os.makedirs(log_dir, exist_ok=True)
         
@@ -108,8 +114,93 @@ class PearsonAnalyzer:
         
         self.logger.info(f"日志文件创建: {log_path}")
     
+    def start_timer(self, timer_name):
+        """开始计时"""
+        self.current_timers[timer_name] = time.time()
+        if self.debug:
+            self.logger.info(f"⏱️ 开始计时: {timer_name}")
+    
+    def end_timer(self, timer_name):
+        """结束计时并记录耗时"""
+        if timer_name in self.current_timers:
+            elapsed_time = time.time() - self.current_timers[timer_name]
+            self.performance_timers[timer_name].append(elapsed_time)
+            del self.current_timers[timer_name]
+            if self.debug:
+                self.logger.info(f"⏱️ 结束计时: {timer_name} - 耗时: {elapsed_time:.3f}秒")
+            return elapsed_time
+        return 0
+    
+    def get_timer_stats(self, timer_name):
+        """获取计时器统计信息"""
+        times = self.performance_timers[timer_name]
+        if not times:
+            return None
+        return {
+            'count': len(times),
+            'total': sum(times),
+            'average': sum(times) / len(times),
+            'min': min(times),
+            'max': max(times)
+        }
+    
+    def log_performance_summary(self):
+        """输出性能统计表"""
+        self.logger.info("=" * 80)
+        self.logger.info("🚀 性能统计报告")
+        self.logger.info("=" * 80)
+        
+        # 计算总耗时
+        total_analysis_time = sum(self.performance_timers.get('total_analysis', [0]))
+        
+        # 创建统计表
+        stats_table = []
+        stats_table.append(f"{'阶段':<25} {'次数':<8} {'总耗时(秒)':<12} {'平均耗时(秒)':<15} {'最小耗时(秒)':<15} {'最大耗时(秒)':<15}")
+        stats_table.append("-" * 90)
+        
+        # 定义关键阶段的显示顺序和中文名称
+        stage_names = {
+            'total_analysis': '总分析时间',
+            'data_loading': '数据加载',
+            'target_stock_loading': '目标股票数据加载',
+            'comparison_stocks_loading': '对比股票数据加载',
+            'self_analysis': '自身历史数据分析',
+            'comparison_analysis': '跨股票对比分析',
+            'correlation_calculation': '相关性计算',
+            'plotting': 'K线图绘制',
+            'stats_calculation': '统计计算',
+            'stats_saving': '统计保存'
+        }
+        
+        for timer_name, display_name in stage_names.items():
+            stats = self.get_timer_stats(timer_name)
+            if stats:
+                stats_table.append(
+                    f"{display_name:<25} {stats['count']:<8} {stats['total']:<12.3f} "
+                    f"{stats['average']:<15.3f} {stats['min']:<15.3f} {stats['max']:<15.3f}"
+                )
+        
+        # 输出统计表
+        for line in stats_table:
+            self.logger.info(line)
+        
+        # 输出性能分析
+        self.logger.info("-" * 90)
+        if total_analysis_time > 0:
+            data_loading_time = sum(self.performance_timers.get('data_loading', [0]))
+            analysis_time = sum(self.performance_timers.get('self_analysis', [0])) + sum(self.performance_timers.get('comparison_analysis', [0]))
+            plotting_time = sum(self.performance_timers.get('plotting', [0]))
+            
+            self.logger.info(f"📊 性能分析:")
+            self.logger.info(f"   数据加载占比: {(data_loading_time/total_analysis_time)*100:.1f}%")
+            self.logger.info(f"   分析计算占比: {(analysis_time/total_analysis_time)*100:.1f}%")
+            self.logger.info(f"   图表绘制占比: {(plotting_time/total_analysis_time)*100:.1f}%")
+        
+        self.logger.info("=" * 80)
+    
     def load_data(self):
         """加载目标股票数据"""
+        self.start_timer('target_stock_loading')
         self.logger.info("初始化数据加载器")
         self.data_loader = StockDataLoader()
         
@@ -118,10 +209,12 @@ class PearsonAnalyzer:
         
         if data is None or data.empty:
             self.logger.error(f"无法加载股票 {self.stock_code} 的数据")
+            self.end_timer('target_stock_loading')
             return None
         
         # 数据过滤：确保价格为正数，成交量大于0
         self.data = self._filter_data(data, self.stock_code)
+        self.end_timer('target_stock_loading')
         
         # 加载对比股票数据
         self._load_comparison_stocks_data()
@@ -167,6 +260,7 @@ class PearsonAnalyzer:
             self.logger.info("使用自身历史数据对比模式，跳过其他股票数据加载")
             return
         
+        self.start_timer('comparison_stocks_loading')
         self.logger.info(f"开始加载 {len(self.comparison_stocks)} 只对比股票的数据")
         successful_loads = 0
         
@@ -197,6 +291,7 @@ class PearsonAnalyzer:
         self.logger.info(f"成功加载 {successful_loads} 只对比股票的数据")
         if successful_loads == 0:
             self.logger.warning("未能加载任何对比股票数据，将使用自身历史数据对比")
+        self.end_timer('comparison_stocks_loading')
     
     def plot_kline_comparison(self, recent_data, historical_data, correlation_info):
         """
@@ -207,6 +302,7 @@ class PearsonAnalyzer:
             historical_data: 历史高相关性数据
             correlation_info: 相关性信息字典
         """
+        self.start_timer('plotting')
         try:
             # 创建图表目录
             chart_dir = os.path.join(self.log_dir, 'charts')
@@ -269,15 +365,73 @@ class PearsonAnalyzer:
             plt.close()
             
             self.logger.info(f"K线对比图已保存: {comparison_file}")
+            self.end_timer('plotting')
             
         except Exception as e:
             self.logger.error(f"绘制K线图时出错: {str(e)}")
             import traceback
             self.logger.error(f"详细错误信息: {traceback.format_exc()}")
+            self.end_timer('plotting')
     
-    def calculate_pearson_correlation(self, recent_data, historical_data):
+    def calculate_pearson_correlation_vectorized(self, recent_data, historical_data):
         """
-        计算Pearson相关系数
+        向量化计算Pearson相关系数 - 性能优化版本
+        
+        Args:
+            recent_data: 最近的数据 (numpy array or DataFrame)
+            historical_data: 历史数据 (numpy array or DataFrame)
+            
+        Returns:
+            tuple: (平均相关系数, 各字段相关系数字典)
+        """
+        fields = ['open', 'high', 'low', 'close', 'volume']
+        correlations = {}
+        
+        try:
+            # 转换为numpy数组以提高性能
+            if hasattr(recent_data, 'values'):
+                recent_values = recent_data[fields].values
+            else:
+                recent_values = recent_data
+                
+            if hasattr(historical_data, 'values'):
+                historical_values = historical_data[fields].values
+            else:
+                historical_values = historical_data
+            
+            # 向量化计算所有字段的相关系数
+            correlations_matrix = np.corrcoef(recent_values.T, historical_values.T)
+            
+            # 提取对角线上的相关系数（recent vs historical for each field）
+            n_fields = len(fields)
+            field_correlations = np.diag(correlations_matrix[:n_fields, n_fields:])
+            
+            # 构建结果字典
+            for i, field in enumerate(fields):
+                corr_coef = field_correlations[i]
+                if np.isnan(corr_coef) or np.isinf(corr_coef):
+                    correlations[field] = {'correlation': np.nan, 'p_value': np.nan}
+                else:
+                    # 对于向量化版本，我们暂时不计算p_value以提高性能
+                    # 如果需要p_value，可以在必要时单独计算
+                    correlations[field] = {'correlation': corr_coef, 'p_value': np.nan}
+            
+            # 计算平均相关系数（忽略NaN值）
+            valid_correlations = [corr['correlation'] for corr in correlations.values() 
+                                if not np.isnan(corr['correlation'])]
+            avg_correlation = np.mean(valid_correlations) if valid_correlations else 0
+            
+            return avg_correlation, correlations
+            
+        except Exception as e:
+            if self.debug:
+                self.logger.warning(f"向量化相关系数计算出错，回退到原始方法: {e}")
+            # 回退到原始方法
+            return self.calculate_pearson_correlation_original(recent_data, historical_data)
+    
+    def calculate_pearson_correlation_original(self, recent_data, historical_data):
+        """
+        原始的Pearson相关系数计算方法（作为备用）
         
         Args:
             recent_data: 最近的数据
@@ -304,6 +458,12 @@ class PearsonAnalyzer:
         avg_correlation = np.mean(valid_correlations) if valid_correlations else 0
         
         return avg_correlation, correlations
+    
+    def calculate_pearson_correlation(self, recent_data, historical_data):
+        """
+        计算Pearson相关系数 - 使用优化后的向量化方法
+        """
+        return self.calculate_pearson_correlation_vectorized(recent_data, historical_data)
     
     def calculate_future_performance_stats(self, data, high_correlation_periods):
         """
@@ -489,6 +649,8 @@ class PearsonAnalyzer:
         if not stats:
             return
         
+        self.start_timer('stats_saving')
+        
         # 创建统计结果目录
         stats_dir = os.path.join(self.log_dir, 'stats')
         os.makedirs(stats_dir, exist_ok=True)
@@ -533,18 +695,28 @@ class PearsonAnalyzer:
             writer.writerows(csv_data)
         
         self.logger.info(f"统计结果已保存到: {csv_file}")
+        self.end_timer('stats_saving')
 
     def analyze(self):
         """执行Pearson相关性分析"""
+        self.start_timer('total_analysis')
+        self.start_timer('data_loading')
+        
         # 加载目标股票数据
         data = self.load_data()
         if data is None:
+            self.end_timer('data_loading')
+            self.end_timer('total_analysis')
             return
         
         # 检查数据量是否足够
         if len(data) < self.window_size * 2:
             self.logger.error(f"数据量不足，需要至少 {self.window_size * 2} 条记录")
+            self.end_timer('data_loading')
+            self.end_timer('total_analysis')
             return
+        
+        self.end_timer('data_loading')
         
         # 获取最近的数据
         recent_data = data.tail(self.window_size)
@@ -562,6 +734,8 @@ class PearsonAnalyzer:
         max_correlation_period = None
         
         # 1. 分析自身历史数据
+        self.start_timer('self_analysis')
+        self.start_timer('correlation_calculation')
         self.logger.info(f"开始分析自身历史数据...")
         comparison_count = 0
         for i in range(len(data) - self.window_size):
@@ -605,10 +779,14 @@ class PearsonAnalyzer:
                 self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
                 self.logger.info(f"  平均相关系数: {avg_correlation:.4f}")
         
-        self.logger.info(f"自身历史数据分析完成，比较了 {comparison_count} 个期间")
+        # 结束自身历史的相关性计算计时
+        correlation_elapsed_time = self.end_timer('correlation_calculation')
+        self.logger.info(f"自身历史数据分析完成，比较了 {comparison_count} 个期间，相关性计算耗时: {correlation_elapsed_time:.3f}秒")
+        self.end_timer('self_analysis')
         
         # 2. 分析对比股票数据
         if self.comparison_stocks:
+            self.start_timer('comparison_analysis')
             self.logger.info(f"开始分析对比股票数据...")
             cross_comparison_count = 0
             
@@ -616,6 +794,8 @@ class PearsonAnalyzer:
                 if comp_data is None or len(comp_data) < self.window_size:
                     continue
                 
+                # 开始单个股票的相关性计算计时
+                self.start_timer('correlation_calculation')
                 self.logger.info(f"正在分析对比股票: {comp_stock_code}")
                 stock_comparison_count = 0
                 
@@ -662,9 +842,15 @@ class PearsonAnalyzer:
                         self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
                         self.logger.info(f"  平均相关系数: {avg_correlation:.4f}")
                 
-                self.logger.info(f"对比股票 {comp_stock_code} 分析完成，比较了 {stock_comparison_count} 个期间")
+                # 结束单个股票的相关性计算计时
+                elapsed_time = self.end_timer('correlation_calculation')
+                self.logger.info(f"对比股票 {comp_stock_code} 分析完成，比较了 {stock_comparison_count} 个期间，耗时: {elapsed_time:.3f}秒")
             
             self.logger.info(f"跨股票数据分析完成，总共比较了 {cross_comparison_count} 个期间")
+            self.end_timer('comparison_analysis')
+        
+        # 开始统计计算
+        self.start_timer('stats_calculation')
         
         # 输出分析结果
         self.logger.info("=" * 80)
@@ -778,6 +964,8 @@ class PearsonAnalyzer:
             else:
                 self.logger.error(f"无法找到股票 {max_period_stock} 的数据")
         
+        self.end_timer('stats_calculation')
+        
         # 计算并输出统计结果
         if high_correlation_periods:
             self.logger.info("=" * 80)
@@ -790,6 +978,10 @@ class PearsonAnalyzer:
                 self.save_stats_to_file(stats)
             else:
                 self.logger.info("无法计算统计数据")
+        
+        # 结束总分析计时并输出性能统计表
+        self.end_timer('total_analysis')
+        self.log_performance_summary()
         
         self.logger.info("分析完成")
         
