@@ -6,18 +6,25 @@
 提供对比股票列表等配置信息
 """
 
-def get_comparison_stocks(mode='top100'):
+def get_comparison_stocks(mode='top10'):
     """
     获取对比股票列表
     
     Args:
-        mode: 对比模式 ('top100', 'industry', 'custom')
+        mode: 对比模式 ('top10', 'top100', 'industry', 'custom')
     
     Returns:
         list: 股票代码列表
     """
     
-    if mode == 'top100':
+    if mode == 'top10':
+        # 市值前10的股票代码
+        return [
+            '000001', '000002', '000858', '002415', '002594', 
+            '600000', '600036', '600519', '600887', '601318'
+        ]
+    
+    elif mode == 'top100':
         # 市值前100的股票代码（示例）
         return [
             '000001', '000002', '000858', '000876', '002415', '002594', '002714',

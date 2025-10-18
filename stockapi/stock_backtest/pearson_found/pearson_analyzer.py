@@ -35,7 +35,7 @@ from collections import defaultdict
 
 class PearsonAnalyzer:
     def __init__(self, stock_code, log_dir='logs', window_size=20, threshold=0.8, debug=False, 
-                 comparison_stocks=None, comparison_mode='default'):
+                 comparison_stocks=None, comparison_mode='default', backtest_date=None):
         """
         初始化Pearson相关性分析器
         
@@ -46,7 +46,8 @@ class PearsonAnalyzer:
             threshold: 相关系数阈值
             debug: 是否开启debug模式（影响性能）
             comparison_stocks: 自定义对比股票列表
-            comparison_mode: 对比模式 ('default', 'top100', 'banks', 'tech', 'new_energy', 'healthcare', 'consumer', 'self_only')
+            comparison_mode: 对比模式 ('default', 'top10', 'top100', 'banks', 'tech', 'new_energy', 'healthcare', 'consumer', 'self_only')
+            backtest_date: 回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析
         """
         self.stock_code = stock_code
         self.log_dir = log_dir
@@ -54,6 +55,7 @@ class PearsonAnalyzer:
         self.threshold = threshold
         self.debug = debug
         self.comparison_mode = comparison_mode
+        self.backtest_date = backtest_date
         self.data_loader = None
         self.logger = None
         
@@ -718,8 +720,32 @@ class PearsonAnalyzer:
         
         self.end_timer('data_loading')
         
-        # 获取最近的数据
-        recent_data = data.tail(self.window_size)
+        # 获取最近的数据（支持自定义回测日期）
+        if self.backtest_date:
+            # 如果指定了回测日期，从该日期往前数获取数据段
+            try:
+                backtest_datetime = pd.to_datetime(self.backtest_date)
+                # 找到指定日期或之前最近的交易日
+                available_dates = data.index[data.index <= backtest_datetime]
+                if len(available_dates) == 0:
+                    self.logger.error(f"指定的回测日期 {self.backtest_date} 早于所有可用数据")
+                    return
+                
+                # 从指定日期往前数window_size个交易日
+                end_date_idx = data.index.get_loc(available_dates[-1])
+                start_idx = max(0, end_date_idx - self.window_size + 1)
+                recent_data = data.iloc[start_idx:end_date_idx + 1]
+                
+                if len(recent_data) < self.window_size:
+                    self.logger.warning(f"从指定日期 {self.backtest_date} 往前数据不足 {self.window_size} 个交易日，实际获取 {len(recent_data)} 个交易日")
+                
+            except Exception as e:
+                self.logger.error(f"解析回测日期 {self.backtest_date} 失败: {str(e)}")
+                return
+        else:
+            # 默认使用最后的数据
+            recent_data = data.tail(self.window_size)
+        
         recent_start_date = recent_data.index[0]
         recent_end_date = recent_data.index[-1]
         
@@ -743,8 +769,9 @@ class PearsonAnalyzer:
             historical_start_date = historical_data.index[0]
             historical_end_date = historical_data.index[-1]
             
-            # 跳过与最近数据重叠的期间
-            if historical_end_date >= recent_start_date:
+            # 跳过与最近数据重叠的期间或完全相同的期间
+            if (historical_end_date >= recent_start_date or 
+                (historical_start_date == recent_start_date and historical_end_date == recent_end_date)):
                 continue
             
             comparison_count += 1
@@ -996,12 +1023,14 @@ def main():
     parser.add_argument('--debug', action='store_true', help='开启debug模式（会影响性能）')
     
     # 跨股票对比参数
-    parser.add_argument('--comparison_mode', choices=['none', 'top100', 'industry', 'custom'], 
-                       default='top100', help='对比模式: none(仅自身), top100(市值前100), industry(同行业), custom(自定义) (默认: top100)')
+    parser.add_argument('--comparison_mode', choices=['none', 'top10', 'top100', 'industry', 'custom'],
+                        default='top10', help='对比模式: none(仅自身), top10(市值前10), top100(市值前100), industry(同行业), custom(自定义) (默认: top10)')
     parser.add_argument('--comparison_stocks', nargs='*', 
                        help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--no_comparison', action='store_true', 
                        help='禁用跨股票对比，仅分析自身历史数据')
+    parser.add_argument('--backtest_date', type=str, 
+                       help='指定回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析，默认使用最后一个交易日')
     
     args = parser.parse_args()
     
@@ -1043,7 +1072,8 @@ def main():
         threshold=args.threshold,
         debug=args.debug,
         comparison_mode=comparison_mode,
-        comparison_stocks=comparison_stocks
+        comparison_stocks=comparison_stocks,
+        backtest_date=args.backtest_date
     )
     
     results = analyzer.analyze()
