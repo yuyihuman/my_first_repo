@@ -600,6 +600,49 @@ def fetch_macro_china_money_supply():
                 import traceback
                 print(f"详细错误: {traceback.format_exc()}")
 
+        # 读取自制上海房价指数数据
+        custom_house_price_dict = {}
+        try:
+            # 构建JSON文件路径
+            json_file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cache', 'outsource', 'shanghai_house_price_index.json')
+            print(f"DEBUG: 尝试读取自制房价指数文件: {json_file_path}")
+            
+            if os.path.exists(json_file_path):
+                with open(json_file_path, 'r', encoding='utf-8') as f:
+                    custom_house_data = json.load(f)
+                
+                print(f"DEBUG: 成功读取自制房价指数数据，基准期: {custom_house_data.get('base_period')}")
+                
+                # 处理数据，转换为与现有数据格式兼容的格式
+                for date_key, data_item in custom_house_data.get('data', {}).items():
+                    price_index = data_item.get('price_index')
+                    if price_index is not None:
+                        # 转换日期格式
+                        if '-' in date_key:
+                            # 格式如 "2016-01"
+                            year, month = date_key.split('-')
+                            month = month.lstrip('0') if month != '0' else '0'
+                            year_month_dot = f"{year}.{month}"
+                        else:
+                            year_month_dot = date_key
+                        
+                        # 存储自制房价指数数据
+                        custom_house_price_dict[year_month_dot] = price_index
+                        custom_house_price_dict[date_key] = price_index
+                
+                print(f"DEBUG: 自制房价指数数据处理完成，共{len(custom_house_price_dict)}条记录")
+                if custom_house_price_dict:
+                    sample_keys = list(custom_house_price_dict.keys())[:5]
+                    print(f"DEBUG: 自制房价指数数据样本: {[(k, custom_house_price_dict[k]) for k in sample_keys]}")
+            else:
+                print(f"WARNING: 自制房价指数文件不存在: {json_file_path}")
+        
+        except Exception as e:
+            print(f"读取自制房价指数数据失败: {e}")
+            import traceback
+            print(f"详细错误信息: {traceback.format_exc()}")
+            custom_house_price_dict = {}
+
         # 确保数据框不为空
         if money_supply_df.empty:
             return {
@@ -960,6 +1003,32 @@ def fetch_macro_china_money_supply():
                         item['上海新建商品住宅价格指数(2016.1=100)'] = None
                         item['上海二手住宅价格指数(2016.1=100)'] = None
                 
+                # 添加自制房价指数数据（如果存在）
+                custom_house_index = None
+                if formatted_date in custom_house_price_dict:
+                    custom_house_index = custom_house_price_dict[formatted_date]
+                else:
+                    # 尝试其他可能的日期格式
+                    for key in custom_house_price_dict.keys():
+                        # 检查年份和月份是否匹配
+                        if '-' in formatted_date and '-' in key:
+                            if formatted_date.split('-')[0] == key.split('-')[0] and formatted_date.split('-')[1] == key.split('-')[1]:
+                                custom_house_index = custom_house_price_dict[key]
+                                break
+                        elif '.' in formatted_date and '.' in key:
+                            if formatted_date.split('.')[0] == key.split('.')[0] and formatted_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
+                                custom_house_index = custom_house_price_dict[key]
+                                break
+                        elif '.' in formatted_date and '-' in key:
+                            # 格式转换：2016.1 -> 2016-01
+                            year, month = formatted_date.split('.')
+                            month_padded = month.zfill(2)
+                            if key == f"{year}-{month_padded}":
+                                custom_house_index = custom_house_price_dict[key]
+                                break
+                
+                item['上海二手房价指数（自制）'] = custom_house_index
+                
                 # 添加商品价格指数数据（如果存在）
                 # 商品价格指数数据现在使用日期格式（YYYY-MM-DD）作为键
                 commodity_value = None
@@ -1169,6 +1238,32 @@ def fetch_macro_china_money_supply():
                                 item['上海二手住宅价格指数_环比'] = None
                                 item['上海新建商品住宅价格指数(2016.1=100)'] = None
                                 item['上海二手住宅价格指数(2016.1=100)'] = None
+                            
+                            # 添加自制房价指数数据（如果存在）
+                            custom_house_index = None
+                            if hs300_month in custom_house_price_dict:
+                                custom_house_index = custom_house_price_dict[hs300_month]
+                            else:
+                                # 尝试其他可能的日期格式
+                                for key in custom_house_price_dict.keys():
+                                    # 检查年份和月份是否匹配
+                                    if '-' in hs300_month and '-' in key:
+                                        if hs300_month.split('-')[0] == key.split('-')[0] and hs300_month.split('-')[1] == key.split('-')[1]:
+                                            custom_house_index = custom_house_price_dict[key]
+                                            break
+                                    elif '.' in hs300_month and '.' in key:
+                                        if hs300_month.split('.')[0] == key.split('.')[0] and hs300_month.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
+                                            custom_house_index = custom_house_price_dict[key]
+                                            break
+                                    elif '.' in hs300_month and '-' in key:
+                                        # 格式转换：2016.1 -> 2016-01
+                                        year, month = hs300_month.split('.')
+                                        month_padded = month.zfill(2)
+                                        if key == f"{year}-{month_padded}":
+                                            custom_house_index = custom_house_price_dict[key]
+                                            break
+                            
+                            item['上海二手房价指数（自制）'] = custom_house_index
                             
                             # 添加商品价格指数数据（如果存在）
                             commodity_value = None
