@@ -34,7 +34,7 @@ from collections import defaultdict
 
 
 class PearsonAnalyzer:
-    def __init__(self, stock_code, log_dir='logs', window_size=20, threshold=0.8, debug=False, 
+    def __init__(self, stock_code, log_dir='logs', window_size=20, threshold=0.9, debug=False, 
                  comparison_stocks=None, comparison_mode='default', backtest_date=None):
         """
         初始化Pearson相关性分析器
@@ -1019,7 +1019,7 @@ def main():
     parser.add_argument('stock_code', help='股票代码')
     parser.add_argument('--log_dir', default='logs', help='日志目录 (默认: logs)')
     parser.add_argument('--window_size', type=int, default=20, help='分析窗口大小 (默认: 20)')
-    parser.add_argument('--threshold', type=float, default=0.8, help='相关系数阈值 (默认: 0.8)')
+    parser.add_argument('--threshold', type=float, default=0.9, help='相关系数阈值 (默认: 0.9)')
     parser.add_argument('--debug', action='store_true', help='开启debug模式（会影响性能）')
     
     # 跨股票对比参数
