@@ -46,7 +46,7 @@ class PearsonAnalyzer:
             threshold: 相关系数阈值
             debug: 是否开启debug模式（影响性能）
             comparison_stocks: 自定义对比股票列表
-            comparison_mode: 对比模式 ('default', 'top10', 'top100', 'banks', 'tech', 'new_energy', 'healthcare', 'consumer', 'self_only')
+            comparison_mode: 对比模式 ('default', 'top10', 'banks', 'tech', 'new_energy', 'healthcare', 'consumer', 'self_only')
             backtest_date: 回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析
         """
         self.stock_code = stock_code
@@ -1023,8 +1023,8 @@ def main():
     parser.add_argument('--debug', action='store_true', help='开启debug模式（会影响性能）')
     
     # 跨股票对比参数
-    parser.add_argument('--comparison_mode', choices=['none', 'top10', 'top100', 'industry', 'custom'],
-                        default='top10', help='对比模式: none(仅自身), top10(市值前10), top100(市值前100), industry(同行业), custom(自定义) (默认: top10)')
+    parser.add_argument('--comparison_mode', choices=['none', 'top10', 'industry', 'custom'],
+                        default='top10', help='对比模式: none(仅自身), top10(市值前10), industry(同行业), custom(自定义) (默认: top10)')
     parser.add_argument('--comparison_stocks', nargs='*', 
                        help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--no_comparison', action='store_true', 
