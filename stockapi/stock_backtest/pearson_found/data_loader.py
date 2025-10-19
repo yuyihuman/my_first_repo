@@ -109,13 +109,30 @@ class StockDataLoader:
             if fields is None:
                 fields = self.key_fields
             
-            # 确保所需字段存在
-            available_fields = [field for field in fields if field in df.columns]
-            if len(available_fields) != len(fields):
-                missing_fields = set(fields) - set(available_fields)
+            # 确保所需字段存在（考虑datetime可能已经成为索引）
+            available_fields = []
+            missing_fields = set()
+            
+            for field in fields:
+                if field == 'datetime':
+                    # datetime字段可能在列中，也可能已经成为索引
+                    if field in df.columns or df.index.name == 'datetime':
+                        available_fields.append(field)
+                    else:
+                        missing_fields.add(field)
+                else:
+                    # 其他字段必须在列中
+                    if field in df.columns:
+                        available_fields.append(field)
+                    else:
+                        missing_fields.add(field)
+            
+            if missing_fields:
                 logger.warning(f"以下字段在数据中不存在: {missing_fields}")
             
-            result_df = df[available_fields].copy()
+            # 只选择实际存在于列中的字段（排除已成为索引的datetime）
+            column_fields = [field for field in available_fields if field in df.columns]
+            result_df = df[column_fields].copy() if column_fields else df.copy()
             
             logger.info(f"数据加载成功，股票: {stock_code}, 时间粒度: {time_frame}, 数据行数: {len(result_df)}")
             return result_df
