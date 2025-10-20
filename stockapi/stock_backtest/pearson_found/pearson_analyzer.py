@@ -35,7 +35,7 @@ from collections import defaultdict
 
 class PearsonAnalyzer:
     def __init__(self, stock_code, log_dir='logs', window_size=15, threshold=0.9, debug=False, 
-                 comparison_stocks=None, comparison_mode='default', backtest_date=None):
+                 comparison_stocks=None, comparison_mode='default', backtest_date=None, csv_filename='evaluation_results.csv'):
         """
         初始化Pearson相关性分析器
         
@@ -48,13 +48,14 @@ class PearsonAnalyzer:
             comparison_stocks: 自定义对比股票列表
             comparison_mode: 对比模式 ('default', 'top10', 'banks', 'tech', 'new_energy', 'healthcare', 'consumer', 'self_only')
             backtest_date: 回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析
+            csv_filename: CSV结果文件名 (默认: evaluation_results.csv)
         """
         self.stock_code = stock_code
         
         # 设置固定的绝对路径
         script_dir = r'C:\Users\17701\github\my_first_repo\stockapi\stock_backtest\pearson_found'
         self.log_dir = os.path.join(script_dir, 'logs')
-        self.csv_results_file = os.path.join(script_dir, 'evaluation_results.csv')
+        self.csv_results_file = os.path.join(script_dir, csv_filename)
         
         self.window_size = window_size
         self.threshold = threshold
@@ -1134,25 +1135,27 @@ def main():
                        help='禁用跨股票对比，仅分析自身历史数据')
     parser.add_argument('--backtest_date', type=str, 
                        help='指定回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析，默认使用最后一个交易日')
+    parser.add_argument('--csv_filename', type=str, default='evaluation_results.csv',
+                       help='指定CSV结果文件名 (默认: evaluation_results.csv)')
     
     args = parser.parse_args()
     
     # 清空logs文件夹
     def clear_logs_directory(log_dir):
-        """清空logs目录下的内容，但保留evaluation_results.csv文件"""
+        """清空logs目录下的内容，但保留所有CSV文件"""
         import shutil
         if os.path.exists(log_dir):
             try:
-                # 删除目录下的所有内容，但保留evaluation_results.csv
+                # 删除目录下的所有内容，但保留CSV文件
                 for item in os.listdir(log_dir):
-                    if item == 'evaluation_results.csv':
-                        continue  # 跳过CSV结果文件
+                    if item.endswith('.csv'):
+                        continue  # 跳过所有CSV文件
                     item_path = os.path.join(log_dir, item)
                     if os.path.isdir(item_path):
                         shutil.rmtree(item_path)
                     else:
                         os.remove(item_path)
-                print(f"已清空 {log_dir} 目录（保留evaluation_results.csv）")
+                print(f"已清空 {log_dir} 目录（保留所有CSV文件）")
             except Exception as e:
                 print(f"清空 {log_dir} 目录时出错: {e}")
         else:
@@ -1182,7 +1185,8 @@ def main():
         debug=args.debug,
         comparison_mode=comparison_mode,
         comparison_stocks=comparison_stocks,
-        backtest_date=args.backtest_date
+        backtest_date=args.backtest_date,
+        csv_filename=args.csv_filename
     )
     
     results = analyzer.analyze()
