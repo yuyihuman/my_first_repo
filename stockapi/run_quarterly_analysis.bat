@@ -18,16 +18,6 @@ python macro_data_fetch\true_quarterly_analysis.py
 python macro_data_fetch\commodity_price_index.py
 python macro_data_fetch\pmi_data_fetcher.py
 
-echo 正在清空回测数据目录...
-if exist "stock_backtest\data" (
-    del /q /s "stock_backtest\data\*.*" > nul 2>&1
-    for /d %%i in ("stock_backtest\data\*") do rd /s /q "%%i" > nul 2>&1
-    echo 回测数据目录已清空
-) else (
-    mkdir "stock_backtest\data"
-    echo 创建回测数据目录
-)
-
 echo 正在复制股票数据到回测目录...
 if exist "stock_base_info\all_stocks_data" (
     xcopy "stock_base_info\all_stocks_data" "stock_backtest\data\all_stocks_data\" /e /i /y > nul
