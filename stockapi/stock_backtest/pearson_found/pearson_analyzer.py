@@ -50,7 +50,12 @@ class PearsonAnalyzer:
             backtest_date: 回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析
         """
         self.stock_code = stock_code
-        self.log_dir = log_dir
+        
+        # 设置固定的绝对路径
+        script_dir = r'C:\Users\17701\github\my_first_repo\stockapi\stock_backtest\pearson_found'
+        self.log_dir = os.path.join(script_dir, 'logs')
+        self.csv_results_file = os.path.join(script_dir, 'evaluation_results.csv')
+        
         self.window_size = window_size
         self.threshold = threshold
         self.debug = debug
@@ -78,7 +83,10 @@ class PearsonAnalyzer:
         self.current_timers = {}
         
         # 确保日志目录存在
-        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(self.log_dir, exist_ok=True)
+        
+        # 设置CSV文件
+        self._setup_csv_file()
         
         # 设置日志
         self._setup_logging()
@@ -115,6 +123,69 @@ class PearsonAnalyzer:
         self.logger.addHandler(file_handler)
         
         self.logger.info(f"日志文件创建: {log_path}")
+    
+    def _setup_csv_file(self):
+        """设置CSV文件，如果不存在则创建"""
+        if not os.path.exists(self.csv_results_file):
+            # 创建CSV文件的表头
+            header = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨']
+            df = pd.DataFrame(columns=header)
+            # 确保代码列为字符串类型
+            df['代码'] = df['代码'].astype(str)
+            df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
+    
+    def save_evaluation_result(self, evaluation_date, stats, correlation_count=0):
+        """
+        保存单次评测结果到CSV文件
+        
+        Args:
+            evaluation_date: 评测日期（评测序列的最后一天）
+            stats: 统计结果字典
+            correlation_count: 相关数量（高相关性期间的数量）
+        """
+        try:
+            # 计算对比股票数量（对比股票数量 + 目标股票自身）
+            comparison_stock_count = len(self.comparison_stocks) + 1
+            
+            # 准备要保存的数据
+            result_data = {
+                '代码': str(self.stock_code),  # 确保股票代码为字符串
+                'window_size': self.window_size,
+                '阈值': self.threshold,
+                '评测日期': evaluation_date.strftime('%Y-%m-%d'),
+                '对比股票数量': comparison_stock_count,
+                '相关数量': correlation_count,
+                '下1日高开': f"{stats['ratios']['next_day_gap_up']:.2%}" if stats and 'ratios' in stats else 'N/A',
+                '下1日上涨': f"{stats['ratios']['next_1_day_up']:.2%}" if stats and 'ratios' in stats else 'N/A',
+                '下3日上涨': f"{stats['ratios']['next_3_day_up']:.2%}" if stats and 'ratios' in stats else 'N/A',
+                '下5日上涨': f"{stats['ratios']['next_5_day_up']:.2%}" if stats and 'ratios' in stats else 'N/A',
+                '下10日上涨': f"{stats['ratios']['next_10_day_up']:.2%}" if stats and 'ratios' in stats else 'N/A'
+            }
+            
+            # 读取现有的CSV文件，指定代码列为字符串类型
+            if os.path.exists(self.csv_results_file):
+                df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig', dtype={'代码': str})
+            else:
+                # 如果文件不存在，创建新的DataFrame
+                df = pd.DataFrame()
+            
+            # 添加新的结果行
+            new_row = pd.DataFrame([result_data])
+            df = pd.concat([df, new_row], ignore_index=True)
+            
+            # 确保代码列为字符串类型
+            df['代码'] = df['代码'].astype(str)
+            
+            # 保存到CSV文件
+            df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
+            
+            self.logger.info(f"评测结果已保存到CSV文件: {self.csv_results_file}")
+            self.logger.info(f"保存的结果: {result_data}")
+            
+        except Exception as e:
+            self.logger.error(f"保存评测结果到CSV文件时出错: {str(e)}")
+            import traceback
+            self.logger.error(f"详细错误信息: {traceback.format_exc()}")
     
     def start_timer(self, timer_name):
         """开始计时"""
@@ -725,22 +796,48 @@ class PearsonAnalyzer:
             # 如果指定了回测日期，从该日期往前数获取数据段
             try:
                 backtest_datetime = pd.to_datetime(self.backtest_date)
+                
+                # 检查指定日期是否在数据范围内
+                if backtest_datetime < data.index.min():
+                    self.logger.error(f"指定的回测日期 {self.backtest_date} 早于所有可用数据（最早数据日期: {data.index.min().strftime('%Y-%m-%d')}）")
+                    print(f"错误：指定的回测日期 {self.backtest_date} 早于所有可用数据")
+                    return
+                
+                if backtest_datetime > data.index.max():
+                    self.logger.error(f"指定的回测日期 {self.backtest_date} 晚于所有可用数据（最晚数据日期: {data.index.max().strftime('%Y-%m-%d')}）")
+                    print(f"错误：指定的回测日期 {self.backtest_date} 晚于所有可用数据")
+                    return
+                
                 # 找到指定日期或之前最近的交易日
                 available_dates = data.index[data.index <= backtest_datetime]
                 if len(available_dates) == 0:
-                    self.logger.error(f"指定的回测日期 {self.backtest_date} 早于所有可用数据")
+                    self.logger.error(f"指定的回测日期 {self.backtest_date} 没有对应的交易日数据")
+                    print(f"错误：指定的回测日期 {self.backtest_date} 没有对应的交易日数据")
                     return
                 
+                # 检查指定日期当天是否有数据
+                exact_date_data = data[data.index.date == backtest_datetime.date()]
+                if exact_date_data.empty:
+                    # 如果指定日期当天没有数据，直接结束程序
+                    self.logger.error(f"指定的回测日期 {self.backtest_date} 当天没有交易数据，程序结束")
+                    print(f"错误：指定的回测日期 {self.backtest_date} 当天没有交易数据，程序结束")
+                    return
+                else:
+                    self.logger.info(f"找到指定回测日期 {self.backtest_date} 的交易数据")
+                
                 # 从指定日期往前数window_size个交易日
-                end_date_idx = data.index.get_loc(available_dates[-1])
+                end_date_idx = data.index.get_loc(backtest_datetime)
                 start_idx = max(0, end_date_idx - self.window_size + 1)
                 recent_data = data.iloc[start_idx:end_date_idx + 1]
                 
                 if len(recent_data) < self.window_size:
-                    self.logger.warning(f"从指定日期 {self.backtest_date} 往前数据不足 {self.window_size} 个交易日，实际获取 {len(recent_data)} 个交易日")
+                    self.logger.error(f"从指定日期 {self.backtest_date} 往前数据不足 {self.window_size} 个交易日，实际获取 {len(recent_data)} 个交易日，无法进行分析")
+                    print(f"错误：从指定日期 {self.backtest_date} 往前数据不足 {self.window_size} 个交易日，无法进行分析")
+                    return
                 
             except Exception as e:
                 self.logger.error(f"解析回测日期 {self.backtest_date} 失败: {str(e)}")
+                print(f"错误：解析回测日期 {self.backtest_date} 失败: {str(e)}")
                 return
         else:
             # 默认使用最后的数据
@@ -948,6 +1045,8 @@ class PearsonAnalyzer:
                         break
         else:
             self.logger.info(f"未发现相关系数超过 {self.threshold} 的历史期间")
+            # 即使未发现高相关性期间，也保存基本信息到CSV
+            self.save_evaluation_result(recent_end_date, None, 0)
         
         # Debug模式下绘制K线图对比
         if self.debug and max_correlation_period and high_correlation_periods:
@@ -1003,8 +1102,12 @@ class PearsonAnalyzer:
             if stats:
                 self.log_performance_stats(stats)
                 self.save_stats_to_file(stats)
+                # 保存评测结果到CSV文件
+                self.save_evaluation_result(recent_end_date, stats, len(high_correlation_periods))
             else:
                 self.logger.info("无法计算统计数据")
+                # 即使没有统计数据，也保存基本信息到CSV
+                self.save_evaluation_result(recent_end_date, None, len(high_correlation_periods))
         
         # 结束总分析计时并输出性能统计表
         self.end_timer('total_analysis')
@@ -1036,25 +1139,31 @@ def main():
     
     # 清空logs文件夹
     def clear_logs_directory(log_dir):
-        """清空logs目录下的所有内容"""
+        """清空logs目录下的内容，但保留evaluation_results.csv文件"""
         import shutil
         if os.path.exists(log_dir):
             try:
-                # 删除目录下的所有内容
+                # 删除目录下的所有内容，但保留evaluation_results.csv
                 for item in os.listdir(log_dir):
+                    if item == 'evaluation_results.csv':
+                        continue  # 跳过CSV结果文件
                     item_path = os.path.join(log_dir, item)
                     if os.path.isdir(item_path):
                         shutil.rmtree(item_path)
                     else:
                         os.remove(item_path)
-                print(f"已清空 {log_dir} 目录")
+                print(f"已清空 {log_dir} 目录（保留evaluation_results.csv）")
             except Exception as e:
                 print(f"清空 {log_dir} 目录时出错: {e}")
         else:
             print(f"{log_dir} 目录不存在，将自动创建")
     
+    # 设置固定的绝对路径
+    script_dir = r'C:\Users\17701\github\my_first_repo\stockapi\stock_backtest\pearson_found'
+    fixed_log_dir = os.path.join(script_dir, 'logs')
+    
     # 清空logs目录
-    clear_logs_directory(args.log_dir)
+    clear_logs_directory(fixed_log_dir)
     
     # 处理对比模式
     if args.no_comparison:
@@ -1067,7 +1176,7 @@ def main():
     # 创建分析器并执行分析
     analyzer = PearsonAnalyzer(
         stock_code=args.stock_code,
-        log_dir=args.log_dir,
+        log_dir=args.log_dir,  # 这个参数现在在PearsonAnalyzer内部会被忽略，使用固定路径
         window_size=args.window_size,
         threshold=args.threshold,
         debug=args.debug,
