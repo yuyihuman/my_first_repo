@@ -37,7 +37,7 @@ def load_stock_codes(csv_file):
     """从CSV文件中加载股票代码"""
     try:
         df = pd.read_csv(csv_file, encoding='utf-8')
-        stock_codes = df['代码'].astype(str).str.zfill(6).tolist()  # 确保是6位数字
+        stock_codes = df['code'].astype(str).str.zfill(6).tolist()  # 确保是6位数字
         logging.info(f"成功加载 {len(stock_codes)} 个股票代码")
         return stock_codes
     except Exception as e:

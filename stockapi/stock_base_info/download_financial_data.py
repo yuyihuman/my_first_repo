@@ -195,7 +195,7 @@ def process_stock_batch(stock_batch):
     # 构造股票代码列表（添加交易所后缀）
     stock_codes = []
     for _, row in stock_batch.iterrows():
-        stock_code = str(row['代码']).zfill(6)
+        stock_code = str(row['code']).zfill(6)
         if stock_code.startswith('6'):
             full_code = f"{stock_code}.SH"  # 上海交易所
         elif stock_code.startswith('0') or stock_code.startswith('3'):
@@ -338,10 +338,11 @@ def main():
         df = pd.read_csv(csv_file, encoding='utf-8')
         logging.info(f"共找到 {len(df)} 只股票")  # 主进程日志，不需要使用safe_log
         
-        # 过滤出0、3、6开头的股票
-        df['代码_str'] = df['代码'].astype(str).str.zfill(6)
-        filtered_df = df[df['代码_str'].str.startswith(('0', '3', '6'))]
-        logging.info(f"过滤出0、3、6开头的股票共 {len(filtered_df)} 只")  # 主进程日志，不需要使用safe_log
+        # 过滤掉8和9开头的股票
+        df['code_6digit'] = df['code'].astype(str).str.zfill(6)
+        filtered_df = df[~df['code_6digit'].str[0].isin(['8', '9'])]
+        filtered_df = filtered_df.drop('code_6digit', axis=1)
+        logging.info(f"过滤8开头和9开头股票后剩余 {len(filtered_df)} 只股票")  # 主进程日志，不需要使用safe_log
         
         if len(filtered_df) == 0:
             logging.warning("没有找到符合条件的股票")  # 主进程日志，不需要使用safe_log

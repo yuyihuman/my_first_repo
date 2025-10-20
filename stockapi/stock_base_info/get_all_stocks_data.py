@@ -345,8 +345,8 @@ def process_stock_batch(stock_batch):
     processed_in_batch = 0
     
     for index, row in stock_batch.iterrows():
-        stock_code = str(row['代码']).zfill(6)  # 确保股票代码是6位数字
-        stock_name = row['名称']
+        stock_code = str(row['code']).zfill(6)  # 确保股票代码是6位数字
+        stock_name = row['name']
         
         processed_in_batch += 1
         safe_log(f"{'='*60}")
@@ -399,14 +399,14 @@ def main():
         df = pd.read_csv(csv_file, encoding='utf-8')
         logging.info(f"共找到 {len(df)} 只股票")  # 主进程日志，不需要使用safe_log
         
-        # 过滤掉8开头的股票（北交所）
-        df = df[~df['代码'].astype(str).str.startswith('8')]
-        logging.info(f"过滤8开头股票后剩余 {len(df)} 只股票")  # 主进程日志，不需要使用safe_log
+        # 过滤掉8开头和9开头的股票（北交所等）
+        # 确保股票代码是6位数字，然后检查第一位数字
+        df['code_6digit'] = df['code'].astype(str).str.zfill(6)
+        df = df[~df['code_6digit'].str[0].isin(['8', '9'])]
+        df = df.drop('code_6digit', axis=1)  # 删除临时列
+        logging.info(f"过滤8开头和9开头股票后剩余 {len(df)} 只股票")  # 主进程日志，不需要使用safe_log
         
-        # 过滤股票代码：只保留0、3、60开头的股票
-        original_count = len(df)
-        df = df[df['代码'].astype(str).apply(is_valid_stock_code)]
-        logging.info(f"过滤股票代码后剩余 {len(df)} 只股票（从 {original_count} 只减少到 {len(df)} 只）")
+
         
         # 创建总的数据文件夹（在脚本所在目录下）
         base_folder = os.path.join(script_dir, "all_stocks_data")
