@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 股票回测运行器
-功能：对指定股票进行逐交易日回测分析
+功能：对指定股票进行逐交易日回测分析，支持多股票并行处理
 作者：AI Assistant
 创建时间：2025年
 """
@@ -14,6 +14,9 @@ import subprocess
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
+from multiprocessing import Pool, cpu_count
+from functools import partial
+import time
 
 # 添加项目根目录到Python路径
 current_dir = Path(__file__).parent
@@ -122,7 +125,7 @@ class StockBacktestRunner:
             return []
     
     def run_pearson_analysis(self, backtest_date, csv_filename=None, 
-                           comparison_mode='industry', window_size=15, threshold=0.9,
+                           comparison_mode='industry', window_size=15, threshold=0.85,
                            debug=False):
         """
         运行单日的皮尔逊相关性分析
@@ -187,7 +190,7 @@ class StockBacktestRunner:
             return False, str(e)
     
     def run_backtest(self, start_date=None, end_date=None, days_back=30,
-                    comparison_mode='industry', window_size=15, threshold=0.9,
+                    comparison_mode='industry', window_size=15, threshold=0.85,
                     debug=False, max_parallel=1):
         """
         运行完整的回测流程
@@ -254,12 +257,158 @@ class StockBacktestRunner:
         return results
 
 
+def run_single_stock_backtest(stock_code, start_date=None, end_date=None, days_back=30,
+                             comparison_mode='industry', window_size=15, threshold=0.85,
+                             debug=False, data_base_path=None, pearson_analyzer_path=None):
+    """
+    单个股票回测的工作函数，用于多进程调用
+    
+    Args:
+        stock_code (str): 股票代码
+        其他参数与 StockBacktestRunner.run_backtest 相同
+        
+    Returns:
+        dict: 包含股票代码和回测结果的字典
+    """
+    try:
+        print(f"开始处理股票: {stock_code}")
+        
+        # 创建回测运行器
+        runner = StockBacktestRunner(
+            stock_code=stock_code,
+            data_base_path=data_base_path,
+            pearson_analyzer_path=pearson_analyzer_path
+        )
+        
+        # 运行回测
+        results = runner.run_backtest(
+            start_date=start_date,
+            end_date=end_date,
+            days_back=days_back,
+            comparison_mode=comparison_mode,
+            window_size=window_size,
+            threshold=threshold,
+            debug=debug
+        )
+        
+        print(f"完成处理股票: {stock_code}")
+        return {
+            'stock_code': stock_code,
+            'success': True,
+            'results': results
+        }
+        
+    except Exception as e:
+        print(f"处理股票 {stock_code} 时出错: {e}")
+        return {
+            'stock_code': stock_code,
+            'success': False,
+            'error': str(e)
+        }
+
+
+class MultiStockBacktestRunner:
+    """多股票并行回测运行器类"""
+    
+    def __init__(self, stock_codes, data_base_path=None, pearson_analyzer_path=None, max_processes=20):
+        """
+        初始化多股票回测运行器
+        
+        Args:
+            stock_codes (list): 股票代码列表
+            data_base_path (str): 数据基础路径
+            pearson_analyzer_path (str): pearson_analyzer.py 脚本路径
+            max_processes (int): 最大进程数，默认20
+        """
+        self.stock_codes = stock_codes if isinstance(stock_codes, list) else [stock_codes]
+        self.data_base_path = data_base_path
+        self.pearson_analyzer_path = pearson_analyzer_path
+        
+        # 限制最大进程数
+        available_cpus = cpu_count()
+        self.max_processes = min(max_processes, available_cpus, len(self.stock_codes))
+        
+        print(f"将处理 {len(self.stock_codes)} 只股票")
+        print(f"使用 {self.max_processes} 个进程（系统CPU数: {available_cpus}）")
+    
+    def run_parallel_backtest(self, start_date=None, end_date=None, days_back=30,
+                             comparison_mode='industry', window_size=15, threshold=0.85,
+                             debug=False):
+        """
+        运行并行回测
+        
+        Args:
+            与单股票回测相同的参数
+            
+        Returns:
+            dict: 所有股票的回测结果汇总
+        """
+        print(f"开始并行回测，使用 {self.max_processes} 个进程")
+        start_time = time.time()
+        
+        # 创建偏函数，固定参数
+        worker_func = partial(
+            run_single_stock_backtest,
+            start_date=start_date,
+            end_date=end_date,
+            days_back=days_back,
+            comparison_mode=comparison_mode,
+            window_size=window_size,
+            threshold=threshold,
+            debug=debug,
+            data_base_path=self.data_base_path,
+            pearson_analyzer_path=self.pearson_analyzer_path
+        )
+        
+        # 使用进程池执行
+        with Pool(processes=self.max_processes) as pool:
+            results = pool.map(worker_func, self.stock_codes)
+        
+        end_time = time.time()
+        
+        # 汇总结果
+        summary = {
+            'total_stocks': len(self.stock_codes),
+            'successful_stocks': 0,
+            'failed_stocks': 0,
+            'execution_time': end_time - start_time,
+            'results': results,
+            'failed_stock_codes': []
+        }
+        
+        for result in results:
+            if result['success']:
+                summary['successful_stocks'] += 1
+            else:
+                summary['failed_stocks'] += 1
+                summary['failed_stock_codes'].append(result['stock_code'])
+        
+        # 输出汇总信息
+        print(f"\n{'='*60}")
+        print(f"并行回测完成！")
+        print(f"总耗时: {summary['execution_time']:.2f} 秒")
+        print(f"处理股票数: {summary['total_stocks']}")
+        print(f"成功: {summary['successful_stocks']} 只")
+        print(f"失败: {summary['failed_stocks']} 只")
+        
+        if summary['failed_stock_codes']:
+            print(f"失败股票: {', '.join(summary['failed_stock_codes'])}")
+        
+        return summary
+
+
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description='股票回测分析工具')
+    parser = argparse.ArgumentParser(description='股票回测分析工具 - 支持单股票和多股票并行处理')
     
-    # 必需参数
-    parser.add_argument('stock_code', help='股票代码，如 000001')
+    # 股票代码参数 - 支持多种输入方式
+    stock_group = parser.add_mutually_exclusive_group(required=True)
+    stock_group.add_argument('--stock_code', help='单个股票代码，如 000001')
+    stock_group.add_argument('--stock_codes', nargs='+', help='多个股票代码，如 000001 000002 600000')
+    stock_group.add_argument('--stock_file', help='包含股票代码的文件路径，每行一个股票代码')
+    
+    # 兼容原有的位置参数（可选）
+    parser.add_argument('stock_code_positional', nargs='?', help='股票代码（位置参数，兼容原有用法）')
     
     # 可选参数
     parser.add_argument('--start_date', help='开始日期，格式 YYYY-MM-DD')
@@ -272,8 +421,14 @@ def main():
                        help='比较模式（默认 industry）')
     parser.add_argument('--window_size', type=int, default=15,
                        help='窗口大小（默认 15）')
-    parser.add_argument('--threshold', type=float, default=0.9,
-                       help='相关性阈值（默认 0.9）')
+    parser.add_argument('--threshold', type=float, default=0.85,
+                       help='相关性阈值（默认 0.85）')
+    
+    # 并行处理参数
+    parser.add_argument('--max_processes', type=int, default=20,
+                       help='最大并行进程数（默认 20）')
+    parser.add_argument('--single_process', action='store_true',
+                       help='强制使用单进程模式（即使有多个股票）')
     
     # 其他选项
     parser.add_argument('--debug', action='store_true',
@@ -286,30 +441,101 @@ def main():
     args = parser.parse_args()
     
     try:
-        # 创建回测运行器
-        runner = StockBacktestRunner(
-            stock_code=args.stock_code,
-            data_base_path=args.data_path,
-            pearson_analyzer_path=args.analyzer_path
-        )
+        # 确定股票代码列表
+        stock_codes = []
         
-        # 运行回测
-        results = runner.run_backtest(
-            start_date=args.start_date,
-            end_date=args.end_date,
-            days_back=args.days_back,
-            comparison_mode=args.comparison_mode,
-            window_size=args.window_size,
-            threshold=args.threshold,
-            debug=args.debug
-        )
+        if args.stock_code_positional:
+            # 兼容原有的位置参数用法
+            stock_codes = [args.stock_code_positional]
+        elif args.stock_code:
+            # 单个股票代码
+            stock_codes = [args.stock_code]
+        elif args.stock_codes:
+            # 多个股票代码
+            stock_codes = args.stock_codes
+        elif args.stock_file:
+            # 从文件读取股票代码
+            try:
+                with open(args.stock_file, 'r', encoding='utf-8') as f:
+                    stock_codes = [line.strip() for line in f if line.strip()]
+                print(f"从文件 {args.stock_file} 读取到 {len(stock_codes)} 个股票代码")
+            except FileNotFoundError:
+                print(f"错误：找不到股票代码文件 {args.stock_file}")
+                sys.exit(1)
+            except Exception as e:
+                print(f"错误：读取股票代码文件时出错 {e}")
+                sys.exit(1)
         
-        # 根据结果设置退出码
-        if results['failed'] == 0:
-            sys.exit(0)
-        else:
+        if not stock_codes:
+            print("错误：未指定股票代码")
             sys.exit(1)
+        
+        # 去重并排序
+        stock_codes = sorted(list(set(stock_codes)))
+        print(f"将处理 {len(stock_codes)} 只股票: {', '.join(stock_codes)}")
+        
+        # 根据股票数量和用户选择决定使用单进程还是多进程
+        if len(stock_codes) == 1 or args.single_process:
+            # 单股票或强制单进程模式
+            print("使用单进程模式")
             
+            for stock_code in stock_codes:
+                print(f"\n处理股票: {stock_code}")
+                
+                # 创建回测运行器
+                runner = StockBacktestRunner(
+                    stock_code=stock_code,
+                    data_base_path=args.data_path,
+                    pearson_analyzer_path=args.analyzer_path
+                )
+                
+                # 运行回测
+                results = runner.run_backtest(
+                    start_date=args.start_date,
+                    end_date=args.end_date,
+                    days_back=args.days_back,
+                    comparison_mode=args.comparison_mode,
+                    window_size=args.window_size,
+                    threshold=args.threshold,
+                    debug=args.debug
+                )
+                
+                print(f"股票 {stock_code} 处理完成")
+        
+        else:
+            # 多股票并行模式
+            print("使用多进程并行模式")
+            
+            # 创建多股票回测运行器
+            multi_runner = MultiStockBacktestRunner(
+                stock_codes=stock_codes,
+                data_base_path=args.data_path,
+                pearson_analyzer_path=args.analyzer_path,
+                max_processes=args.max_processes
+            )
+            
+            # 运行并行回测
+            summary = multi_runner.run_parallel_backtest(
+                start_date=args.start_date,
+                end_date=args.end_date,
+                days_back=args.days_back,
+                comparison_mode=args.comparison_mode,
+                window_size=args.window_size,
+                threshold=args.threshold,
+                debug=args.debug
+            )
+            
+            # 根据结果设置退出码
+            if summary['failed_stocks'] == 0:
+                print("所有股票处理成功！")
+                sys.exit(0)
+            else:
+                print(f"有 {summary['failed_stocks']} 只股票处理失败")
+                sys.exit(1)
+            
+    except KeyboardInterrupt:
+        print("\n用户中断执行")
+        sys.exit(1)
     except Exception as e:
         print(f"程序执行出错：{e}")
         sys.exit(1)
