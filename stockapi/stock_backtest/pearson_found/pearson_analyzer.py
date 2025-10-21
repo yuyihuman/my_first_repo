@@ -100,9 +100,13 @@ class PearsonAnalyzer:
     
     def _setup_logging(self):
         """设置日志配置"""
+        # 按股票代码创建子文件夹
+        stock_log_dir = os.path.join(self.log_dir, self.stock_code)
+        os.makedirs(stock_log_dir, exist_ok=True)
+        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_filename = f"pearson_analysis_{self.stock_code}_{timestamp}.log"
-        log_path = os.path.join(self.log_dir, log_filename)
+        log_path = os.path.join(stock_log_dir, log_filename)
         
         # 创建logger
         self.logger = logging.getLogger(f'PearsonAnalyzer_{self.stock_code}')
@@ -242,8 +246,7 @@ class PearsonAnalyzer:
             'comparison_analysis': '跨股票对比分析',
             'correlation_calculation': '相关性计算',
             'plotting': 'K线图绘制',
-            'stats_calculation': '统计计算',
-            'stats_saving': '统计保存'
+            'stats_calculation': '统计计算'
         }
         
         for timer_name, display_name in stage_names.items():
@@ -378,8 +381,8 @@ class PearsonAnalyzer:
         """
         self.start_timer('plotting')
         try:
-            # 创建图表目录
-            chart_dir = os.path.join(self.log_dir, 'charts')
+            # 创建图表目录（按股票代码组织）
+            chart_dir = os.path.join(self.log_dir, self.stock_code, 'charts')
             os.makedirs(chart_dir, exist_ok=True)
             
             # 准备数据 - 确保列名符合mplfinance要求
@@ -915,13 +918,20 @@ class PearsonAnalyzer:
             self.logger.info(f"开始分析对比股票数据...")
             cross_comparison_count = 0
             
-            for comp_stock_code, comp_data in self.loaded_stocks_data.items():
-                if comp_data is None or len(comp_data) < self.window_size:
-                    continue
+            # 计算有效的对比股票总数
+            valid_comparison_stocks = [
+                (code, data) for code, data in self.loaded_stocks_data.items() 
+                if data is not None and len(data) >= self.window_size
+            ]
+            total_comparison_stocks = len(valid_comparison_stocks)
+            current_stock_index = 0
+            
+            for comp_stock_code, comp_data in valid_comparison_stocks:
+                current_stock_index += 1
                 
                 # 开始单个股票的相关性计算计时
                 self.start_timer('correlation_calculation')
-                self.logger.info(f"正在分析对比股票: {comp_stock_code}")
+                self.logger.info(f"正在分析对比股票: {comp_stock_code} ({current_stock_index}/{total_comparison_stocks})")
                 stock_comparison_count = 0
                 
                 # 遍历对比股票的历史数据
@@ -1102,7 +1112,7 @@ class PearsonAnalyzer:
             stats = self.calculate_future_performance_stats(data, high_correlation_periods)
             if stats:
                 self.log_performance_stats(stats)
-                self.save_stats_to_file(stats)
+                # self.save_stats_to_file(stats)  # 已移除stats文件夹生成功能
                 # 保存评测结果到CSV文件
                 self.save_evaluation_result(recent_end_date, stats, len(high_correlation_periods))
             else:
@@ -1165,8 +1175,8 @@ def main():
     script_dir = r'C:\Users\17701\github\my_first_repo\stockapi\stock_backtest\pearson_found'
     fixed_log_dir = os.path.join(script_dir, 'logs')
     
-    # 清空logs目录
-    clear_logs_directory(fixed_log_dir)
+    # 清空logs目录 - 已注释，不再删除日志文件
+    # clear_logs_directory(fixed_log_dir)
     
     # 处理对比模式
     if args.no_comparison:

@@ -122,7 +122,7 @@ class StockBacktestRunner:
             return []
     
     def run_pearson_analysis(self, backtest_date, csv_filename=None, 
-                           comparison_mode='top10', window_size=15, threshold=0.8,
+                           comparison_mode='industry', window_size=15, threshold=0.9,
                            debug=False):
         """
         运行单日的皮尔逊相关性分析
@@ -166,7 +166,7 @@ class StockBacktestRunner:
                 capture_output=True,
                 text=True,
                 cwd=str(current_dir),
-                timeout=300  # 5分钟超时
+                timeout=600  # 10分钟超时
             )
             
             if result.returncode == 0:
@@ -187,7 +187,7 @@ class StockBacktestRunner:
             return False, str(e)
     
     def run_backtest(self, start_date=None, end_date=None, days_back=30,
-                    comparison_mode='top10', window_size=15, threshold=0.8,
+                    comparison_mode='industry', window_size=15, threshold=0.9,
                     debug=False, max_parallel=1):
         """
         运行完整的回测流程
@@ -268,12 +268,12 @@ def main():
                        help='从最近日期往前推的天数（默认30天）')
     
     # 分析参数
-    parser.add_argument('--comparison_mode', default='top10',
-                       help='比较模式（默认 top10）')
-    parser.add_argument('--window_size', type=int, default=20,
-                       help='窗口大小（默认 20）')
-    parser.add_argument('--threshold', type=float, default=0.8,
-                       help='相关性阈值（默认 0.8）')
+    parser.add_argument('--comparison_mode', default='industry',
+                       help='比较模式（默认 industry）')
+    parser.add_argument('--window_size', type=int, default=15,
+                       help='窗口大小（默认 15）')
+    parser.add_argument('--threshold', type=float, default=0.9,
+                       help='相关性阈值（默认 0.9）')
     
     # 其他选项
     parser.add_argument('--debug', action='store_true',
