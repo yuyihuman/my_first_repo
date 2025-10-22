@@ -169,7 +169,7 @@ class StockBacktestRunner:
                 capture_output=True,
                 text=True,
                 cwd=str(current_dir),
-                timeout=600  # 10分钟超时
+                timeout=6000  # 100分钟超时
             )
             
             if result.returncode == 0:

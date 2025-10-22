@@ -30,6 +30,7 @@ import mplfinance as mpf
 import pandas as pd
 from stock_config import get_comparison_stocks
 import time
+import threading
 from collections import defaultdict
 
 
@@ -86,11 +87,11 @@ class PearsonAnalyzer:
         # 确保日志目录存在
         os.makedirs(self.log_dir, exist_ok=True)
         
-        # 设置CSV文件
-        self._setup_csv_file()
-        
         # 设置日志
         self._setup_logging()
+        
+        # 设置CSV文件
+        self._setup_csv_file()
         
         self.logger.info(f"初始化Pearson分析器，目标股票: {stock_code}")
         self.logger.info(f"窗口大小: {window_size}, 阈值: {threshold}, Debug模式: {debug}")
@@ -105,7 +106,8 @@ class PearsonAnalyzer:
         os.makedirs(stock_log_dir, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f"pearson_analysis_{self.stock_code}_{timestamp}.log"
+        thread_id = threading.get_ident()
+        log_filename = f"pearson_analysis_{self.stock_code}_{timestamp}_thread_{thread_id}.log"
         log_path = os.path.join(stock_log_dir, log_filename)
         
         # 创建logger
@@ -132,12 +134,25 @@ class PearsonAnalyzer:
     def _setup_csv_file(self):
         """设置CSV文件，如果不存在则创建"""
         if not os.path.exists(self.csv_results_file):
+            if self.debug:
+                self.logger.info(f"🆕 Debug: CSV结果文件不存在，创建新文件: {self.csv_results_file}")
+            
             # 创建CSV文件的表头
             header = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨']
             df = pd.DataFrame(columns=header)
             # 确保代码列为字符串类型
             df['代码'] = df['代码'].astype(str)
             df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
+            
+            if self.debug:
+                file_size = os.path.getsize(self.csv_results_file)
+                self.logger.info(f"🆕 Debug: CSV文件创建完成，表头: {header}")
+                self.logger.info(f"🆕 Debug: 初始文件大小: {file_size} bytes")
+        else:
+            if self.debug:
+                file_size = os.path.getsize(self.csv_results_file)
+                self.logger.info(f"✅ Debug: CSV结果文件已存在: {self.csv_results_file}")
+                self.logger.info(f"✅ Debug: 现有文件大小: {file_size} bytes")
     
     def save_evaluation_result(self, evaluation_date, stats, correlation_count=0):
         """
@@ -169,8 +184,21 @@ class PearsonAnalyzer:
             
             # 读取现有的CSV文件，指定代码列为字符串类型
             if os.path.exists(self.csv_results_file):
+                if self.debug:
+                    self.logger.info(f"📖 Debug: 开始读取现有CSV文件: {self.csv_results_file}")
+                    file_size = os.path.getsize(self.csv_results_file)
+                    self.logger.info(f"📖 Debug: CSV文件大小: {file_size} bytes")
+                
                 df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig', dtype={'代码': str})
+                
+                if self.debug:
+                    self.logger.info(f"📖 Debug: CSV文件读取完成，共 {len(df)} 行数据")
+                    if not df.empty:
+                        self.logger.info(f"📖 Debug: CSV文件列名: {list(df.columns)}")
+                        self.logger.info(f"📖 Debug: 最后一条记录的股票代码: {df.iloc[-1]['代码'] if '代码' in df.columns else 'N/A'}")
             else:
+                if self.debug:
+                    self.logger.info(f"📖 Debug: CSV文件不存在，创建新的DataFrame: {self.csv_results_file}")
                 # 如果文件不存在，创建新的DataFrame
                 df = pd.DataFrame()
             
@@ -181,8 +209,17 @@ class PearsonAnalyzer:
             # 确保代码列为字符串类型
             df['代码'] = df['代码'].astype(str)
             
+            if self.debug:
+                self.logger.info(f"💾 Debug: 准备保存CSV文件，当前DataFrame共 {len(df)} 行数据")
+                self.logger.info(f"💾 Debug: 新增数据: {result_data}")
+            
             # 保存到CSV文件
             df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
+            
+            if self.debug:
+                # 验证保存后的文件
+                saved_file_size = os.path.getsize(self.csv_results_file)
+                self.logger.info(f"💾 Debug: CSV文件保存完成，文件大小: {saved_file_size} bytes")
             
             self.logger.info(f"评测结果已保存到CSV文件: {self.csv_results_file}")
             self.logger.info(f"保存的结果: {result_data}")
