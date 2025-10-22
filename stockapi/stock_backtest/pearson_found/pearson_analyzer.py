@@ -612,27 +612,61 @@ class PearsonAnalyzer:
             end_date = period['end_date']
             start_date = period['start_date']
             avg_correlation = period['avg_correlation']
+            source_stock_code = period['stock_code']
+            source_type = period['source']
+            
+            # 根据来源股票代码获取正确的数据源
+            if source_stock_code == self.stock_code:
+                # 来自目标股票自身的历史数据
+                source_data = data
+            else:
+                # 来自对比股票的历史数据
+                source_data = self.loaded_stocks_data.get(source_stock_code)
+                if source_data is None:
+                    self.logger.warning(f"无法找到股票 {source_stock_code} 的数据，跳过期间 #{i}")
+                    continue
             
             # 找到该期间结束后的数据位置
             try:
-                end_idx = data.index.get_loc(end_date)
+                end_idx = source_data.index.get_loc(end_date)
             except KeyError:
+                self.logger.warning(f"在股票 {source_stock_code} 数据中找不到日期 {end_date}，跳过期间 #{i}")
                 continue
             
             # 获取期间最后一天的收盘价
-            period_close = data.iloc[end_idx]['close']
+            period_close = source_data.iloc[end_idx]['close']
             
             # Debug模式下记录每个期间的详细信息
             if self.debug:
                 self.logger.info(f"高相关性期间 #{i}:")
                 self.logger.info(f"  期间: {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}")
+                self.logger.info(f"  来源股票: {source_stock_code} ({'自身历史' if source_type == 'self' else '对比股票'})")
                 self.logger.info(f"  相关系数: {avg_correlation:.4f}")
                 self.logger.info(f"  期间收盘价: {period_close:.2f}")
             
+            # 根据高相关性期间的来源股票获取对应的数据源
+            period_stock_code = period['stock_code']
+            if period_stock_code == self.stock_code:
+                # 来自目标股票自身的历史数据
+                source_data = data
+            else:
+                # 来自对比股票的数据
+                source_data = self.loaded_stocks_data.get(period_stock_code)
+                if source_data is None:
+                    self.logger.warning(f"无法获取股票 {period_stock_code} 的数据，跳过期间 #{i} 的未来表现分析")
+                    continue
+            
+            # 找到对应的日期在数据源中的位置
+            try:
+                source_end_idx = source_data.index.get_loc(end_date)
+            except KeyError:
+                self.logger.warning(f"在股票 {period_stock_code} 数据中找不到日期 {end_date}，跳过期间 #{i} 的未来表现分析")
+                continue
+            
             # 检查下1个交易日
-            if end_idx + 1 < len(data):
-                next_day_data = data.iloc[end_idx + 1]
-                next_day_date = data.index[end_idx + 1]
+            if source_end_idx + 1 < len(source_data):
+                next_day_data = source_data.iloc[source_end_idx + 1]
+                next_day_date = source_data.index[source_end_idx + 1]
                 next_day_open = next_day_data['open']
                 next_day_close = next_day_data['close']
                 
@@ -655,9 +689,9 @@ class PearsonAnalyzer:
                     self.logger.info(f"  下1日({next_day_date.strftime('%Y-%m-%d')}): 开盘{next_day_open:.2f} 收盘{next_day_close:.2f} | 高开:{gap_up_str} 上涨:{day_1_up_str}")
             
             # 检查下3个交易日
-            if end_idx + 3 < len(data):
-                day_3_data = data.iloc[end_idx + 3]
-                day_3_date = data.index[end_idx + 3]
+            if source_end_idx + 3 < len(source_data):
+                day_3_data = source_data.iloc[source_end_idx + 3]
+                day_3_date = source_data.index[source_end_idx + 3]
                 day_3_close = day_3_data['close']
                 stats['valid_periods']['next_3_day'] += 1
                 
@@ -671,9 +705,9 @@ class PearsonAnalyzer:
                     self.logger.info(f"  下3日({day_3_date.strftime('%Y-%m-%d')}): 收盘{day_3_close:.2f} | 上涨:{day_3_up_str}")
             
             # 检查下5个交易日
-            if end_idx + 5 < len(data):
-                day_5_data = data.iloc[end_idx + 5]
-                day_5_date = data.index[end_idx + 5]
+            if source_end_idx + 5 < len(source_data):
+                day_5_data = source_data.iloc[source_end_idx + 5]
+                day_5_date = source_data.index[source_end_idx + 5]
                 day_5_close = day_5_data['close']
                 stats['valid_periods']['next_5_day'] += 1
                 
@@ -687,9 +721,9 @@ class PearsonAnalyzer:
                     self.logger.info(f"  下5日({day_5_date.strftime('%Y-%m-%d')}): 收盘{day_5_close:.2f} | 上涨:{day_5_up_str}")
             
             # 检查下10个交易日
-            if end_idx + 10 < len(data):
-                day_10_data = data.iloc[end_idx + 10]
-                day_10_date = data.index[end_idx + 10]
+            if source_end_idx + 10 < len(source_data):
+                day_10_data = source_data.iloc[source_end_idx + 10]
+                day_10_date = source_data.index[source_end_idx + 10]
                 day_10_close = day_10_data['close']
                 stats['valid_periods']['next_10_day'] += 1
                 
