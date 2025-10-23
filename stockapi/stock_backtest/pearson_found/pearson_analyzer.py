@@ -164,8 +164,13 @@ class PearsonAnalyzer:
             correlation_count: 相关数量（高相关性期间的数量）
         """
         try:
-            # 计算对比股票数量（对比股票数量 + 目标股票自身）
-            comparison_stock_count = len(self.comparison_stocks) + 1
+            # 计算对比股票数量
+            # 在self_only模式下，只对比自身历史数据，不需要额外加1
+            # 在其他模式下，需要加上目标股票自身
+            if self.comparison_mode == 'self_only':
+                comparison_stock_count = len(self.comparison_stocks)
+            else:
+                comparison_stock_count = len(self.comparison_stocks) + 1
             
             # 准备要保存的数据
             result_data = {
@@ -456,7 +461,8 @@ class PearsonAnalyzer:
                     type='candle',
                     style=s,
                     ax=ax1,
-                    volume=ax1_vol)
+                    volume=ax1_vol,
+                    warn_too_much_data=10000)
             ax1.set_title(f'Historical High Correlation Period - {source_label}\n({historical_start} to {historical_end}) | Avg Correlation: {correlation_info["avg_correlation"]:.4f}')
             ax1.set_ylabel('Price')
             ax1_vol.set_ylabel('Volume')
@@ -468,7 +474,8 @@ class PearsonAnalyzer:
                     type='candle',
                     style=s,
                     ax=ax2,
-                    volume=ax2_vol)
+                    volume=ax2_vol,
+                    warn_too_much_data=10000)
             ax2.set_title(f'Recent Trading Period - Target Stock {self.stock_code}\n({recent_start} to {recent_end})')
             ax2.set_ylabel('Price')
             ax2_vol.set_ylabel('Volume')
@@ -900,10 +907,8 @@ class PearsonAnalyzer:
                 else:
                     self.logger.info(f"找到指定回测日期 {self.backtest_date} 的交易数据")
                 
-                # 从指定日期往前数window_size个交易日
-                end_date_idx = data.index.get_loc(backtest_datetime)
-                start_idx = max(0, end_date_idx - self.window_size + 1)
-                recent_data = data.iloc[start_idx:end_date_idx + 1]
+                # 使用全部数据，但以指定日期为分析终点
+                recent_data = data[data.index <= backtest_datetime]
                 
                 if len(recent_data) < self.window_size:
                     self.logger.error(f"从指定日期 {self.backtest_date} 往前数据不足 {self.window_size} 个交易日，实际获取 {len(recent_data)} 个交易日，无法进行分析")
@@ -915,8 +920,8 @@ class PearsonAnalyzer:
                 print(f"错误：解析回测日期 {self.backtest_date} 失败: {str(e)}")
                 return
         else:
-            # 默认使用最后的数据
-            recent_data = data.tail(self.window_size)
+            # 使用全部数据进行分析
+            recent_data = data
         
         recent_start_date = recent_data.index[0]
         recent_end_date = recent_data.index[-1]
@@ -936,23 +941,32 @@ class PearsonAnalyzer:
         self.start_timer('correlation_calculation')
         self.logger.info(f"开始分析自身历史数据...")
         comparison_count = 0
-        for i in range(len(data) - self.window_size):
+        
+        # 为自身历史数据分析重新定义recent_data，只包含最近window_size天的数据
+        if self.backtest_date:
+            # 有回测日期时，取回测日期之前的最近window_size天数据
+            backtest_data = data[data.index <= pd.to_datetime(self.backtest_date)]
+            recent_data_for_self = backtest_data.iloc[-self.window_size:]
+            # 比较回测日期之前的历史数据段，包含所有可能的窗口
+            max_historical_periods = len(backtest_data) - self.window_size + 1
+        else:
+            # 没有回测日期时，取最近window_size天数据
+            recent_data_for_self = data.iloc[-self.window_size:]
+            # 比较除了最后window_size天之外的历史数据段，包含所有可能的窗口
+            max_historical_periods = len(data) - self.window_size + 1
+        
+        for i in range(max_historical_periods):
             historical_data = data.iloc[i:i + self.window_size]
             historical_start_date = historical_data.index[0]
             historical_end_date = historical_data.index[-1]
             
-            # 跳过与最近数据重叠的期间或完全相同的期间
-            if (historical_end_date >= recent_start_date or 
-                (historical_start_date == recent_start_date and historical_end_date == recent_end_date)):
-                continue
-            
             comparison_count += 1
             
             # 计算相关系数
-            avg_correlation, correlations = self.calculate_pearson_correlation(recent_data, historical_data)
+            avg_correlation, correlations = self.calculate_pearson_correlation(recent_data_for_self, historical_data)
             
-            # 更新最高相关系数
-            if avg_correlation > max_correlation:
+            # 更新最高相关系数（剔除相关性系数等于1的结果）
+            if avg_correlation > max_correlation and avg_correlation < 1.0:
                 max_correlation = avg_correlation
                 max_correlation_period = (historical_start_date, historical_end_date, self.stock_code)
             
@@ -962,8 +976,8 @@ class PearsonAnalyzer:
                 self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
                 self.logger.info(f"  平均相关系数: {avg_correlation:.6f}")
             
-            # 检查是否超过阈值
-            if avg_correlation >= self.threshold:
+            # 检查是否超过阈值，并剔除相关性系数等于1的结果
+            if avg_correlation >= self.threshold and avg_correlation < 1.0:
                 high_correlation_periods.append({
                     'start_date': historical_start_date,
                     'end_date': historical_end_date,
@@ -977,6 +991,10 @@ class PearsonAnalyzer:
                 self.logger.info("发现高相关性数据 (自身历史):")
                 self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
                 self.logger.info(f"  平均相关系数: {avg_correlation:.4f}")
+            elif avg_correlation >= 1.0:
+                # 记录被过滤的相关性系数等于1的数据
+                if self.debug:
+                    self.logger.info(f"过滤相关性系数等于1的数据 (自身历史): {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
         
         # 结束自身历史的相关性计算计时
         correlation_elapsed_time = self.end_timer('correlation_calculation')
@@ -988,6 +1006,15 @@ class PearsonAnalyzer:
             self.start_timer('comparison_analysis')
             self.logger.info(f"开始分析对比股票数据...")
             cross_comparison_count = 0
+            
+            # 为对比股票分析重新定义recent_data，只包含目标股票最近window_size天的数据
+            if self.backtest_date:
+                # 有回测日期时，取目标股票回测日期之前的最近window_size天数据
+                backtest_data = data[data.index <= pd.to_datetime(self.backtest_date)]
+                recent_data_for_comparison = backtest_data.iloc[-self.window_size:]
+            else:
+                # 没有回测日期时，取目标股票最近window_size天数据
+                recent_data_for_comparison = data.iloc[-self.window_size:]
             
             # 计算有效的对比股票总数
             valid_comparison_stocks = [
@@ -1006,23 +1033,29 @@ class PearsonAnalyzer:
                 stock_comparison_count = 0
                 
                 # 遍历对比股票的历史数据
-                for i in range(len(comp_data) - self.window_size):
+                # 当使用全部数据时，我们需要比较不同的历史时间段
+                # 如果指定了回测日期，则比较该日期之前的历史数据段
+                # 如果没有指定回测日期，则比较除了最后window_size天之外的历史数据段
+                if self.backtest_date:
+                    # 有回测日期时，比较回测日期之前的历史数据段，包含所有可能的窗口
+                    max_comp_historical_periods = len(comp_data[comp_data.index <= pd.to_datetime(self.backtest_date)]) - self.window_size + 1
+                else:
+                    # 没有回测日期时，比较除了最后window_size天之外的历史数据段，包含所有可能的窗口
+                    max_comp_historical_periods = len(comp_data) - self.window_size + 1
+                
+                for i in range(max_comp_historical_periods):
                     historical_data = comp_data.iloc[i:i + self.window_size]
                     historical_start_date = historical_data.index[0]
                     historical_end_date = historical_data.index[-1]
-                    
-                    # 跳过与最近数据重叠的期间（基于日期）
-                    if historical_end_date >= recent_start_date:
-                        continue
                     
                     stock_comparison_count += 1
                     cross_comparison_count += 1
                     
                     # 计算相关系数
-                    avg_correlation, correlations = self.calculate_pearson_correlation(recent_data, historical_data)
+                    avg_correlation, correlations = self.calculate_pearson_correlation(recent_data_for_comparison, historical_data)
                     
-                    # 更新最高相关系数
-                    if avg_correlation > max_correlation:
+                    # 更新最高相关系数（剔除相关性系数等于1的结果）
+                    if avg_correlation > max_correlation and avg_correlation < 1.0:
                         max_correlation = avg_correlation
                         max_correlation_period = (historical_start_date, historical_end_date, comp_stock_code)
                     
@@ -1032,8 +1065,8 @@ class PearsonAnalyzer:
                         self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
                         self.logger.info(f"  平均相关系数: {avg_correlation:.6f}")
                     
-                    # 检查是否超过阈值
-                    if avg_correlation >= self.threshold:
+                    # 检查是否超过阈值，并剔除相关性系数等于1的结果
+                    if avg_correlation >= self.threshold and avg_correlation < 1.0:
                         high_correlation_periods.append({
                             'start_date': historical_start_date,
                             'end_date': historical_end_date,
@@ -1047,6 +1080,10 @@ class PearsonAnalyzer:
                         self.logger.info(f"发现高相关性数据 (对比股票 {comp_stock_code}):")
                         self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
                         self.logger.info(f"  平均相关系数: {avg_correlation:.4f}")
+                    elif avg_correlation >= 1.0:
+                        # 记录被过滤的相关性系数等于1的数据
+                        if self.debug:
+                            self.logger.info(f"过滤相关性系数等于1的数据 (对比股票 {comp_stock_code}): {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
                 
                 # 结束单个股票的相关性计算计时
                 elapsed_time = self.end_timer('correlation_calculation')
@@ -1164,8 +1201,18 @@ class PearsonAnalyzer:
                         'source_stock': max_period_stock
                     }
                     
+                    # 准备绘图用的recent_data - 只包含最近window_size天的数据
+                    if self.backtest_date:
+                        # 如果指定了回测日期，获取该日期之前的最近window_size天数据
+                        backtest_end_idx = data.index.get_loc(self.backtest_date)
+                        plot_recent_start_idx = max(0, backtest_end_idx - self.window_size + 1)
+                        plot_recent_data = data.iloc[plot_recent_start_idx:backtest_end_idx + 1]
+                    else:
+                        # 如果没有指定回测日期，获取最新的window_size天数据
+                        plot_recent_data = data.iloc[-self.window_size:]
+                    
                     # 绘制K线图对比
-                    self.plot_kline_comparison(recent_data, historical_data, correlation_info)
+                    self.plot_kline_comparison(plot_recent_data, historical_data, correlation_info)
                 except Exception as e:
                     self.logger.error(f"获取历史数据时出错: {str(e)}")
                     self.logger.error(f"期间: {max_period_start} 到 {max_period_end}, 股票: {max_period_stock}")

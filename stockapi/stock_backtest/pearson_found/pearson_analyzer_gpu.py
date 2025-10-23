@@ -196,8 +196,13 @@ class GPUPearsonAnalyzer:
             correlation_count: 相关数量（高相关性期间的数量）
         """
         try:
-            # 计算对比股票数量（对比股票数量 + 目标股票自身）
-            comparison_stock_count = len(self.comparison_stocks) + 1
+            # 计算对比股票数量
+            # 在self_only模式下，只对比自身历史数据，不需要额外加1
+            # 在其他模式下，需要加上目标股票自身
+            if self.comparison_mode == 'self_only':
+                comparison_stock_count = len(self.comparison_stocks)
+            else:
+                comparison_stock_count = len(self.comparison_stocks) + 1
             
             # 准备要保存的数据
             result_data = {
