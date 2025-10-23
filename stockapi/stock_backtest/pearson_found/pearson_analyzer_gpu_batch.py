@@ -443,7 +443,8 @@ class GPUBatchPearsonAnalyzer:
         
         # 处理结果
         results = self._process_batch_correlation_results(
-            all_correlations, period_info_list, evaluation_days
+            all_correlations, period_info_list, evaluation_days,
+            batch_recent_data, historical_data_list
         )
         
         self.end_timer('batch_gpu_correlation')
@@ -487,7 +488,8 @@ class GPUBatchPearsonAnalyzer:
         
         return correlation
     
-    def _process_batch_correlation_results(self, correlations_tensor, period_info_list, evaluation_days):
+    def _process_batch_correlation_results(self, correlations_tensor, period_info_list, evaluation_days,
+                                          batch_recent_data=None, historical_data_list=None):
         """
         处理批量相关性计算结果
         
@@ -524,6 +526,13 @@ class GPUBatchPearsonAnalyzer:
         # 找出高相关性期间（使用过滤后的相关系数）
         high_corr_mask = avg_correlations_filtered > self.threshold
         
+        # Debug模式下打印前10条评测数据的详细信息
+        if self.debug:
+            self._print_detailed_evaluation_data(
+                correlations_np, avg_correlations_filtered, period_info_list, 
+                high_corr_mask, fields, batch_recent_data, historical_data_list
+            )
+        
         # 统计结果
         results = {
             'evaluation_days': evaluation_days,
@@ -547,6 +556,111 @@ class GPUBatchPearsonAnalyzer:
         
         self.end_timer('batch_result_processing')
         return results
+    
+    def _print_detailed_evaluation_data(self, correlations_np, avg_correlations_filtered, 
+                                       period_info_list, high_corr_mask, fields,
+                                       batch_recent_data=None, historical_data_list=None):
+        """
+        打印前10条评测数据的详细信息，包括对比数组
+        
+        Args:
+            correlations_np: 详细相关系数数组 [evaluation_days, num_historical_periods, 5]
+            avg_correlations_filtered: 过滤后的平均相关系数 [evaluation_days, num_historical_periods]
+            period_info_list: 历史期间信息列表
+            high_corr_mask: 高相关性掩码
+            fields: 字段名称列表
+            batch_recent_data: 批量评测数据 [evaluation_days, window_size, 5]
+            historical_data_list: 历史期间数据列表
+        """
+        self.logger.info("=" * 80)
+        self.logger.info("DEBUG模式 - 前10条评测数据详细信息:")
+        self.logger.info("=" * 80)
+        
+        evaluation_days, num_historical_periods, num_fields = correlations_np.shape
+        max_display_count = min(10, evaluation_days * num_historical_periods)
+        
+        # 收集前10条评测数据（按评测日期顺序）
+        all_evaluation_data = []
+        count = 0
+        
+        # 按评测日期顺序遍历，每个评测日期取第一个历史期间的数据
+        for eval_idx in range(evaluation_days):
+            if count >= 10:  # 只取前10条
+                break
+            for hist_idx in range(num_historical_periods):
+                if count >= 10:  # 只取前10条
+                    break
+                    
+                avg_corr = avg_correlations_filtered[eval_idx, hist_idx]
+                detailed_corr = correlations_np[eval_idx, hist_idx]
+                is_high_corr = high_corr_mask[eval_idx, hist_idx]
+                
+                period_info = period_info_list[hist_idx]
+                
+                all_evaluation_data.append({
+                    'eval_idx': eval_idx,
+                    'hist_idx': hist_idx,
+                    'avg_correlation': avg_corr,
+                    'detailed_correlations': detailed_corr,
+                    'is_high_correlation': is_high_corr,
+                    'period_info': period_info
+                })
+                count += 1
+        
+        # 打印前10条数据（按评测日期顺序）
+        for i, data in enumerate(all_evaluation_data):
+            self.logger.info(f"\n第 {i+1} 条评测数据:")
+            self.logger.info(f"  评测日期索引: {data['eval_idx']}")
+            self.logger.info(f"  历史期间索引: {data['hist_idx']}")
+            self.logger.info(f"  历史期间: {data['period_info']['start_date'].strftime('%Y-%m-%d')} 到 {data['period_info']['end_date'].strftime('%Y-%m-%d')}")
+            self.logger.info(f"  来源股票: {data['period_info']['stock_code']}")
+            self.logger.info(f"  平均相关系数: {data['avg_correlation']:.6f}")
+            self.logger.info(f"  是否高相关: {'是' if data['is_high_correlation'] else '否'}")
+            
+            # 打印各字段的详细相关系数
+            self.logger.info("  各字段相关系数:")
+            for j, field in enumerate(fields):
+                self.logger.info(f"    {field}: {data['detailed_correlations'][j]:.6f}")
+            
+            # 打印对比数组（如果有原始数据）
+            if batch_recent_data is not None and historical_data_list is not None:
+                eval_idx = data['eval_idx']
+                hist_idx = data['hist_idx']
+                
+                # 获取评测数据（转换为numpy数组）
+                recent_data = batch_recent_data[eval_idx]  # [window_size, 5]
+                if isinstance(recent_data, torch.Tensor):
+                    recent_data = recent_data.cpu().numpy()
+                
+                # 获取历史数据
+                if hist_idx < len(historical_data_list):
+                    historical_data = historical_data_list[hist_idx]  # [window_size, 5]
+                    if isinstance(historical_data, torch.Tensor):
+                        historical_data = historical_data.cpu().numpy()
+                    
+                    self.logger.info("  对比数组详情:")
+                    self.logger.info(f"    数据窗口大小: {recent_data.shape[0]} 天")
+                    
+                    # 打印前5天和后5天的数据对比
+                    for field_idx, field in enumerate(fields):
+                        self.logger.info(f"    {field} 字段对比:")
+                        self.logger.info(f"      评测数据前5天: {recent_data[:5, field_idx].tolist()}")
+                        self.logger.info(f"      历史数据前5天: {historical_data[:5, field_idx].tolist()}")
+                        self.logger.info(f"      评测数据后5天: {recent_data[-5:, field_idx].tolist()}")
+                        self.logger.info(f"      历史数据后5天: {historical_data[-5:, field_idx].tolist()}")
+                        
+                        # 计算统计信息
+                        recent_mean = np.mean(recent_data[:, field_idx])
+                        historical_mean = np.mean(historical_data[:, field_idx])
+                        recent_std = np.std(recent_data[:, field_idx])
+                        historical_std = np.std(historical_data[:, field_idx])
+                        
+                        self.logger.info(f"      评测数据统计 - 均值: {recent_mean:.4f}, 标准差: {recent_std:.4f}")
+                        self.logger.info(f"      历史数据统计 - 均值: {historical_mean:.4f}, 标准差: {historical_std:.4f}")
+            
+            self.logger.info("-" * 60)
+        
+        self.logger.info("=" * 80)
     
     def calculate_future_performance_stats(self, data, high_correlation_periods):
         """
@@ -855,6 +969,29 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"最大每日高相关数量: {batch_results['summary']['max_high_correlations_per_day']}")
         if batch_results['summary']['overall_avg_correlation'] > 0:
             self.logger.info(f"整体平均相关系数: {batch_results['summary']['overall_avg_correlation']:.4f}")
+        
+        # 查找并打印相关系数最大的条目
+        max_correlation = 0
+        max_correlation_item = None
+        max_eval_date = None
+        
+        for result in batch_results['detailed_results']:
+            for period in result['high_correlation_periods']:
+                if period['avg_correlation'] > max_correlation:
+                    max_correlation = period['avg_correlation']
+                    max_correlation_item = period
+                    max_eval_date = result['evaluation_date']
+        
+        if max_correlation_item:
+            self.logger.info("=" * 40)
+            self.logger.info("相关系数最大的条目:")
+            self.logger.info(f"评测日期: {max_eval_date.strftime('%Y-%m-%d')}")
+            self.logger.info(f"历史期间: {max_correlation_item['start_date'].strftime('%Y-%m-%d')} 到 {max_correlation_item['end_date'].strftime('%Y-%m-%d')}")
+            self.logger.info(f"相关系数: {max_correlation_item['avg_correlation']:.6f}")
+            self.logger.info(f"来源股票: {max_correlation_item['stock_code']}")
+            self.logger.info(f"数据来源: {max_correlation_item['source']}")
+            self.logger.info("=" * 40)
+        
         self.logger.info("=" * 80)
         
         return final_result

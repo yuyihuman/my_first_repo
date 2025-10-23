@@ -965,8 +965,8 @@ class PearsonAnalyzer:
             # 计算相关系数
             avg_correlation, correlations = self.calculate_pearson_correlation(recent_data_for_self, historical_data)
             
-            # 更新最高相关系数（剔除相关性系数等于1的结果）
-            if avg_correlation > max_correlation and avg_correlation < 1.0:
+            # 更新最高相关系数（剔除相关性系数>=0.9999的结果）
+            if avg_correlation > max_correlation and avg_correlation < 0.9999:
                 max_correlation = avg_correlation
                 max_correlation_period = (historical_start_date, historical_end_date, self.stock_code)
             
@@ -976,8 +976,8 @@ class PearsonAnalyzer:
                 self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
                 self.logger.info(f"  平均相关系数: {avg_correlation:.6f}")
             
-            # 检查是否超过阈值，并剔除相关性系数等于1的结果
-            if avg_correlation >= self.threshold and avg_correlation < 1.0:
+            # 检查是否超过阈值，并剔除相关性系数>=0.9999的结果
+            if avg_correlation >= self.threshold and avg_correlation < 0.9999:
                 high_correlation_periods.append({
                     'start_date': historical_start_date,
                     'end_date': historical_end_date,
