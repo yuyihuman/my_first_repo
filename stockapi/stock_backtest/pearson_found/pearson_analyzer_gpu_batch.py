@@ -341,8 +341,8 @@ class GPUBatchPearsonAnalyzer:
         valid_dates = []
         
         for eval_date in evaluation_dates:
-            # 获取该评测日期的窗口数据
-            recent_data = self.data[self.data.index < eval_date].tail(self.window_size)
+            # 获取该评测日期的窗口数据（包含评测日期当天）
+            recent_data = self.data[self.data.index <= eval_date].tail(self.window_size)
             
             if len(recent_data) == self.window_size:
                 # 提取字段数据
@@ -1113,7 +1113,7 @@ class GPUBatchPearsonAnalyzer:
         valid_eval_dates = []
         
         for eval_date in evaluation_dates:
-            target_recent_data = self.data[self.data.index < eval_date].tail(self.window_size)
+            target_recent_data = self.data[self.data.index <= eval_date].tail(self.window_size)
             
             if len(target_recent_data) == self.window_size:
                 target_matrix = target_recent_data[fields].values  # [window_size, 5]
@@ -1135,8 +1135,8 @@ class GPUBatchPearsonAnalyzer:
             stock_matrices = []
             
             for eval_date in valid_eval_dates:
-                # 获取该股票在同一评测日期的同时期数据
-                stock_recent_data = stock_data[stock_data.index < eval_date].tail(self.window_size)
+                # 获取该股票在同一评测日期的同时期数据（包含评测日期当天）
+                stock_recent_data = stock_data[stock_data.index <= eval_date].tail(self.window_size)
                 
                 if len(stock_recent_data) == self.window_size:
                     stock_matrix = stock_recent_data[fields].values  # [window_size, 5]
