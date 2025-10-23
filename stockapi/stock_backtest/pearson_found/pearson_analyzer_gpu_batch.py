@@ -49,7 +49,7 @@ class GPUBatchPearsonAnalyzer:
     def __init__(self, stock_code, log_dir='logs', window_size=15, threshold=0.9, 
                  evaluation_days=100, debug=False, comparison_stocks=None, 
                  comparison_mode='top10', backtest_date=None, 
-                 csv_filename='batch_evaluation_results.csv', use_gpu=True, 
+                 csv_filename='evaluation_results.csv', use_gpu=True, 
                  batch_size=1000, gpu_memory_limit=0.8, topn_mode=True, 
                  max_comparison_stocks=10):
         """
@@ -184,9 +184,9 @@ class GPUBatchPearsonAnalyzer:
     def _setup_csv_file(self):
         """设置CSV文件，如果不存在则创建"""
         if not os.path.exists(self.csv_results_file):
-            header = ['代码', 'window_size', '阈值', '评测日期数量', '起始评测日期', '结束评测日期', 
-                     '对比股票数量', '总相关数量', '平均相关数量', '最大相关数量', '平均相关系数', 
-                     '总体下1日高开率', '总体下1日上涨率', '总体下3日上涨率', '总体下5日上涨率', '总体下10日上涨率']
+            # 使用与单日脚本相同的表头格式
+            header = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', 
+                     '下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨']
             df = pd.DataFrame(columns=header)
             df['代码'] = df['代码'].astype(str)
             df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
@@ -305,8 +305,8 @@ class GPUBatchPearsonAnalyzer:
         """
         self.start_timer('evaluation_dates_preparation')
         
-        # 获取所有可用的交易日期
-        available_dates = self.data[self.data.index < end_date].index
+        # 获取所有可用的交易日期（包含end_date当天，如果数据可用）
+        available_dates = self.data[self.data.index <= end_date].index
         
         if len(available_dates) < self.evaluation_days + self.window_size:
             self.logger.warning(f"可用数据不足，需要 {self.evaluation_days + self.window_size} 个交易日，"
@@ -507,22 +507,37 @@ class GPUBatchPearsonAnalyzer:
         # 计算平均相关系数 [evaluation_days, num_historical_periods]
         avg_correlations = correlations_np.mean(axis=2)
         
-        # 找出高相关性期间
-        high_corr_mask = avg_correlations > self.threshold
+        # 过滤掉相关性为1.0的结果（自相关）
+        # 设置容差，避免浮点数精度问题
+        self_correlation_threshold = 0.9999
+        self_correlation_mask = avg_correlations >= self_correlation_threshold
+        
+        # 统计被过滤的自相关数量
+        filtered_count = self_correlation_mask.sum()
+        if filtered_count > 0:
+            self.logger.info(f"过滤掉 {filtered_count} 个自相关结果（相关性 >= {self_correlation_threshold}）")
+        
+        # 将自相关的位置设置为0，使其不会被选为高相关性期间
+        avg_correlations_filtered = avg_correlations.copy()
+        avg_correlations_filtered[self_correlation_mask] = 0.0
+        
+        # 找出高相关性期间（使用过滤后的相关系数）
+        high_corr_mask = avg_correlations_filtered > self.threshold
         
         # 统计结果
         results = {
             'evaluation_days': evaluation_days,
             'num_historical_periods': len(period_info_list),
             'high_correlation_counts': high_corr_mask.sum(axis=1).tolist(),  # 每个评测日期的高相关数量
-            'avg_correlations': avg_correlations.tolist(),
+            'avg_correlations': avg_correlations_filtered.tolist(),  # 使用过滤后的相关系数
             'detailed_correlations': correlations_np.tolist(),
             'period_info': period_info_list,
             'summary': {
                 'total_high_correlations': high_corr_mask.sum(),
                 'avg_high_correlations_per_day': high_corr_mask.sum(axis=1).mean(),
                 'max_high_correlations_per_day': high_corr_mask.sum(axis=1).max(),
-                'overall_avg_correlation': avg_correlations[high_corr_mask].mean() if high_corr_mask.any() else 0
+                'overall_avg_correlation': avg_correlations_filtered[high_corr_mask].mean() if high_corr_mask.any() else 0,
+                'filtered_self_correlations': int(filtered_count)  # 添加过滤统计
             }
         }
         
@@ -867,8 +882,8 @@ class GPUBatchPearsonAnalyzer:
         """收集自身历史数据"""
         historical_data = []
         
-        # 获取早于最早评测日期的数据
-        available_data = self.data[self.data.index < earliest_eval_date]
+        # 使用所有可用数据，不进行日期截断
+        available_data = self.data
         
         if len(available_data) < self.window_size:
             return historical_data
@@ -881,7 +896,7 @@ class GPUBatchPearsonAnalyzer:
             
             historical_data.append((period_data, start_date, end_date, self.stock_code))
         
-        self.logger.info(f"收集到 {len(historical_data)} 个自身历史期间")
+        self.logger.info(f"收集到 {len(historical_data)} 个自身历史期间（包含所有可用数据）")
         return historical_data
     
     def _collect_comparison_historical_data(self, earliest_eval_date):
@@ -889,8 +904,8 @@ class GPUBatchPearsonAnalyzer:
         historical_data = []
         
         for stock_code, stock_data in self.loaded_stocks_data.items():
-            # 获取该股票早于最早评测日期的数据
-            available_data = stock_data[stock_data.index < earliest_eval_date]
+            # 使用所有可用数据，不进行日期截断
+            available_data = stock_data
             
             if len(available_data) < self.window_size:
                 continue
@@ -903,7 +918,7 @@ class GPUBatchPearsonAnalyzer:
                 
                 historical_data.append((period_data, start_date, end_date, stock_code))
         
-        self.logger.info(f"收集到 {len(historical_data)} 个对比股票历史期间")
+        self.logger.info(f"收集到 {len(historical_data)} 个对比股票历史期间（包含所有可用数据）")
         return historical_data
     
     def _implement_topn_mode(self, comparison_stocks_data):
@@ -1377,89 +1392,68 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info("=" * 60)
     
     def save_batch_results_to_csv(self, result):
-        """保存批量结果到CSV文件"""
+        """保存批量结果到CSV文件 - 逐日详细记录"""
         try:
-            # 计算统计数据
             batch_results = result['batch_results']
-            summary = batch_results['summary']
-            
-            # 计算整体统计
-            total_high_correlations = summary.get('total_high_correlations', 0)
-            avg_high_correlations = summary.get('avg_high_correlations_per_day', 0)
-            max_high_correlations = summary.get('max_high_correlations_per_day', 0)
-            overall_avg_correlation = summary.get('overall_avg_correlation', 0)
-            
-            # 计算整体预测统计
-            all_stats = []
-            for daily_result in batch_results['detailed_results']:
-                if daily_result['prediction_stats']:
-                    all_stats.append(daily_result['prediction_stats'])
-            
-            # 计算整体比例
-            if all_stats:
-                total_next_day_gap_up = sum(s['next_day_gap_up'] for s in all_stats)
-                total_next_1_day_up = sum(s['next_1_day_up'] for s in all_stats)
-                total_next_3_day_up = sum(s['next_3_day_up'] for s in all_stats)
-                total_next_5_day_up = sum(s['next_5_day_up'] for s in all_stats)
-                total_next_10_day_up = sum(s['next_10_day_up'] for s in all_stats)
-                
-                total_valid_next_day = sum(s['valid_periods']['next_day'] for s in all_stats)
-                total_valid_next_3_day = sum(s['valid_periods']['next_3_day'] for s in all_stats)
-                total_valid_next_5_day = sum(s['valid_periods']['next_5_day'] for s in all_stats)
-                total_valid_next_10_day = sum(s['valid_periods']['next_10_day'] for s in all_stats)
-                
-                overall_next_day_gap_up_rate = total_next_day_gap_up / total_valid_next_day if total_valid_next_day > 0 else 0
-                overall_next_1_day_up_rate = total_next_1_day_up / total_valid_next_day if total_valid_next_day > 0 else 0
-                overall_next_3_day_up_rate = total_next_3_day_up / total_valid_next_3_day if total_valid_next_3_day > 0 else 0
-                overall_next_5_day_up_rate = total_next_5_day_up / total_valid_next_5_day if total_valid_next_5_day > 0 else 0
-                overall_next_10_day_up_rate = total_next_10_day_up / total_valid_next_10_day if total_valid_next_10_day > 0 else 0
-            else:
-                overall_next_day_gap_up_rate = 0
-                overall_next_1_day_up_rate = 0
-                overall_next_3_day_up_rate = 0
-                overall_next_5_day_up_rate = 0
-                overall_next_10_day_up_rate = 0
-            
-            # 准备CSV行数据
             evaluation_dates = result['evaluation_dates']
-            start_date = evaluation_dates[0] if evaluation_dates else None
-            end_date = evaluation_dates[-1] if evaluation_dates else None
-            
-            new_row = {
-                '代码': result['stock_code'],
-                'window_size': result['window_size'],
-                '阈值': result['threshold'],
-                '评测日期数量': result['evaluation_days'],
-                '起始评测日期': start_date,
-                '结束评测日期': end_date,
-                '对比股票数量': len(self.comparison_stocks),
-                '总相关数量': total_high_correlations,
-                '平均相关数量': avg_high_correlations,
-                '最大相关数量': max_high_correlations,
-                '平均相关系数': overall_avg_correlation,
-                '总体下1日高开率': overall_next_day_gap_up_rate,
-                '总体下1日上涨率': overall_next_1_day_up_rate,
-                '总体下3日上涨率': overall_next_3_day_up_rate,
-                '总体下5日上涨率': overall_next_5_day_up_rate,
-                '总体下10日上涨率': overall_next_10_day_up_rate
-            }
             
             # 读取现有CSV文件
             if os.path.exists(self.csv_results_file):
-                df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig')
+                df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig', dtype={'代码': str})
             else:
                 df = pd.DataFrame()
             
-            # 添加新行
-            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            # 为每个评测日期创建一行记录
+            new_rows = []
+            for i, daily_result in enumerate(batch_results['detailed_results']):
+                evaluation_date = evaluation_dates[i]
+                prediction_stats = daily_result.get('prediction_stats', {})
+                
+                # 计算对比股票数量（包括目标股票自身）
+                comparison_stock_count = len(self.comparison_stocks) + 1
+                
+                # 准备单日结果数据
+                row_data = {
+                    '代码': str(result['stock_code']),
+                    'window_size': result['window_size'],
+                    '阈值': result['threshold'],
+                    '评测日期': evaluation_date.strftime('%Y-%m-%d'),
+                    '对比股票数量': comparison_stock_count,
+                    '相关数量': daily_result.get('daily_high_count', 0),
+                    '下1日高开': f"{prediction_stats.get('next_day_gap_up_rate', 0):.2%}" if prediction_stats else 'N/A',
+                    '下1日上涨': f"{prediction_stats.get('next_1_day_up_rate', 0):.2%}" if prediction_stats else 'N/A',
+                    '下3日上涨': f"{prediction_stats.get('next_3_day_up_rate', 0):.2%}" if prediction_stats else 'N/A',
+                    '下5日上涨': f"{prediction_stats.get('next_5_day_up_rate', 0):.2%}" if prediction_stats else 'N/A',
+                    '下10日上涨': f"{prediction_stats.get('next_10_day_up_rate', 0):.2%}" if prediction_stats else 'N/A'
+                }
+                new_rows.append(row_data)
             
-            # 保存CSV文件
-            df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
-            
-            self.logger.info(f"✅ 批量结果已保存到CSV文件: {self.csv_results_file}")
+            # 添加所有新行
+            if new_rows:
+                new_df = pd.DataFrame(new_rows)
+                df = pd.concat([df, new_df], ignore_index=True)
+                
+                # 确保代码列为字符串类型
+                df['代码'] = df['代码'].astype(str)
+                
+                # 按评测日期降序排列（最新日期在前）
+                df['评测日期_排序'] = pd.to_datetime(df['评测日期'])
+                df = df.sort_values('评测日期_排序', ascending=False)
+                df = df.drop('评测日期_排序', axis=1)  # 删除临时排序列
+                df = df.reset_index(drop=True)  # 重置索引
+                
+                # 保存CSV文件
+                df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
+                
+                self.logger.info(f"✅ 批量结果已保存到CSV文件: {self.csv_results_file}")
+                self.logger.info(f"✅ 共保存 {len(new_rows)} 条逐日评测记录")
+            else:
+                self.logger.warning("⚠️ 没有有效的评测结果需要保存")
             
         except Exception as e:
             self.logger.error(f"❌ 保存CSV文件时出错: {str(e)}")
+            import traceback
+            self.logger.error(f"❌ 详细错误信息: {traceback.format_exc()}")
 
 
 def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evaluation_days=100, 
@@ -1507,9 +1501,6 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
     
     result = analyzer.analyze_batch()
     
-    if result:
-        analyzer.save_batch_results_to_csv(result)
-    
     return result
 
 
@@ -1524,7 +1515,7 @@ if __name__ == "__main__":
                        choices=['top10', 'industry', 'self_only'],
                        help='对比模式: top10(市值前10), industry(行业股票), self_only(仅自身历史)')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
-    parser.add_argument('--csv_filename', type=str, default='batch_evaluation_results.csv', help='CSV结果文件名')
+    parser.add_argument('--csv_filename', type=str, default='evaluation_results.csv', help='CSV结果文件名')
     parser.add_argument('--use_gpu', action='store_true', default=True, help='使用GPU加速')
     parser.add_argument('--batch_size', type=int, default=1000, 
                        help='GPU批处理大小 - 控制单次GPU计算的数据量，影响内存使用和计算效率。'
