@@ -11,7 +11,7 @@ def get_comparison_stocks(mode='top10'):
     获取对比股票列表
     
     Args:
-        mode: 对比模式 ('top10', 'industry', 'custom')
+        mode: 对比模式 ('top10', 'industry', 'none', 'custom', 'self_only')
     
     Returns:
         list: 股票代码列表
@@ -65,9 +65,17 @@ def get_comparison_stocks(mode='top10'):
             '601899', '601919', '601939', '601988', '601998'
         ]
     
-    else:
-        # 默认返回空列表，由用户自定义
+    elif mode in ['none', 'self_only']:
+        # 仅自身对比，返回空列表
         return []
+    
+    elif mode == 'custom':
+        # 自定义模式，返回空列表，由调用者提供股票列表
+        return []
+    
+    else:
+        # 默认返回top10
+        return get_comparison_stocks('top10')
 
 def get_stock_industry(stock_code):
     """
