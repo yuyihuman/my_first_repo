@@ -1463,8 +1463,10 @@ if __name__ == "__main__":
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
     parser.add_argument('--threshold', type=float, default=0.85, help='相关系数阈值 (默认: 0.85)')
     parser.add_argument('--comparison_mode', type=str, default='top10', 
-                       choices=['top10', 'industry', 'self_only'],
-                       help='对比模式: top10(市值前10), industry(行业股票), self_only(仅自身历史) (默认: top10)')
+                       choices=['top10', 'industry', 'custom', 'self_only'],
+                       help='对比模式: top10(市值前10), industry(行业股票), custom(自定义), self_only(仅自身历史) (默认: top10)')
+    parser.add_argument('--comparison_stocks', nargs='*', 
+                       help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
     parser.add_argument('--csv_filename', type=str, default='evaluation_results.csv', help='CSV结果文件名 (默认: evaluation_results.csv)')
     parser.add_argument('--use_gpu', action='store_true', default=True, help='使用GPU加速')
@@ -1488,6 +1490,7 @@ if __name__ == "__main__":
         window_size=args.window_size,
         threshold=args.threshold,
         comparison_mode=args.comparison_mode,
+        comparison_stocks=args.comparison_stocks,
         debug=args.debug,
         csv_filename=args.csv_filename,
         use_gpu=args.use_gpu,

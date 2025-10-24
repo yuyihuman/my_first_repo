@@ -1402,8 +1402,8 @@ def main():
     parser.add_argument('--debug', action='store_true', help='开启debug模式（会影响性能）')
     
     # 跨股票对比参数
-    parser.add_argument('--comparison_mode', choices=['none', 'top10', 'industry', 'custom'],
-                        default='top10', help='对比模式: none(仅自身), top10(市值前10), industry(同行业), custom(自定义) (默认: top10)')
+    parser.add_argument('--comparison_mode', choices=['top10', 'industry', 'custom', 'self_only'],
+                        default='top10', help='对比模式: top10(市值前10), industry(同行业), custom(自定义), self_only(仅自身历史) (默认: top10)')
     parser.add_argument('--comparison_stocks', nargs='*', 
                        help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--no_comparison', action='store_true', 
