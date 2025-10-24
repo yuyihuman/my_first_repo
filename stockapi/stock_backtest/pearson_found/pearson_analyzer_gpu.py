@@ -401,10 +401,8 @@ class GPUBatchPearsonAnalyzer:
         Returns:
             dict: 批量相关性结果
         """
-        self.start_timer('batch_gpu_correlation')
         
         if batch_recent_data is None or len(historical_periods_data) == 0:
-            self.end_timer('batch_gpu_correlation')
             return {}
         
         evaluation_days, window_size, num_fields = batch_recent_data.shape
@@ -413,11 +411,15 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"开始批量GPU相关性计算")
         self.logger.info(f"评测日期数: {evaluation_days}, 历史期间数: {num_historical_periods}")
         
-        # 准备历史数据张量 [num_historical_periods, window_size, 5]
+        # 子步骤1/5: 历史数据准备和筛选
+        self.start_timer('gpu_step1_data_preparation')
+        self.logger.info(f"[子步骤1/5] 开始历史数据准备和筛选 - prepare_historical_data")
         historical_data_list = []
         period_info_list = []
+        valid_periods = 0
+        invalid_periods = 0
         
-        for data, start_date, end_date, stock_code in historical_periods_data:
+        for idx, (data, start_date, end_date, stock_code) in enumerate(historical_periods_data):
             if len(data) == window_size:
                 fields = ['open', 'high', 'low', 'close', 'volume']
                 historical_values = data[fields].values
@@ -427,11 +429,25 @@ class GPUBatchPearsonAnalyzer:
                     'end_date': end_date,
                     'stock_code': stock_code
                 })
+                valid_periods += 1
+            else:
+                invalid_periods += 1
+                
+            # 每处理10000个期间打印一次进度
+            if (idx + 1) % 10000 == 0:
+                self.logger.info(f"历史数据筛选进度: {idx + 1}/{num_historical_periods} ({(idx + 1)/num_historical_periods*100:.1f}%)")
+        
+        self.logger.info(f"历史数据筛选完成: 有效期间={valid_periods}, 无效期间={invalid_periods}")
+        self.end_timer('gpu_step1_data_preparation')
         
         if not historical_data_list:
             self.logger.warning("没有有效的历史期间数据")
-            self.end_timer('batch_gpu_correlation')
             return {}
+        
+        # 子步骤2/5: 创建GPU历史数据张量
+        self.start_timer('gpu_step2_tensor_creation')
+        self.logger.info(f"[子步骤2/5] 开始创建GPU历史数据张量 - create_historical_tensor")
+        self.logger.info(f"张量形状将为: [{len(historical_data_list)}, {window_size}, 5]")
         
         historical_tensor = torch.tensor(
             np.stack(historical_data_list, axis=0), 
@@ -439,44 +455,66 @@ class GPUBatchPearsonAnalyzer:
             device=self.device
         )  # [num_historical_periods, window_size, 5]
         
+        self.logger.info(f"GPU历史数据张量创建完成: {historical_tensor.shape}, 设备: {historical_tensor.device}")
+        self.end_timer('gpu_step2_tensor_creation')
+        
         # 监控数据张量创建后的GPU显存
         self.monitor_gpu_memory("张量创建完成")
         
-        # 批量计算相关系数
-        # 扩展维度进行批量计算
-        # batch_recent_data: [evaluation_days, window_size, 5]
-        # historical_tensor: [num_historical_periods, window_size, 5]
-        # 目标: [evaluation_days, num_historical_periods, 5]
+        # 子步骤3/5: 批量相关系数计算
+        self.start_timer('gpu_step3_correlation_calculation')
+        self.logger.info(f"[子步骤3/5] 开始批量相关系数计算 - compute_batch_correlations")
+        self.logger.info(f"输入张量形状: batch_recent_data={batch_recent_data.shape}, historical_tensor={historical_tensor.shape}")
+        self.logger.info(f"目标输出形状: [{evaluation_days}, {historical_tensor.shape[0]}, 5]")
         
         batch_correlations = []
         
         # 分批处理以避免内存溢出
         batch_size = min(self.batch_size, evaluation_days)
+        total_batches = (evaluation_days + batch_size - 1) // batch_size
         
-        for i in range(0, evaluation_days, batch_size):
+        self.logger.info(f"分批计算配置: batch_size={batch_size}, total_batches={total_batches}")
+        
+        for batch_idx, i in enumerate(range(0, evaluation_days, batch_size)):
             end_idx = min(i + batch_size, evaluation_days)
             current_batch = batch_recent_data[i:end_idx]  # [batch_size, window_size, 5]
+            
+            self.logger.info(f"处理批次 {batch_idx + 1}/{total_batches}: 评测日期 {i+1}-{end_idx} (形状: {current_batch.shape})")
             
             # 计算当前批次的相关系数
             batch_corr = self._compute_correlation_matrix(current_batch, historical_tensor)
             batch_correlations.append(batch_corr)
+            
+            # 监控每个批次后的GPU显存
+            if batch_idx % max(1, total_batches // 5) == 0:  # 每20%进度监控一次
+                self.monitor_gpu_memory(f"批次{batch_idx + 1}完成")
         
+        self.end_timer('gpu_step3_correlation_calculation')
+        
+        # 子步骤4/5: 合并批次结果
+        self.start_timer('gpu_step4_batch_merging')
+        self.logger.info(f"[子步骤4/5] 开始合并批次结果 - merge_batch_results")
         # 合并所有批次的结果
         all_correlations = torch.cat(batch_correlations, dim=0)  # [evaluation_days, num_historical_periods, 5]
+        self.logger.info(f"批次结果合并完成: 最终形状={all_correlations.shape}")
+        self.end_timer('gpu_step4_batch_merging')
         
         # 监控相关系数计算完成后的GPU显存
         self.monitor_gpu_memory("相关系数计算完成")
         
         self.logger.info(f"批量GPU相关性计算完成，结果形状: {all_correlations.shape}")
         
-        self.end_timer('batch_gpu_correlation')
-        
-        # 处理结果 - 现在作为独立的第5阶段
+        # 子步骤5/5: 处理批量相关性结果
+        self.start_timer('gpu_step5_result_processing')
+        self.logger.info(f"[子步骤5/5] 开始处理批量相关性结果 - _process_batch_correlation_results")
+        self.logger.info(f"调用函数: _process_batch_correlation_results")
         results = self._process_batch_correlation_results(
             all_correlations, period_info_list, evaluation_days,
             batch_recent_data, historical_data_list, evaluation_dates
         )
+        self.end_timer('gpu_step5_result_processing')
         
+        self.logger.info(f"批量GPU相关性计算全部完成，返回结果包含 {len(results) if results else 0} 个字段")
         return results
     
     def _compute_correlation_matrix(self, recent_batch, historical_tensor):
@@ -493,27 +531,46 @@ class GPUBatchPearsonAnalyzer:
         batch_size, window_size, num_fields = recent_batch.shape
         num_historical_periods = historical_tensor.shape[0]
         
+        if self.debug:
+            self.logger.debug(f"    [GPU计算] 开始相关系数矩阵计算 - _compute_correlation_matrix")
+            self.logger.debug(f"    输入形状: recent_batch={recent_batch.shape}, historical_tensor={historical_tensor.shape}")
+        
         # 扩展维度进行广播计算
+        if self.debug:
+            self.logger.debug(f"    [GPU计算] 步骤1: 扩展维度进行广播")
         recent_expanded = recent_batch.unsqueeze(1)  # [batch_size, 1, window_size, 5]
         historical_expanded = historical_tensor.unsqueeze(0)  # [1, num_historical_periods, window_size, 5]
         
         # 计算均值
+        if self.debug:
+            self.logger.debug(f"    [GPU计算] 步骤2: 计算均值")
         recent_mean = recent_expanded.mean(dim=2, keepdim=True)  # [batch_size, 1, 1, 5]
         historical_mean = historical_expanded.mean(dim=2, keepdim=True)  # [1, num_historical_periods, 1, 5]
         
         # 中心化
+        if self.debug:
+            self.logger.debug(f"    [GPU计算] 步骤3: 数据中心化")
         recent_centered = recent_expanded - recent_mean
         historical_centered = historical_expanded - historical_mean
         
         # 计算协方差
+        if self.debug:
+            self.logger.debug(f"    [GPU计算] 步骤4: 计算协方差")
         covariance = (recent_centered * historical_centered).sum(dim=2)  # [batch_size, num_historical_periods, 5]
         
         # 计算标准差
+        if self.debug:
+            self.logger.debug(f"    [GPU计算] 步骤5: 计算标准差")
         recent_std = torch.sqrt((recent_centered ** 2).sum(dim=2))  # [batch_size, 1, 5]
         historical_std = torch.sqrt((historical_centered ** 2).sum(dim=2))  # [1, num_historical_periods, 5]
         
         # 计算相关系数
+        if self.debug:
+            self.logger.debug(f"    [GPU计算] 步骤6: 计算最终相关系数")
         correlation = covariance / (recent_std * historical_std + 1e-8)
+        
+        if self.debug:
+            self.logger.debug(f"    [GPU计算] 相关系数计算完成，输出形状: {correlation.shape}")
         
         return correlation
     
@@ -1259,10 +1316,14 @@ class GPUBatchPearsonAnalyzer:
             # 第3阶段：历史数据收集
             'historical_data_collection': ('3-1', '历史数据收集'),
             
-            # 第4阶段：GPU计算（重新拆分）
-            'batch_gpu_correlation': ('4-1', 'GPU相关性计算'),
+            # 第4阶段：GPU计算（详细拆分为5个子步骤）
+            'gpu_step1_data_preparation': ('4-1', '历史数据准备和筛选'),
+            'gpu_step2_tensor_creation': ('4-2', '创建GPU历史数据张量'),
+            'gpu_step3_correlation_calculation': ('4-3', '批量相关系数计算'),
+            'gpu_step4_batch_merging': ('4-4', '合并批次结果'),
+            'gpu_step5_result_processing': ('4-5', '处理批量相关性结果'),
             
-            # 第5阶段：结果处理（原来嵌套在第4阶段的）
+            # 第5阶段：结果处理
             'batch_result_processing': ('5-1', '相关性结果处理'),
             
             # 第6阶段：最终处理
@@ -1469,12 +1530,12 @@ if __name__ == "__main__":
                        help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
     parser.add_argument('--csv_filename', type=str, default='evaluation_results.csv', help='CSV结果文件名 (默认: evaluation_results.csv)')
-    parser.add_argument('--use_gpu', action='store_true', default=True, help='使用GPU加速')
+    parser.add_argument('--no_gpu', action='store_true', help='禁用GPU加速 (默认启用GPU)')
     parser.add_argument('--batch_size', type=int, default=1000, 
                        help='GPU批处理大小 - 控制单次GPU计算的数据量，影响内存使用和计算效率。'
                             '推荐值：RTX 3060(8GB)=500-1000, RTX 3080(10GB)=1000-2000, RTX 4090(24GB)=2000-5000 (默认: 1000)')
-    parser.add_argument('--earliest_date', type=str, default='2020-01-01', 
-                       help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2020-01-01)')
+    parser.add_argument('--earliest_date', type=str, default='2022-01-01', 
+                       help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2022-01-01)')
     
     args = parser.parse_args()
     
@@ -1493,7 +1554,7 @@ if __name__ == "__main__":
         comparison_stocks=args.comparison_stocks,
         debug=args.debug,
         csv_filename=args.csv_filename,
-        use_gpu=args.use_gpu,
+        use_gpu=not args.no_gpu,
         batch_size=args.batch_size,
         earliest_date=args.earliest_date
     )
