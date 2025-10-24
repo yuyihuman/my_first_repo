@@ -194,17 +194,37 @@ class GPUBatchPearsonAnalyzer:
             if self.debug:
                 self.logger.info(f"🆕 Debug: 批量评测CSV文件创建完成: {self.csv_results_file}")
     
-    def start_timer(self, timer_name):
-        """开始计时"""
-        self.current_timers[timer_name] = time.time()
+    def start_timer(self, timer_name, parent_timer=None):
+        """
+        开始计时
+        
+        Args:
+            timer_name: 计时器名称
+            parent_timer: 父计时器名称（用于分层显示）
+        """
+        self.current_timers[timer_name] = {
+            'start_time': time.time(),
+            'parent': parent_timer
+        }
         if self.debug:
             self.logger.info(f"⏱️ 开始计时: {timer_name}")
     
     def end_timer(self, timer_name):
         """结束计时并记录耗时"""
         if timer_name in self.current_timers:
-            elapsed_time = time.time() - self.current_timers[timer_name]
-            self.performance_timers[timer_name].append(elapsed_time)
+            timer_info = self.current_timers[timer_name]
+            elapsed_time = time.time() - timer_info['start_time']
+            
+            # 存储计时信息，包括父计时器信息
+            if timer_name not in self.performance_timers:
+                self.performance_timers[timer_name] = []
+            
+            self.performance_timers[timer_name].append({
+                'elapsed_time': elapsed_time,
+                'parent': timer_info['parent'],
+                'timestamp': time.time()
+            })
+            
             del self.current_timers[timer_name]
             if self.debug:
                 self.logger.info(f"⏱️ 结束计时: {timer_name} - 耗时: {elapsed_time:.3f}秒")
@@ -368,13 +388,14 @@ class GPUBatchPearsonAnalyzer:
         self.end_timer('batch_data_preparation')
         return batch_tensor, valid_dates
     
-    def calculate_batch_gpu_correlation(self, batch_recent_data, historical_periods_data):
+    def calculate_batch_gpu_correlation(self, batch_recent_data, historical_periods_data, evaluation_dates=None):
         """
         批量GPU相关性计算
         
         Args:
             batch_recent_data: 批量评测数据 [evaluation_days, window_size, 5]
             historical_periods_data: 历史期间数据列表
+            evaluation_dates: 评测日期列表
             
         Returns:
             dict: 批量相关性结果
@@ -417,6 +438,9 @@ class GPUBatchPearsonAnalyzer:
             device=self.device
         )  # [num_historical_periods, window_size, 5]
         
+        # 监控数据张量创建后的GPU显存
+        self.monitor_gpu_memory("张量创建完成")
+        
         # 批量计算相关系数
         # 扩展维度进行批量计算
         # batch_recent_data: [evaluation_days, window_size, 5]
@@ -439,15 +463,19 @@ class GPUBatchPearsonAnalyzer:
         # 合并所有批次的结果
         all_correlations = torch.cat(batch_correlations, dim=0)  # [evaluation_days, num_historical_periods, 5]
         
+        # 监控相关系数计算完成后的GPU显存
+        self.monitor_gpu_memory("相关系数计算完成")
+        
         self.logger.info(f"批量GPU相关性计算完成，结果形状: {all_correlations.shape}")
         
-        # 处理结果
+        self.end_timer('batch_gpu_correlation')
+        
+        # 处理结果 - 现在作为独立的第5阶段
         results = self._process_batch_correlation_results(
             all_correlations, period_info_list, evaluation_days,
-            batch_recent_data, historical_data_list
+            batch_recent_data, historical_data_list, evaluation_dates
         )
         
-        self.end_timer('batch_gpu_correlation')
         return results
     
     def _compute_correlation_matrix(self, recent_batch, historical_tensor):
@@ -489,7 +517,7 @@ class GPUBatchPearsonAnalyzer:
         return correlation
     
     def _process_batch_correlation_results(self, correlations_tensor, period_info_list, evaluation_days,
-                                          batch_recent_data=None, historical_data_list=None):
+                                          batch_recent_data=None, historical_data_list=None, evaluation_dates=None):
         """
         处理批量相关性计算结果
         
@@ -497,6 +525,7 @@ class GPUBatchPearsonAnalyzer:
             correlations_tensor: [evaluation_days, num_historical_periods, 5]
             period_info_list: 历史期间信息列表
             evaluation_days: 评测日期数量
+            evaluation_dates: 评测日期列表
             
         Returns:
             dict: 处理后的结果
@@ -530,7 +559,7 @@ class GPUBatchPearsonAnalyzer:
         if self.debug:
             self._print_detailed_evaluation_data(
                 correlations_np, avg_correlations_filtered, period_info_list, 
-                high_corr_mask, fields, batch_recent_data, historical_data_list
+                high_corr_mask, fields, batch_recent_data, historical_data_list, evaluation_dates
             )
         
         # 统计结果
@@ -559,7 +588,7 @@ class GPUBatchPearsonAnalyzer:
     
     def _print_detailed_evaluation_data(self, correlations_np, avg_correlations_filtered, 
                                        period_info_list, high_corr_mask, fields,
-                                       batch_recent_data=None, historical_data_list=None):
+                                       batch_recent_data=None, historical_data_list=None, evaluation_dates=None):
         """
         打印前10条评测数据的详细信息，包括对比数组
         
@@ -571,6 +600,7 @@ class GPUBatchPearsonAnalyzer:
             fields: 字段名称列表
             batch_recent_data: 批量评测数据 [evaluation_days, window_size, 5]
             historical_data_list: 历史期间数据列表
+            evaluation_dates: 评测日期列表
         """
         self.logger.info("=" * 80)
         self.logger.info("DEBUG模式 - 前10条评测数据详细信息:")
@@ -611,6 +641,14 @@ class GPUBatchPearsonAnalyzer:
         for i, data in enumerate(all_evaluation_data):
             self.logger.info(f"\n第 {i+1} 条评测数据:")
             self.logger.info(f"  评测日期索引: {data['eval_idx']}")
+            
+            # 添加评测数据时间段信息
+            if evaluation_dates and data['eval_idx'] < len(evaluation_dates):
+                eval_date = evaluation_dates[data['eval_idx']]
+                # 计算评测数据的时间段（从评测日期往前推window_size天）
+                eval_start_date = eval_date - pd.Timedelta(days=self.window_size - 1)
+                self.logger.info(f"  评测数据时间段: {eval_start_date.strftime('%Y-%m-%d')} 到 {eval_date.strftime('%Y-%m-%d')}")
+            
             self.logger.info(f"  历史期间索引: {data['hist_idx']}")
             self.logger.info(f"  历史期间: {data['period_info']['start_date'].strftime('%Y-%m-%d')} 到 {data['period_info']['end_date'].strftime('%Y-%m-%d')}")
             self.logger.info(f"  来源股票: {data['period_info']['stock_code']}")
@@ -887,6 +925,9 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"GPU设备: {self.device}")
         self.logger.info("=" * 80)
         
+        # 初始GPU显存监控
+        self.monitor_gpu_memory("分析开始")
+        
         # 加载数据
         if not hasattr(self, 'data') or self.data is None:
             self.data = self.load_data()
@@ -908,6 +949,9 @@ class GPUBatchPearsonAnalyzer:
             self.logger.error("批量评测数据准备失败")
             return None
         
+        # 监控数据准备后的GPU显存
+        self.monitor_gpu_memory("数据准备完成")
+        
         # 收集历史期间数据
         earliest_eval_date = min(valid_dates)
         historical_periods_data = self._collect_historical_periods_data(earliest_eval_date)
@@ -917,7 +961,9 @@ class GPUBatchPearsonAnalyzer:
             return None
         
         # 执行批量GPU相关性计算
-        batch_correlations = self.calculate_batch_gpu_correlation(batch_recent_data, historical_periods_data)
+        self.monitor_gpu_memory("GPU计算开始")
+        batch_correlations = self.calculate_batch_gpu_correlation(batch_recent_data, historical_periods_data, valid_dates)
+        self.monitor_gpu_memory("GPU计算完成")
         
         if not batch_correlations:
             self.logger.error("批量相关性计算失败")
@@ -959,6 +1005,9 @@ class GPUBatchPearsonAnalyzer:
         
         # 输出性能总结
         self._log_performance_summary()
+        
+        # 最终GPU显存监控
+        self.monitor_gpu_memory("分析完成")
         
         # 输出分析总结
         self.logger.info("=" * 80)
@@ -1491,15 +1540,31 @@ class GPUBatchPearsonAnalyzer:
     def _get_performance_stats(self):
         """获取性能统计信息"""
         stats = {}
-        for timer_name, times in self.performance_timers.items():
-            if times:
-                stats[timer_name] = {
-                    'total_time': sum(times),
-                    'avg_time': sum(times) / len(times),
-                    'max_time': max(times),
-                    'min_time': min(times),
-                    'count': len(times)
-                }
+        for timer_name, timer_records in self.performance_timers.items():
+            if timer_records:
+                # 处理新的数据结构
+                if isinstance(timer_records[0], dict):
+                    elapsed_times = [record['elapsed_time'] for record in timer_records]
+                    stats[timer_name] = {
+                        'total_time': sum(elapsed_times),
+                        'avg_time': sum(elapsed_times) / len(elapsed_times),
+                        'max_time': max(elapsed_times),
+                        'min_time': min(elapsed_times),
+                        'count': len(elapsed_times),
+                        'parent': timer_records[0]['parent'],
+                        'timestamp': timer_records[0]['timestamp']
+                    }
+                else:
+                    # 兼容旧的数据结构
+                    stats[timer_name] = {
+                        'total_time': sum(timer_records),
+                        'avg_time': sum(timer_records) / len(timer_records),
+                        'max_time': max(timer_records),
+                        'min_time': min(timer_records),
+                        'count': len(timer_records),
+                        'parent': None,
+                        'timestamp': time.time()
+                    }
         
         # 添加GPU显存统计
         if self.device.type == 'cuda':
@@ -1508,25 +1573,102 @@ class GPUBatchPearsonAnalyzer:
         return stats
     
     def _log_performance_summary(self):
-        """输出性能总结"""
-        self.logger.info("=" * 60)
-        self.logger.info("性能统计总结:")
+        """输出分层性能总结"""
+        self.logger.info("=" * 80)
+        self.logger.info("📊 分层性能统计总结 (按执行顺序)")
+        self.logger.info("=" * 80)
         
-        for timer_name, times in self.performance_timers.items():
-            if times:
-                total_time = sum(times)
-                avg_time = total_time / len(times)
-                self.logger.info(f"  {timer_name}: 总耗时={total_time:.3f}秒, 平均={avg_time:.3f}秒, 次数={len(times)}")
+        # 获取性能统计
+        stats = self._get_performance_stats()
+        
+        # 定义步骤映射和显示顺序
+        step_mapping = {
+            # 第1阶段：数据加载
+            'target_stock_loading': ('1-1', '目标股票数据加载'),
+            'comparison_stocks_loading': ('1-2', '对比股票数据加载'),
+            
+            # 第2阶段：数据准备
+            'evaluation_dates_preparation': ('2-1', '评测日期准备'),
+            'batch_data_preparation': ('2-2', '批量数据准备'),
+            
+            # 第3阶段：历史数据收集
+            'historical_data_collection': ('3-1', '历史数据收集'),
+            
+            # 第4阶段：GPU计算（重新拆分）
+            'batch_gpu_correlation': ('4-1', 'GPU相关性计算'),
+            
+            # 第5阶段：结果处理（原来嵌套在第4阶段的）
+            'batch_result_processing': ('5-1', '相关性结果处理'),
+            
+            # 第6阶段：最终处理
+            'batch_results_processing': ('6-1', '批量结果整合'),
+            
+            # 总体统计
+            'total_batch_analysis': ('总计', '完整批量分析')
+        }
+        
+        # 按步骤顺序显示
+        current_stage = 0
+        stage_names = {
+            1: "🔄 第1阶段：数据加载",
+            2: "📋 第2阶段：数据准备", 
+            3: "📚 第3阶段：历史数据收集",
+            4: "🚀 第4阶段：GPU计算",
+            5: "⚙️  第5阶段：结果处理",
+            6: "📊 第6阶段：最终处理"
+        }
+        
+        for timer_name, (step_id, step_name) in step_mapping.items():
+            if timer_name in stats:
+                stat = stats[timer_name]
+                
+                # 检查是否需要显示新的阶段标题
+                if step_id != '总计':
+                    stage_num = int(step_id.split('-')[0])
+                    if stage_num != current_stage:
+                        if current_stage > 0:
+                            self.logger.info("")  # 空行分隔
+                        self.logger.info(stage_names[stage_num])
+                        current_stage = stage_num
+                
+                # 显示步骤统计
+                if step_id == '总计':
+                    self.logger.info("")
+                    self.logger.info("=" * 40)
+                    self.logger.info(f"📈 {step_id} - {step_name}:")
+                else:
+                    self.logger.info(f"  {step_id} {step_name}:")
+                
+                self.logger.info(f"      总耗时: {stat['total_time']:.3f}秒")
+                self.logger.info(f"      平均耗时: {stat['avg_time']:.3f}秒") 
+                self.logger.info(f"      执行次数: {stat['count']}")
+                
+                # 计算百分比（相对于总时间）
+                if 'total_batch_analysis' in stats:
+                    total_time = stats['total_batch_analysis']['total_time']
+                    percentage = (stat['total_time'] / total_time) * 100
+                    self.logger.info(f"      占比: {percentage:.1f}%")
+        
+        # 显示其他未映射的计时器
+        unmapped_timers = set(stats.keys()) - set(step_mapping.keys()) - {'gpu_memory'}
+        if unmapped_timers:
+            self.logger.info("")
+            self.logger.info("🔧 其他计时器:")
+            for timer_name in sorted(unmapped_timers):
+                stat = stats[timer_name]
+                self.logger.info(f"  {timer_name}: 总耗时={stat['total_time']:.3f}秒, "
+                               f"平均={stat['avg_time']:.3f}秒, 次数={stat['count']}")
         
         # GPU显存统计
         if self.device.type == 'cuda':
-            self.logger.info("GPU显存统计:")
+            self.logger.info("")
+            self.logger.info("💾 GPU显存统计:")
             self.logger.info(f"  峰值已分配: {self.gpu_memory_stats['peak_allocated']:.2f}GB")
             self.logger.info(f"  峰值已保留: {self.gpu_memory_stats['peak_reserved']:.2f}GB")
             self.logger.info(f"  当前已分配: {self.gpu_memory_stats['current_allocated']:.2f}GB")
             self.logger.info(f"  当前已保留: {self.gpu_memory_stats['current_reserved']:.2f}GB")
         
-        self.logger.info("=" * 60)
+        self.logger.info("=" * 80)
     
     def save_batch_results_to_csv(self, result):
         """保存批量结果到CSV文件 - 逐日详细记录"""
@@ -1601,7 +1743,8 @@ class GPUBatchPearsonAnalyzer:
 def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evaluation_days=100, 
                                          window_size=15, threshold=0.9, comparison_mode='default', 
                                          comparison_stocks=None, debug=False, csv_filename=None, 
-                                         use_gpu=True, batch_size=1000):
+                                         use_gpu=True, batch_size=1000, max_comparison_stocks=10, 
+                                         topn_mode=True):
     """
     GPU批量评测Pearson相关性分析的便捷函数
     
@@ -1617,6 +1760,8 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         csv_filename: CSV文件名
         use_gpu: 是否使用GPU
         batch_size: 批处理大小
+        max_comparison_stocks: 最大对比股票数量
+        topn_mode: 是否启用TopN模式
         
     Returns:
         dict: 分析结果
@@ -1638,7 +1783,9 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         backtest_date=backtest_date,
         csv_filename=csv_filename,
         use_gpu=use_gpu,
-        batch_size=batch_size
+        batch_size=batch_size,
+        max_comparison_stocks=max_comparison_stocks,
+        topn_mode=topn_mode
     )
     
     result = analyzer.analyze_batch()
@@ -1662,6 +1809,10 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=1000, 
                        help='GPU批处理大小 - 控制单次GPU计算的数据量，影响内存使用和计算效率。'
                             '推荐值：RTX 3060(8GB)=500-1000, RTX 3080(10GB)=1000-2000, RTX 4090(24GB)=2000-5000')
+    parser.add_argument('--max_comparison_stocks', type=int, default=-1, 
+                       help='最大对比股票数量 - 在TopN模式下限制对比股票数量，设置为-1表示不限制')
+    parser.add_argument('--disable_topn_mode', action='store_true', default=True,
+                       help='禁用TopN模式 - 禁用后将使用所有配置的对比股票')
     
     args = parser.parse_args()
     
@@ -1669,6 +1820,11 @@ if __name__ == "__main__":
     print(f"评测日期数量: {args.evaluation_days}")
     print(f"窗口大小: {args.window_size}")
     print(f"相关系数阈值: {args.threshold}")
+    
+    # 处理max_comparison_stocks参数
+    max_comparison_stocks = args.max_comparison_stocks
+    if max_comparison_stocks == -1:
+        max_comparison_stocks = 999999  # 设置为一个很大的数，表示不限制
     
     result = analyze_pearson_correlation_gpu_batch(
         stock_code=args.stock_code,
@@ -1680,7 +1836,9 @@ if __name__ == "__main__":
         debug=args.debug,
         csv_filename=args.csv_filename,
         use_gpu=args.use_gpu,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        max_comparison_stocks=max_comparison_stocks,
+        topn_mode=not args.disable_topn_mode
     )
     
     if result:
