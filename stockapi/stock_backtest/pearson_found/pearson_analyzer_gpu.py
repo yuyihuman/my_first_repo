@@ -11,7 +11,6 @@
 4. 智能内存管理，避免GPU内存溢出
 5. 批量结果统计和CSV导出
 6. GPU显存监控和自适应分组处理
-7. 真正的TopN模式（N个股票同时期数据矩阵比较）
 
 使用方法：
 python pearson_analyzer_gpu_batch.py --stock_code 000001 --evaluation_days 100
@@ -19,7 +18,6 @@ python pearson_analyzer_gpu_batch.py --stock_code 000001 --evaluation_days 100
 作者：Stock Backtest System
 创建时间：2024年
 GPU批量优化版本：2024年
-TopN模式增强版本：2024年
 """
 
 import argparse
@@ -50,8 +48,7 @@ class GPUBatchPearsonAnalyzer:
                  evaluation_days=100, debug=False, comparison_stocks=None, 
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
-                 batch_size=1000, gpu_memory_limit=0.8, topn_mode=True, 
-                 max_comparison_stocks=10):
+                 batch_size=1000, gpu_memory_limit=0.8):
         """
         初始化GPU批量评测Pearson相关性分析器
         
@@ -69,8 +66,6 @@ class GPUBatchPearsonAnalyzer:
             use_gpu: 是否使用GPU加速
             batch_size: GPU批处理大小
             gpu_memory_limit: GPU内存使用限制（0.0-1.0）
-            topn_mode: 是否启用TopN模式（N个股票同时期数据矩阵比较）
-            max_comparison_stocks: TopN模式下最大对比股票数量
         """
         self.stock_code = stock_code
         
@@ -88,8 +83,6 @@ class GPUBatchPearsonAnalyzer:
         self.use_gpu = use_gpu
         self.batch_size = batch_size
         self.gpu_memory_limit = gpu_memory_limit
-        self.topn_mode = topn_mode  # 新增：TopN模式开关
-        self.max_comparison_stocks = max_comparison_stocks  # 新增：最大对比股票数量
         self.data_loader = None
         self.logger = None
         
@@ -113,10 +106,6 @@ class GPUBatchPearsonAnalyzer:
             self.comparison_stocks = get_comparison_stocks(comparison_mode)
             if stock_code in self.comparison_stocks:
                 self.comparison_stocks.remove(stock_code)
-        
-        # TopN模式下限制对比股票数量
-        if self.topn_mode and len(self.comparison_stocks) > self.max_comparison_stocks:
-            self.comparison_stocks = self.comparison_stocks[:self.max_comparison_stocks]
         
         # 存储已加载的股票数据
         self.loaded_stocks_data = {}
@@ -1107,351 +1096,15 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"收集到 {len(historical_data)} 个对比股票历史期间（包含所有可用数据）")
         return historical_data
     
-    def _implement_topn_mode(self, comparison_stocks_data):
-        """实现TopN模式"""
-        max_stocks = self.max_comparison_stocks
-        
-        self.logger.info(f"启动TopN模式，最大对比股票数: {max_stocks}")
-        
-        # 如果股票数量已经在限制内，直接返回
-        if len(comparison_stocks_data) <= max_stocks:
-            self.logger.info(f"✅ 当前股票数量 {len(comparison_stocks_data)} 在TopN限制内")
-            return comparison_stocks_data
-        
-        # 根据数据质量和可用性选择TopN股票
-        stock_scores = []
-        
-        for stock_code, stock_data in comparison_stocks_data.items():
-            # 计算股票数据质量分数
-            data_length = len(stock_data)
-            data_completeness = 1.0 - (stock_data.isnull().sum().sum() / (len(stock_data) * len(stock_data.columns)))
-            
-            # 计算数据的时间跨度
-            date_range = (stock_data.index[-1] - stock_data.index[0]).days
-            
-            # 综合评分
-            score = data_length * 0.4 + data_completeness * 0.3 + (date_range / 365) * 0.3
-            
-            stock_scores.append((stock_code, score, data_length))
-        
-        # 按分数排序，选择TopN
-        stock_scores.sort(key=lambda x: x[1], reverse=True)
-        selected_stocks = stock_scores[:max_stocks]
-        
-        self.logger.info(f"📊 TopN股票选择结果:")
-        for i, (stock_code, score, data_length) in enumerate(selected_stocks, 1):
-            self.logger.info(f"   Top{i}: {stock_code} (评分: {score:.2f}, 数据量: {data_length})")
-        
-        # 构建TopN股票数据字典
-        topn_data = {}
-        for stock_code, score, data_length in selected_stocks:
-            topn_data[stock_code] = comparison_stocks_data[stock_code]
-        
-        self.logger.info(f"✅ TopN模式完成，从 {len(comparison_stocks_data)} 只股票中选择了 {len(topn_data)} 只")
-        
-        return topn_data
+
     
-    def prepare_topn_matrix_comparison(self, evaluation_dates, topn_stocks_data):
-        """准备TopN模式的矩阵比较数据"""
-        self.logger.info(f"🔄 准备TopN矩阵比较数据")
-        
-        fields = ['open', 'high', 'low', 'close', 'volume']
-        
-        # 为每个评测日期准备目标股票数据
-        target_matrices = []
-        valid_eval_dates = []
-        
-        for eval_date in evaluation_dates:
-            target_recent_data = self.data[self.data.index <= eval_date].tail(self.window_size)
-            
-            if len(target_recent_data) == self.window_size:
-                target_matrix = target_recent_data[fields].values  # [window_size, 5]
-                target_matrices.append(target_matrix)
-                valid_eval_dates.append(eval_date)
-        
-        if not target_matrices:
-            self.logger.error("没有有效的目标股票评测数据")
-            return None, None, []
-        
-        # 转换为张量 [evaluation_days, window_size, 5]
-        target_tensor = torch.tensor(np.stack(target_matrices, axis=0), dtype=torch.float32, device=self.device)
-        
-        # 为每个TopN股票准备同时期数据矩阵
-        topn_matrices = []
-        topn_stock_codes = []
-        
-        for stock_code, stock_data in topn_stocks_data.items():
-            stock_matrices = []
-            
-            for eval_date in valid_eval_dates:
-                # 获取该股票在同一评测日期的同时期数据（包含评测日期当天）
-                stock_recent_data = stock_data[stock_data.index <= eval_date].tail(self.window_size)
-                
-                if len(stock_recent_data) == self.window_size:
-                    stock_matrix = stock_recent_data[fields].values  # [window_size, 5]
-                    stock_matrices.append(stock_matrix)
-                else:
-                    # 如果数据不足，用零矩阵填充
-                    stock_matrices.append(np.zeros((self.window_size, len(fields))))
-            
-            if stock_matrices:
-                # [evaluation_days, window_size, 5]
-                stock_tensor = torch.tensor(np.stack(stock_matrices, axis=0), dtype=torch.float32, device=self.device)
-                topn_matrices.append(stock_tensor)
-                topn_stock_codes.append(stock_code)
-        
-        if not topn_matrices:
-            self.logger.error("没有有效的TopN股票数据")
-            return None, None, []
-        
-        # 合并所有TopN股票数据 [num_stocks, evaluation_days, window_size, 5]
-        topn_tensor = torch.stack(topn_matrices, dim=0)
-        
-        self.logger.info(f"✅ TopN矩阵数据准备完成")
-        self.logger.info(f"   目标股票数据形状: {target_tensor.shape}")
-        self.logger.info(f"   TopN股票数据形状: {topn_tensor.shape}")
-        self.logger.info(f"   TopN股票数量: {len(topn_stock_codes)}")
-        
-        return target_tensor, topn_tensor, topn_stock_codes
+
     
-    def calculate_topn_correlations(self, target_tensor, topn_tensor, topn_stock_codes):
-        """计算TopN模式的相关系数"""
-        self.start_timer('topn_correlation_calculation')
-        
-        num_stocks, evaluation_days, window_size, num_fields = topn_tensor.shape
-        
-        self.logger.info(f"🔄 开始TopN相关性计算")
-        self.logger.info(f"   股票数量: {num_stocks}")
-        self.logger.info(f"   评测日期数: {evaluation_days}")
-        
-        # 监控显存
-        self.monitor_gpu_memory("TopN计算开始")
-        
-        all_correlations = []
-        
-        # 对每只TopN股票计算与目标股票的相关性
-        for stock_idx, stock_code in enumerate(topn_stock_codes):
-            stock_data = topn_tensor[stock_idx]  # [evaluation_days, window_size, 5]
-            
-            # 计算相关系数 [evaluation_days, 5]
-            stock_correlations = self._compute_topn_correlation(target_tensor, stock_data)
-            all_correlations.append(stock_correlations)
-            
-            if self.debug:
-                self.logger.info(f"   完成股票 {stock_code} 的相关性计算")
-        
-        # 合并结果 [num_stocks, evaluation_days, 5]
-        correlations_tensor = torch.stack(all_correlations, dim=0)
-        
-        # 监控显存
-        self.monitor_gpu_memory("TopN计算完成")
-        
-        self.logger.info(f"✅ TopN相关性计算完成，结果形状: {correlations_tensor.shape}")
-        
-        self.end_timer('topn_correlation_calculation')
-        
-        return correlations_tensor
+
     
-    def _compute_topn_correlation(self, target_data, comparison_data):
-        """计算TopN模式下单只股票的相关系数"""
-        # target_data: [evaluation_days, window_size, 5]
-        # comparison_data: [evaluation_days, window_size, 5]
-        
-        # 计算均值
-        target_mean = target_data.mean(dim=1, keepdim=True)  # [evaluation_days, 1, 5]
-        comparison_mean = comparison_data.mean(dim=1, keepdim=True)  # [evaluation_days, 1, 5]
-        
-        # 中心化
-        target_centered = target_data - target_mean
-        comparison_centered = comparison_data - comparison_mean
-        
-        # 计算协方差
-        covariance = (target_centered * comparison_centered).sum(dim=1)  # [evaluation_days, 5]
-        
-        # 计算标准差
-        target_std = torch.sqrt((target_centered ** 2).sum(dim=1))  # [evaluation_days, 5]
-        comparison_std = torch.sqrt((comparison_centered ** 2).sum(dim=1))  # [evaluation_days, 5]
-        
-        # 计算相关系数
-        correlation = covariance / (target_std * comparison_std + 1e-8)
-        
-        return correlation
+
     
-    def process_topn_results(self, correlations_tensor, topn_stock_codes, evaluation_dates):
-        """处理TopN模式的结果"""
-        self.start_timer('topn_result_processing')
-        
-        num_stocks, evaluation_days, num_fields = correlations_tensor.shape
-        correlations_np = correlations_tensor.cpu().numpy()
-        
-        # 计算平均相关系数 [num_stocks, evaluation_days]
-        avg_correlations = correlations_np.mean(axis=2)
-        
-        # 构建结果
-        topn_results = {
-            'num_stocks': num_stocks,
-            'evaluation_days': evaluation_days,
-            'stock_codes': topn_stock_codes,
-            'avg_correlations': avg_correlations.tolist(),
-            'detailed_correlations': correlations_np.tolist(),
-            'high_correlation_summary': {}
-        }
-        
-        # 统计高相关性
-        total_high_correlations = 0
-        daily_high_counts = []
-        
-        for eval_idx in range(evaluation_days):
-            daily_high_count = 0
-            for stock_idx in range(num_stocks):
-                if avg_correlations[stock_idx, eval_idx] > self.threshold:
-                    daily_high_count += 1
-                    total_high_correlations += 1
-            daily_high_counts.append(daily_high_count)
-        
-        topn_results['high_correlation_summary'] = {
-            'total_high_correlations': total_high_correlations,
-            'daily_high_counts': daily_high_counts,
-            'avg_high_per_day': np.mean(daily_high_counts),
-            'max_high_per_day': max(daily_high_counts) if daily_high_counts else 0
-        }
-        
-        self.logger.info(f"✅ TopN结果处理完成")
-        self.logger.info(f"   总高相关性: {total_high_correlations}")
-        self.logger.info(f"   平均每日高相关数: {np.mean(daily_high_counts):.2f}")
-        
-        self.end_timer('topn_result_processing')
-        
-        return topn_results
-    
-    def analyze_topn_mode(self, evaluation_dates):
-        """执行TopN模式分析"""
-        if not self.topn_mode:
-            self.logger.info("TopN模式未启用，跳过TopN分析")
-            return None
-        
-        self.start_timer('topn_mode_analysis')
-        
-        self.logger.info("🔝 开始TopN模式分析")
-        
-        # 实现TopN股票选择
-        topn_stocks_data = self._implement_topn_mode(self.loaded_stocks_data)
-        
-        if not topn_stocks_data:
-            self.logger.warning("没有可用的TopN股票数据")
-            self.end_timer('topn_mode_analysis')
-            return None
-        
-        # 准备TopN矩阵比较数据
-        target_tensor, topn_tensor, topn_stock_codes = self.prepare_topn_matrix_comparison(
-            evaluation_dates, topn_stocks_data
-        )
-        
-        if target_tensor is None or topn_tensor is None:
-            self.logger.error("TopN矩阵数据准备失败")
-            self.end_timer('topn_mode_analysis')
-            return None
-        
-        # 检查显存需求
-        evaluation_days = target_tensor.shape[0]
-        num_stocks = topn_tensor.shape[0]
-        
-        # 估算TopN模式的显存需求
-        topn_memory_required = self.estimate_memory_requirement(
-            evaluation_days, num_stocks, self.window_size, 5
-        )
-        
-        # 根据显存情况选择处理方式
-        if self.check_gpu_memory_limit(topn_memory_required):
-            # 显存充足，直接计算
-            correlations_tensor = self.calculate_topn_correlations(
-                target_tensor, topn_tensor, topn_stock_codes
-            )
-        else:
-            # 显存不足，使用自适应处理
-            self.logger.info("🔄 TopN模式显存不足，启用自适应处理")
-            correlations_tensor = self._adaptive_topn_processing(
-                target_tensor, topn_tensor, topn_stock_codes
-            )
-        
-        if correlations_tensor is None:
-            self.logger.error("TopN相关性计算失败")
-            self.end_timer('topn_mode_analysis')
-            return None
-        
-        # 处理TopN结果
-        topn_results = self.process_topn_results(
-            correlations_tensor, topn_stock_codes, evaluation_dates
-        )
-        
-        self.end_timer('topn_mode_analysis')
-        
-        self.logger.info("✅ TopN模式分析完成")
-        return topn_results
-    
-    def _adaptive_topn_processing(self, target_tensor, topn_tensor, topn_stock_codes):
-        """TopN模式的自适应处理"""
-        num_stocks, evaluation_days, window_size, num_fields = topn_tensor.shape
-        
-        # 计算每次可以处理的股票数量
-        if self.device.type == 'cuda':
-            total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-            available_memory = total_memory * self.gpu_memory_limit * 0.8
-        else:
-            available_memory = 4.0
-        
-        # 估算单只股票的显存需求
-        single_stock_memory = self.estimate_memory_requirement(
-            evaluation_days, 1, window_size, num_fields
-        )
-        
-        # 计算批次大小
-        stocks_per_batch = max(1, int(available_memory / single_stock_memory))
-        stocks_per_batch = min(stocks_per_batch, num_stocks)
-        
-        self.logger.info(f"📦 TopN自适应处理参数:")
-        self.logger.info(f"   总股票数: {num_stocks}")
-        self.logger.info(f"   每批股票数: {stocks_per_batch}")
-        self.logger.info(f"   预计批次数: {(num_stocks + stocks_per_batch - 1) // stocks_per_batch}")
-        
-        all_correlations = []
-        
-        for i in range(0, num_stocks, stocks_per_batch):
-            end_idx = min(i + stocks_per_batch, num_stocks)
-            batch_stocks = topn_tensor[i:end_idx]  # [batch_size, evaluation_days, window_size, 5]
-            batch_codes = topn_stock_codes[i:end_idx]
-            
-            self.logger.info(f"🔄 处理TopN第 {i//stocks_per_batch + 1} 批 (股票 {i+1}-{end_idx})")
-            
-            # 清理GPU缓存
-            if self.device.type == 'cuda':
-                torch.cuda.empty_cache()
-                gc.collect()
-            
-            # 监控显存
-            self.monitor_gpu_memory(f"TopN批次{i//stocks_per_batch + 1}开始")
-            
-            # 处理当前批次
-            batch_correlations = []
-            for stock_idx, stock_code in enumerate(batch_codes):
-                stock_data = batch_stocks[stock_idx]  # [evaluation_days, window_size, 5]
-                stock_correlations = self._compute_topn_correlation(target_tensor, stock_data)
-                batch_correlations.append(stock_correlations)
-            
-            # 合并当前批次结果
-            batch_tensor = torch.stack(batch_correlations, dim=0)
-            all_correlations.append(batch_tensor)
-            
-            # 监控显存
-            self.monitor_gpu_memory(f"TopN批次{i//stocks_per_batch + 1}完成")
-        
-        # 合并所有批次结果
-        if all_correlations:
-            final_correlations = torch.cat(all_correlations, dim=0)
-            self.logger.info("✅ TopN自适应处理完成")
-            return final_correlations
-        else:
-            return None
+
     
     def monitor_gpu_memory(self, stage_name):
         """监控GPU显存使用情况"""
@@ -1743,8 +1396,7 @@ class GPUBatchPearsonAnalyzer:
 def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evaluation_days=100, 
                                          window_size=15, threshold=0.9, comparison_mode='default', 
                                          comparison_stocks=None, debug=False, csv_filename=None, 
-                                         use_gpu=True, batch_size=1000, max_comparison_stocks=10, 
-                                         topn_mode=True):
+                                         use_gpu=True, batch_size=1000):
     """
     GPU批量评测Pearson相关性分析的便捷函数
     
@@ -1760,8 +1412,6 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         csv_filename: CSV文件名
         use_gpu: 是否使用GPU
         batch_size: 批处理大小
-        max_comparison_stocks: 最大对比股票数量
-        topn_mode: 是否启用TopN模式
         
     Returns:
         dict: 分析结果
@@ -1783,9 +1433,7 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         backtest_date=backtest_date,
         csv_filename=csv_filename,
         use_gpu=use_gpu,
-        batch_size=batch_size,
-        max_comparison_stocks=max_comparison_stocks,
-        topn_mode=topn_mode
+        batch_size=batch_size
     )
     
     result = analyzer.analyze_batch()
@@ -1809,10 +1457,6 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=1000, 
                        help='GPU批处理大小 - 控制单次GPU计算的数据量，影响内存使用和计算效率。'
                             '推荐值：RTX 3060(8GB)=500-1000, RTX 3080(10GB)=1000-2000, RTX 4090(24GB)=2000-5000')
-    parser.add_argument('--max_comparison_stocks', type=int, default=-1, 
-                       help='最大对比股票数量 - 在TopN模式下限制对比股票数量，设置为-1表示不限制')
-    parser.add_argument('--disable_topn_mode', action='store_true', default=True,
-                       help='禁用TopN模式 - 禁用后将使用所有配置的对比股票')
     
     args = parser.parse_args()
     
@@ -1820,11 +1464,6 @@ if __name__ == "__main__":
     print(f"评测日期数量: {args.evaluation_days}")
     print(f"窗口大小: {args.window_size}")
     print(f"相关系数阈值: {args.threshold}")
-    
-    # 处理max_comparison_stocks参数
-    max_comparison_stocks = args.max_comparison_stocks
-    if max_comparison_stocks == -1:
-        max_comparison_stocks = 999999  # 设置为一个很大的数，表示不限制
     
     result = analyze_pearson_correlation_gpu_batch(
         stock_code=args.stock_code,
@@ -1836,9 +1475,7 @@ if __name__ == "__main__":
         debug=args.debug,
         csv_filename=args.csv_filename,
         use_gpu=args.use_gpu,
-        batch_size=args.batch_size,
-        max_comparison_stocks=max_comparison_stocks,
-        topn_mode=not args.disable_topn_mode
+        batch_size=args.batch_size
     )
     
     if result:
