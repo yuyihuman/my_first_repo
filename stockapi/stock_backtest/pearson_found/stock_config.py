@@ -6,12 +6,57 @@
 提供对比股票列表等配置信息
 """
 
+import os
+import pandas as pd
+
+def get_all_stocks_list():
+    """
+    获取所有A股股票列表（过滤掉8和9开头的股票）
+    
+    Returns:
+        list: 股票代码列表
+    """
+    try:
+        # 获取当前脚本所在目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 构建stock_data.csv文件路径（在stock_base_info目录下）
+        stock_base_info_dir = os.path.join(current_dir, '..', '..', 'stock_base_info')
+        csv_file = os.path.join(stock_base_info_dir, 'stock_data.csv')
+        
+        # 检查文件是否存在
+        if not os.path.exists(csv_file):
+            print(f"警告：找不到股票数据文件 {csv_file}")
+            print("请先运行 stock_base_info/stock_data_fetcher.py 生成股票数据文件")
+            return []
+        
+        # 读取CSV文件
+        df = pd.read_csv(csv_file, encoding='utf-8')
+        
+        # 过滤掉8开头和9开头的股票（北交所等）
+        # 确保股票代码是6位数字，然后检查第一位数字
+        df['code_6digit'] = df['code'].astype(str).str.zfill(6)
+        df = df[~df['code_6digit'].str[0].isin(['8', '9'])]
+        
+        # 只保留0、3、60开头的股票
+        valid_stocks = []
+        for _, row in df.iterrows():
+            stock_code = str(row['code']).zfill(6)
+            if stock_code.startswith('0') or stock_code.startswith('3') or stock_code.startswith('60'):
+                valid_stocks.append(stock_code)
+        
+        return valid_stocks
+        
+    except Exception as e:
+        print(f"获取股票列表时发生错误: {e}")
+        return []
+
 def get_comparison_stocks(mode='top10'):
     """
     获取对比股票列表
     
     Args:
-        mode: 对比模式 ('top10', 'industry', 'custom', 'self_only')
+        mode: 对比模式 ('top10', 'industry', 'custom', 'self_only', 'all')
     
     Returns:
         list: 股票代码列表
@@ -72,6 +117,10 @@ def get_comparison_stocks(mode='top10'):
     elif mode == 'custom':
         # 自定义模式，返回空列表，由调用者提供股票列表
         return []
+    
+    elif mode == 'all':
+        # 所有A股股票模式，返回所有有效的股票代码
+        return get_all_stocks_list()
     
     else:
         # 默认返回top10
