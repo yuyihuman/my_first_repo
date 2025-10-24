@@ -1704,11 +1704,11 @@ class GPUBatchPearsonAnalyzer:
                     '评测日期': evaluation_date.strftime('%Y-%m-%d'),
                     '对比股票数量': comparison_stock_count,
                     '相关数量': daily_result.get('daily_high_count', 0),
-                    '下1日高开': f"{prediction_stats.get('next_day_gap_up_rate', 0):.2%}" if prediction_stats else 'N/A',
-                    '下1日上涨': f"{prediction_stats.get('next_1_day_up_rate', 0):.2%}" if prediction_stats else 'N/A',
-                    '下3日上涨': f"{prediction_stats.get('next_3_day_up_rate', 0):.2%}" if prediction_stats else 'N/A',
-                    '下5日上涨': f"{prediction_stats.get('next_5_day_up_rate', 0):.2%}" if prediction_stats else 'N/A',
-                    '下10日上涨': f"{prediction_stats.get('next_10_day_up_rate', 0):.2%}" if prediction_stats else 'N/A'
+                    '下1日高开': f"{prediction_stats.get('ratios', {}).get('next_day_gap_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下1日上涨': f"{prediction_stats.get('ratios', {}).get('next_1_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下3日上涨': f"{prediction_stats.get('ratios', {}).get('next_3_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下5日上涨': f"{prediction_stats.get('ratios', {}).get('next_5_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下10日上涨': f"{prediction_stats.get('ratios', {}).get('next_10_day_up', 0):.2%}" if prediction_stats else 'N/A'
                 }
                 new_rows.append(row_data)
             
