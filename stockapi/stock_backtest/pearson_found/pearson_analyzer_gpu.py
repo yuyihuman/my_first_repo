@@ -13,7 +13,7 @@
 6. GPU显存监控和自适应分组处理
 
 使用方法：
-python pearson_analyzer_gpu_batch.py --stock_code 000001 --evaluation_days 100
+python pearson_analyzer_gpu.py 000001 --evaluation_days 100
 
 作者：Stock Backtest System
 创建时间：2024年
@@ -44,11 +44,11 @@ warnings.filterwarnings('ignore', category=UserWarning)
 
 
 class GPUBatchPearsonAnalyzer:
-    def __init__(self, stock_code, log_dir='logs', window_size=15, threshold=0.9, 
-                 evaluation_days=100, debug=False, comparison_stocks=None, 
+    def __init__(self, stock_code, log_dir='logs', window_size=15, threshold=0.85, 
+                 evaluation_days=1, debug=False, comparison_stocks=None, 
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
-                 batch_size=1000, gpu_memory_limit=0.8):
+                 batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01'):
         """
         初始化GPU批量评测Pearson相关性分析器
         
@@ -66,6 +66,7 @@ class GPUBatchPearsonAnalyzer:
             use_gpu: 是否使用GPU加速
             batch_size: GPU批处理大小
             gpu_memory_limit: GPU内存使用限制（0.0-1.0）
+            earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
         """
         self.stock_code = stock_code
         
@@ -80,6 +81,7 @@ class GPUBatchPearsonAnalyzer:
         self.debug = debug
         self.comparison_mode = comparison_mode
         self.backtest_date = pd.to_datetime(backtest_date) if backtest_date else None
+        self.earliest_date = pd.to_datetime(earliest_date)
         self.use_gpu = use_gpu
         self.batch_size = batch_size
         self.gpu_memory_limit = gpu_memory_limit
@@ -243,11 +245,18 @@ class GPUBatchPearsonAnalyzer:
         return self.data
     
     def _filter_data(self, data, stock_code):
-        """过滤股票数据，确保数据质量"""
+        """过滤股票数据，确保数据质量和日期范围"""
         if data is None or data.empty:
             return data
             
         original_count = len(data)
+        
+        # 首先按日期过滤
+        data = data[data.index >= self.earliest_date]
+        date_filtered_count = len(data)
+        date_removed_count = original_count - date_filtered_count
+        
+        # 然后按数据质量过滤
         data = data[
             (data['open'] > 0) & 
             (data['high'] > 0) & 
@@ -255,11 +264,14 @@ class GPUBatchPearsonAnalyzer:
             (data['close'] > 0) & 
             (data['volume'] > 0)
         ]
-        filtered_count = len(data)
-        removed_count = original_count - filtered_count
+        final_count = len(data)
+        quality_removed_count = date_filtered_count - final_count
         
-        if removed_count > 0:
-            self.logger.info(f"股票 {stock_code} 数据过滤完成，移除 {removed_count} 条异常数据")
+        if date_removed_count > 0:
+            self.logger.info(f"股票 {stock_code} 日期过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_count} 条数据")
+        
+        if quality_removed_count > 0:
+            self.logger.info(f"股票 {stock_code} 数据质量过滤完成，移除 {quality_removed_count} 条异常数据")
         
         if not data.empty:
             self.logger.info(f"股票 {stock_code} 成功加载 {len(data)} 条记录，日期范围: {data.index[0]} 到 {data.index[-1]}")
@@ -1393,10 +1405,10 @@ class GPUBatchPearsonAnalyzer:
             self.logger.error(f"❌ 详细错误信息: {traceback.format_exc()}")
 
 
-def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evaluation_days=100, 
-                                         window_size=15, threshold=0.9, comparison_mode='default', 
+def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evaluation_days=1, 
+                                         window_size=15, threshold=0.85, comparison_mode='default', 
                                          comparison_stocks=None, debug=False, csv_filename=None, 
-                                         use_gpu=True, batch_size=1000):
+                                         use_gpu=True, batch_size=1000, earliest_date='2020-01-01'):
     """
     GPU批量评测Pearson相关性分析的便捷函数
     
@@ -1412,6 +1424,7 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         csv_filename: CSV文件名
         use_gpu: 是否使用GPU
         batch_size: 批处理大小
+        earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
         
     Returns:
         dict: 分析结果
@@ -1433,7 +1446,8 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         backtest_date=backtest_date,
         csv_filename=csv_filename,
         use_gpu=use_gpu,
-        batch_size=batch_size
+        batch_size=batch_size,
+        earliest_date=earliest_date
     )
     
     result = analyzer.analyze_batch()
@@ -1443,20 +1457,22 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='GPU批量评测Pearson相关性分析')
-    parser.add_argument('--stock_code', type=str, required=True, help='股票代码')
+    parser.add_argument('stock_code', help='股票代码')
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
-    parser.add_argument('--evaluation_days', type=int, default=100, help='评测日期数量')
-    parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小')
-    parser.add_argument('--threshold', type=float, default=0.9, help='相关系数阈值')
+    parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
+    parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
+    parser.add_argument('--threshold', type=float, default=0.85, help='相关系数阈值 (默认: 0.85)')
     parser.add_argument('--comparison_mode', type=str, default='top10', 
                        choices=['top10', 'industry', 'self_only'],
-                       help='对比模式: top10(市值前10), industry(行业股票), self_only(仅自身历史)')
+                       help='对比模式: top10(市值前10), industry(行业股票), self_only(仅自身历史) (默认: top10)')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
-    parser.add_argument('--csv_filename', type=str, default='evaluation_results.csv', help='CSV结果文件名')
+    parser.add_argument('--csv_filename', type=str, default='evaluation_results.csv', help='CSV结果文件名 (默认: evaluation_results.csv)')
     parser.add_argument('--use_gpu', action='store_true', default=True, help='使用GPU加速')
     parser.add_argument('--batch_size', type=int, default=1000, 
                        help='GPU批处理大小 - 控制单次GPU计算的数据量，影响内存使用和计算效率。'
-                            '推荐值：RTX 3060(8GB)=500-1000, RTX 3080(10GB)=1000-2000, RTX 4090(24GB)=2000-5000')
+                            '推荐值：RTX 3060(8GB)=500-1000, RTX 3080(10GB)=1000-2000, RTX 4090(24GB)=2000-5000 (默认: 1000)')
+    parser.add_argument('--earliest_date', type=str, default='2020-01-01', 
+                       help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2020-01-01)')
     
     args = parser.parse_args()
     
@@ -1475,7 +1491,8 @@ if __name__ == "__main__":
         debug=args.debug,
         csv_filename=args.csv_filename,
         use_gpu=args.use_gpu,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        earliest_date=args.earliest_date
     )
     
     if result:

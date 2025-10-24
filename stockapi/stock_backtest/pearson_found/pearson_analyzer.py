@@ -35,8 +35,9 @@ from collections import defaultdict
 
 
 class PearsonAnalyzer:
-    def __init__(self, stock_code, log_dir='logs', window_size=15, threshold=0.9, debug=False, 
-                 comparison_stocks=None, comparison_mode='default', backtest_date=None, csv_filename='evaluation_results.csv'):
+    def __init__(self, stock_code, log_dir='logs', window_size=15, threshold=0.85, debug=False, 
+                 comparison_stocks=None, comparison_mode='default', backtest_date=None, csv_filename='evaluation_results.csv',
+                 earliest_date='2020-01-01'):
         """
         初始化Pearson相关性分析器
         
@@ -50,6 +51,7 @@ class PearsonAnalyzer:
             comparison_mode: 对比模式 ('default', 'top10', 'banks', 'tech', 'new_energy', 'healthcare', 'consumer', 'self_only')
             backtest_date: 回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析
             csv_filename: CSV结果文件名 (默认: evaluation_results.csv)
+            earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
         """
         self.stock_code = stock_code
         
@@ -63,6 +65,7 @@ class PearsonAnalyzer:
         self.debug = debug
         self.comparison_mode = comparison_mode
         self.backtest_date = backtest_date
+        self.earliest_date = pd.to_datetime(earliest_date)
         self.data_loader = None
         self.logger = None
         
@@ -341,20 +344,18 @@ class PearsonAnalyzer:
         return self.data
     
     def _filter_data(self, data, stock_code):
-        """
-        过滤股票数据，确保数据质量
-        
-        Args:
-            data: 原始股票数据
-            stock_code: 股票代码
-            
-        Returns:
-            过滤后的数据
-        """
+        """过滤股票数据，确保数据质量和日期范围"""
         if data is None or data.empty:
             return data
             
         original_count = len(data)
+        
+        # 首先按日期过滤
+        data = data[data.index >= self.earliest_date]
+        date_filtered_count = len(data)
+        date_removed_count = original_count - date_filtered_count
+        
+        # 然后按数据质量过滤
         data = data[
             (data['open'] > 0) & 
             (data['high'] > 0) & 
@@ -362,11 +363,14 @@ class PearsonAnalyzer:
             (data['close'] > 0) & 
             (data['volume'] > 0)
         ]
-        filtered_count = len(data)
-        removed_count = original_count - filtered_count
+        final_count = len(data)
+        quality_removed_count = date_filtered_count - final_count
         
-        if removed_count > 0:
-            self.logger.info(f"股票 {stock_code} 数据过滤完成，移除 {removed_count} 条异常数据")
+        if date_removed_count > 0:
+            self.logger.info(f"股票 {stock_code} 日期过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_count} 条数据")
+        
+        if quality_removed_count > 0:
+            self.logger.info(f"股票 {stock_code} 数据质量过滤完成，移除 {quality_removed_count} 条异常数据")
         
         if not data.empty:
             self.logger.info(f"股票 {stock_code} 成功加载 {len(data)} 条记录，日期范围: {data.index[0]} 到 {data.index[-1]}")
@@ -1394,7 +1398,7 @@ def main():
     parser.add_argument('stock_code', help='股票代码')
     parser.add_argument('--log_dir', default='logs', help='日志目录 (默认: logs)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
-    parser.add_argument('--threshold', type=float, default=0.9, help='相关系数阈值 (默认: 0.9)')
+    parser.add_argument('--threshold', type=float, default=0.85, help='相关系数阈值 (默认: 0.85)')
     parser.add_argument('--debug', action='store_true', help='开启debug模式（会影响性能）')
     
     # 跨股票对比参数
@@ -1408,6 +1412,8 @@ def main():
                        help='指定回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析，默认使用最后一个交易日')
     parser.add_argument('--csv_filename', type=str, default='evaluation_results.csv',
                        help='指定CSV结果文件名 (默认: evaluation_results.csv)')
+    parser.add_argument('--earliest_date', type=str, default='2020-01-01',
+                       help='数据过滤的最早日期 (格式: YYYY-MM-DD, 默认: 2020-01-01)')
     
     args = parser.parse_args()
     
@@ -1457,7 +1463,8 @@ def main():
         comparison_mode=comparison_mode,
         comparison_stocks=comparison_stocks,
         backtest_date=args.backtest_date,
-        csv_filename=args.csv_filename
+        csv_filename=args.csv_filename,
+        earliest_date=args.earliest_date
     )
     
     results = analyzer.analyze()
