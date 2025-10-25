@@ -411,34 +411,26 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"开始批量GPU相关性计算")
         self.logger.info(f"评测日期数: {evaluation_days}, 历史期间数: {num_historical_periods}")
         
-        # 子步骤1/5: 历史数据准备和筛选
+        # 子步骤1/5: 历史数据准备（已优化：数据在阶段3已预处理）
         self.start_timer('gpu_step1_data_preparation')
-        self.logger.info(f"[子步骤1/5] 开始历史数据准备和筛选 - prepare_historical_data")
+        self.logger.info(f"  🔍 [子步骤1/5] 历史数据准备（已优化） - 开始")
+        
+        # 数据已在阶段3预处理，直接提取
         historical_data_list = []
         period_info_list = []
-        valid_periods = 0
-        invalid_periods = 0
         
-        for idx, (data, start_date, end_date, stock_code) in enumerate(historical_periods_data):
-            if len(data) == window_size:
-                fields = ['open', 'high', 'low', 'close', 'volume']
-                historical_values = data[fields].values
-                historical_data_list.append(historical_values)
-                period_info_list.append({
-                    'start_date': start_date,
-                    'end_date': end_date,
-                    'stock_code': stock_code
-                })
-                valid_periods += 1
-            else:
-                invalid_periods += 1
-                
-            # 每处理10000个期间打印一次进度
-            if (idx + 1) % 10000 == 0:
-                self.logger.info(f"历史数据筛选进度: {idx + 1}/{num_historical_periods} ({(idx + 1)/num_historical_periods*100:.1f}%)")
+        for historical_values, start_date, end_date, stock_code in historical_periods_data:
+            historical_data_list.append(historical_values)
+            period_info_list.append({
+                'start_date': start_date,
+                'end_date': end_date,
+                'stock_code': stock_code
+            })
         
-        self.logger.info(f"历史数据筛选完成: 有效期间={valid_periods}, 无效期间={invalid_periods}")
+        valid_periods = len(historical_data_list)
+        self.logger.info(f"历史数据准备完成: 有效期间={valid_periods}（数据已在阶段3预处理）")
         self.end_timer('gpu_step1_data_preparation')
+        self.logger.info(f"  🔍 [子步骤1/5] 历史数据准备（已优化） - 完成")
         
         if not historical_data_list:
             self.logger.warning("没有有效的历史期间数据")
@@ -446,7 +438,7 @@ class GPUBatchPearsonAnalyzer:
         
         # 子步骤2/5: 创建GPU历史数据张量
         self.start_timer('gpu_step2_tensor_creation')
-        self.logger.info(f"[子步骤2/5] 开始创建GPU历史数据张量 - create_historical_tensor")
+        self.logger.info(f"  📊 [子步骤2/5] 创建GPU历史数据张量 - 开始")
         self.logger.info(f"张量形状将为: [{len(historical_data_list)}, {window_size}, 5]")
         
         historical_tensor = torch.tensor(
@@ -457,13 +449,14 @@ class GPUBatchPearsonAnalyzer:
         
         self.logger.info(f"GPU历史数据张量创建完成: {historical_tensor.shape}, 设备: {historical_tensor.device}")
         self.end_timer('gpu_step2_tensor_creation')
+        self.logger.info(f"  📊 [子步骤2/5] 创建GPU历史数据张量 - 完成")
         
         # 监控数据张量创建后的GPU显存
         self.monitor_gpu_memory("张量创建完成")
         
         # 子步骤3/5: 批量相关系数计算
         self.start_timer('gpu_step3_correlation_calculation')
-        self.logger.info(f"[子步骤3/5] 开始批量相关系数计算 - compute_batch_correlations")
+        self.logger.info(f"  ⚡ [子步骤3/5] 批量相关系数计算 - 开始")
         self.logger.info(f"输入张量形状: batch_recent_data={batch_recent_data.shape}, historical_tensor={historical_tensor.shape}")
         self.logger.info(f"目标输出形状: [{evaluation_days}, {historical_tensor.shape[0]}, 5]")
         
@@ -490,14 +483,16 @@ class GPUBatchPearsonAnalyzer:
                 self.monitor_gpu_memory(f"批次{batch_idx + 1}完成")
         
         self.end_timer('gpu_step3_correlation_calculation')
+        self.logger.info(f"  ⚡ [子步骤3/5] 批量相关系数计算 - 完成")
         
         # 子步骤4/5: 合并批次结果
         self.start_timer('gpu_step4_batch_merging')
-        self.logger.info(f"[子步骤4/5] 开始合并批次结果 - merge_batch_results")
+        self.logger.info(f"  🔗 [子步骤4/5] 合并批次结果 - 开始")
         # 合并所有批次的结果
         all_correlations = torch.cat(batch_correlations, dim=0)  # [evaluation_days, num_historical_periods, 5]
         self.logger.info(f"批次结果合并完成: 最终形状={all_correlations.shape}")
         self.end_timer('gpu_step4_batch_merging')
+        self.logger.info(f"  🔗 [子步骤4/5] 合并批次结果 - 完成")
         
         # 监控相关系数计算完成后的GPU显存
         self.monitor_gpu_memory("相关系数计算完成")
@@ -506,13 +501,14 @@ class GPUBatchPearsonAnalyzer:
         
         # 子步骤5/5: 处理批量相关性结果
         self.start_timer('gpu_step5_result_processing')
-        self.logger.info(f"[子步骤5/5] 开始处理批量相关性结果 - _process_batch_correlation_results")
+        self.logger.info(f"  📋 [子步骤5/5] 处理批量相关性结果 - 开始")
         self.logger.info(f"调用函数: _process_batch_correlation_results")
         results = self._process_batch_correlation_results(
             all_correlations, period_info_list, evaluation_days,
             batch_recent_data, historical_data_list, evaluation_dates
         )
         self.end_timer('gpu_step5_result_processing')
+        self.logger.info(f"  📋 [子步骤5/5] 处理批量相关性结果 - 完成")
         
         self.logger.info(f"批量GPU相关性计算全部完成，返回结果包含 {len(results) if results else 0} 个字段")
         return results
@@ -986,14 +982,17 @@ class GPUBatchPearsonAnalyzer:
         # 初始GPU显存监控
         self.monitor_gpu_memory("分析开始")
         
-        # 加载数据
+        # 🔄 第1阶段：数据加载 - 开始
+        self.logger.info("🔄 [阶段1/6] 数据加载 - 开始")
         if not hasattr(self, 'data') or self.data is None:
             self.data = self.load_data()
             if self.data is None:
                 self.logger.error("数据加载失败")
                 return None
+        self.logger.info("🔄 [阶段1/6] 数据加载 - 完成")
         
-        # 准备评测日期
+        # 📋 第2阶段：数据准备 - 开始
+        self.logger.info("📋 [阶段2/6] 数据准备 - 开始")
         evaluation_dates = self.prepare_evaluation_dates(self.backtest_date)
         
         if not evaluation_dates:
@@ -1009,26 +1008,36 @@ class GPUBatchPearsonAnalyzer:
         
         # 监控数据准备后的GPU显存
         self.monitor_gpu_memory("数据准备完成")
+        self.logger.info("📋 [阶段2/6] 数据准备 - 完成")
         
-        # 收集历史期间数据
+        # 📚 第3阶段：历史数据收集 - 开始
+        self.logger.info("📚 [阶段3/6] 历史数据收集 - 开始")
         earliest_eval_date = min(valid_dates)
         historical_periods_data = self._collect_historical_periods_data(earliest_eval_date)
         
         if not historical_periods_data:
             self.logger.error("没有有效的历史期间数据")
             return None
+        self.logger.info("📚 [阶段3/6] 历史数据收集 - 完成")
         
-        # 执行批量GPU相关性计算
+        # 🚀 第4阶段：GPU计算 - 开始
+        self.logger.info("🚀 [阶段4/6] GPU计算 - 开始")
         self.monitor_gpu_memory("GPU计算开始")
         batch_correlations = self.calculate_batch_gpu_correlation(batch_recent_data, historical_periods_data, valid_dates)
         self.monitor_gpu_memory("GPU计算完成")
+        self.logger.info("🚀 [阶段4/6] GPU计算 - 完成")
         
         if not batch_correlations:
             self.logger.error("批量相关性计算失败")
             return None
         
-        # 处理批量结果
+        # ⚙️ 第5阶段：结果处理 - 开始
+        self.logger.info("⚙️ [阶段5/6] 结果处理 - 开始")
         batch_results = self.process_batch_results(batch_correlations, valid_dates, historical_periods_data)
+        self.logger.info("⚙️ [阶段5/6] 结果处理 - 完成")
+        
+        # 📊 第6阶段：最终处理 - 开始
+        self.logger.info("📊 [阶段6/6] 最终处理 - 开始")
         
         # 保存结果标志（添加缺失的属性）
         self.save_results = True
@@ -1066,6 +1075,7 @@ class GPUBatchPearsonAnalyzer:
         
         # 最终GPU显存监控
         self.monitor_gpu_memory("分析完成")
+        self.logger.info("📊 [阶段6/6] 最终处理 - 完成")
         
         # 输出分析总结
         self.logger.info("=" * 80)
@@ -1109,9 +1119,11 @@ class GPUBatchPearsonAnalyzer:
         
         historical_periods_data = []
         
-        # 收集自身历史数据
-        self_historical_data = self._collect_self_historical_data(earliest_eval_date)
-        historical_periods_data.extend(self_historical_data)
+        # 在all模式下，自身历史数据已经包含在对比股票数据中，无需单独收集
+        if self.comparison_mode != 'all':
+            # 收集自身历史数据
+            self_historical_data = self._collect_self_historical_data(earliest_eval_date)
+            historical_periods_data.extend(self_historical_data)
         
         # 收集对比股票数据
         if self.comparison_mode != 'self_only':
@@ -1123,46 +1135,91 @@ class GPUBatchPearsonAnalyzer:
         return historical_periods_data
     
     def _collect_self_historical_data(self, earliest_eval_date):
-        """收集自身历史数据"""
+        """收集自身历史数据（已优化：直接筛选和预处理）"""
         historical_data = []
+        valid_periods = 0
+        invalid_periods = 0
         
         # 使用所有可用数据，不进行日期截断
         available_data = self.data
         
         if len(available_data) < self.window_size:
+            self.logger.info(f"自身数据长度 {len(available_data)} 小于窗口大小 {self.window_size}，跳过")
             return historical_data
         
-        # 生成历史期间
+        # 定义需要的字段
+        fields = ['open', 'high', 'low', 'close', 'volume']
+        
+        # 生成历史期间并直接进行筛选和预处理
         for i in range(len(available_data) - self.window_size + 1):
             period_data = available_data.iloc[i:i + self.window_size]
-            start_date = period_data.index[0]
-            end_date = period_data.index[-1]
             
-            historical_data.append((period_data, start_date, end_date, self.stock_code))
+            # 检查数据长度是否正确
+            if len(period_data) == self.window_size:
+                start_date = period_data.index[0]
+                end_date = period_data.index[-1]
+                
+                # 直接提取并预处理数据
+                historical_values = period_data[fields].values
+                
+                # 存储预处理后的数据
+                historical_data.append((historical_values, start_date, end_date, self.stock_code))
+                valid_periods += 1
+            else:
+                invalid_periods += 1
         
-        self.logger.info(f"收集到 {len(historical_data)} 个自身历史期间（包含所有可用数据）")
+        self.logger.info(f"自身历史数据收集完成: 有效期间={valid_periods}, 无效期间={invalid_periods}")
         return historical_data
     
     def _collect_comparison_historical_data(self, earliest_eval_date):
-        """收集对比股票历史数据"""
+        """收集对比股票历史数据（已优化：直接筛选和预处理）"""
         historical_data = []
+        total_valid_periods = 0
+        total_invalid_periods = 0
+        processed_stocks = 0
+        
+        # 定义需要的字段
+        fields = ['open', 'high', 'low', 'close', 'volume']
         
         for stock_code, stock_data in self.loaded_stocks_data.items():
             # 使用所有可用数据，不进行日期截断
             available_data = stock_data
             
             if len(available_data) < self.window_size:
+                if self.debug:
+                    self.logger.info(f"股票 {stock_code} 数据长度 {len(available_data)} 小于窗口大小 {self.window_size}，跳过")
                 continue
             
-            # 生成该股票的历史期间
+            stock_valid_periods = 0
+            stock_invalid_periods = 0
+            
+            # 生成该股票的历史期间并直接进行筛选和预处理
             for i in range(len(available_data) - self.window_size + 1):
                 period_data = available_data.iloc[i:i + self.window_size]
-                start_date = period_data.index[0]
-                end_date = period_data.index[-1]
                 
-                historical_data.append((period_data, start_date, end_date, stock_code))
+                # 检查数据长度是否正确
+                if len(period_data) == self.window_size:
+                    start_date = period_data.index[0]
+                    end_date = period_data.index[-1]
+                    
+                    # 直接提取并预处理数据
+                    historical_values = period_data[fields].values
+                    
+                    # 存储预处理后的数据
+                    historical_data.append((historical_values, start_date, end_date, stock_code))
+                    stock_valid_periods += 1
+                    total_valid_periods += 1
+                else:
+                    stock_invalid_periods += 1
+                    total_invalid_periods += 1
+            
+            processed_stocks += 1
+            
+            # 每处理100只股票打印一次进度
+            if processed_stocks % 100 == 0:
+                self.logger.info(f"对比股票数据收集进度: {processed_stocks}/{len(self.loaded_stocks_data)} 只股票")
         
-        self.logger.info(f"收集到 {len(historical_data)} 个对比股票历史期间（包含所有可用数据）")
+        self.logger.info(f"对比股票历史数据收集完成: 处理股票={processed_stocks}, 有效期间={total_valid_periods}, 无效期间={total_invalid_periods}")
         return historical_data
     
 
