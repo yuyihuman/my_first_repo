@@ -148,6 +148,9 @@ class GPUBatchPearsonAnalyzer:
         # 多进程设置
         self.num_processes = num_processes if num_processes is not None else max(1, mp.cpu_count() - 1)
         
+        # 设置CSV保存功能（默认启用）
+        self.save_results = True
+        
         # GPU设备设置
         self.device = self._setup_device()
         
@@ -740,8 +743,11 @@ class GPUBatchPearsonAnalyzer:
         }
         
         # 保存结果到CSV（原阶段5的功能）
-        if hasattr(self, 'save_results') and self.save_results:
+        if getattr(self, 'save_results', True):  # 默认为True，确保CSV保存功能正常工作
+            self.logger.info("开始保存批量结果到CSV文件...")
             self.save_batch_results_to_csv(final_result)
+        else:
+            self.logger.warning("CSV保存功能已禁用，跳过保存步骤")
         
         self.logger.info(f"批量结果处理完成（已整合详细结果处理和保存功能）")
         self.logger.info(f"总高相关性期间: {batch_results['summary']['total_high_correlations']}")
