@@ -633,7 +633,7 @@ class GPUBatchPearsonAnalyzer:
     def _process_batch_correlation_results(self, correlations_tensor, period_info_list, evaluation_days,
                                           batch_recent_data=None, historical_data_list=None, evaluation_dates=None):
         """
-        处理批量相关性计算结果（整合了阶段5的详细结果处理功能）
+        处理批量相关性计算结果（整合了阶段5的详细结果处理和保存功能）
         
         Args:
             correlations_tensor: [evaluation_days, num_historical_periods, 5]
@@ -642,9 +642,10 @@ class GPUBatchPearsonAnalyzer:
             evaluation_dates: 评测日期列表
             
         Returns:
-            dict: 处理后的完整结果，包含详细结果和统计信息
+            dict: 处理后的完整最终结果，包含详细结果、统计信息和性能数据
         """
-        self.start_timer('batch_result_processing')
+        # 使用统一的计时器，覆盖原来的4-5和5-1步骤
+        self.start_timer('integrated_result_processing')
         
         correlations_np = correlations_tensor.cpu().numpy()
         fields = ['open', 'high', 'low', 'close', 'volume']
@@ -708,8 +709,8 @@ class GPUBatchPearsonAnalyzer:
                         'prediction_stats': stats
                     })
         
-        # 统计结果
-        results = {
+        # 构建批量结果
+        batch_results = {
             'evaluation_days': evaluation_days,
             'num_historical_periods': len(period_info_list),
             'high_correlation_counts': high_corr_mask.sum(axis=1).tolist(),  # 每个评测日期的高相关数量
@@ -726,12 +727,28 @@ class GPUBatchPearsonAnalyzer:
             }
         }
         
-        self.logger.info(f"批量结果处理完成（已整合详细结果处理）")
-        self.logger.info(f"总高相关性期间: {results['summary']['total_high_correlations']}")
-        self.logger.info(f"平均每日高相关数: {results['summary']['avg_high_correlations_per_day']:.2f}")
+        # 整合原阶段5的功能：构建最终结果并保存
+        final_result = {
+            'stock_code': self.stock_code,
+            'backtest_date': self.backtest_date,
+            'evaluation_days': len(evaluation_dates) if evaluation_dates else evaluation_days,
+            'window_size': self.window_size,
+            'threshold': self.threshold,
+            'evaluation_dates': evaluation_dates if evaluation_dates else [],
+            'batch_results': batch_results,
+            'performance_stats': self._get_performance_stats()
+        }
         
-        self.end_timer('batch_result_processing')
-        return results
+        # 保存结果到CSV（原阶段5的功能）
+        if hasattr(self, 'save_results') and self.save_results:
+            self.save_batch_results_to_csv(final_result)
+        
+        self.logger.info(f"批量结果处理完成（已整合详细结果处理和保存功能）")
+        self.logger.info(f"总高相关性期间: {batch_results['summary']['total_high_correlations']}")
+        self.logger.info(f"平均每日高相关数: {batch_results['summary']['avg_high_correlations_per_day']:.2f}")
+        
+        self.end_timer('integrated_result_processing')
+        return final_result
     
     def _print_detailed_evaluation_data(self, correlations_np, avg_correlations_filtered, 
                                        period_info_list, high_corr_mask, fields,
@@ -1062,40 +1079,11 @@ class GPUBatchPearsonAnalyzer:
             self.logger.error("批量相关性计算失败")
             return None
         
-        # 📊 第5阶段：最终处理 - 开始
-        self.logger.info("📊 [阶段5/5] 最终处理 - 开始")
+        # 📊 第5阶段：最终处理 - 已整合到阶段4-5中
+        self.logger.info("📊 [阶段5/5] 最终处理 - 已整合完成")
         
-        # 直接使用阶段4-5的整合结果，无需重复处理
-        batch_results = batch_correlations  # 已包含详细结果处理
-        
-        # 保存结果标志（添加缺失的属性）
-        self.save_results = True
-        
-        # 保存结果
-        if self.save_results:
-            # 构建完整结果用于保存
-            save_result = {
-                'stock_code': self.stock_code,
-                'backtest_date': self.backtest_date,
-                'evaluation_days': len(valid_dates),
-                'window_size': self.window_size,
-                'threshold': self.threshold,
-                'evaluation_dates': valid_dates,
-                'batch_results': batch_results
-            }
-            self.save_batch_results_to_csv(save_result)
-        
-        # 构建最终结果
-        final_result = {
-            'stock_code': self.stock_code,
-            'backtest_date': self.backtest_date,
-            'evaluation_days': len(valid_dates),
-            'window_size': self.window_size,
-            'threshold': self.threshold,
-            'evaluation_dates': valid_dates,
-            'batch_results': batch_results,
-            'performance_stats': self._get_performance_stats()
-        }
+        # 直接使用阶段4-5的整合结果（已包含保存和最终结果构建）
+        final_result = batch_correlations
         
         self.end_timer('total_batch_analysis')
         
@@ -1110,18 +1098,18 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info("=" * 80)
         self.logger.info("批量分析结果总结:")
         self.logger.info(f"评测日期数量: {len(valid_dates)}")
-        self.logger.info(f"总高相关性期间: {batch_results['summary']['total_high_correlations']}")
-        self.logger.info(f"平均每日高相关数量: {batch_results['summary']['avg_high_correlations_per_day']:.2f}")
-        self.logger.info(f"最大每日高相关数量: {batch_results['summary']['max_high_correlations_per_day']}")
-        if batch_results['summary']['overall_avg_correlation'] > 0:
-            self.logger.info(f"整体平均相关系数: {batch_results['summary']['overall_avg_correlation']:.4f}")
+        self.logger.info(f"总高相关性期间: {final_result['batch_results']['summary']['total_high_correlations']}")
+        self.logger.info(f"平均每日高相关数量: {final_result['batch_results']['summary']['avg_high_correlations_per_day']:.2f}")
+        self.logger.info(f"最大每日高相关数量: {final_result['batch_results']['summary']['max_high_correlations_per_day']}")
+        if final_result['batch_results']['summary']['overall_avg_correlation'] > 0:
+            self.logger.info(f"整体平均相关系数: {final_result['batch_results']['summary']['overall_avg_correlation']:.4f}")
         
         # 查找并打印相关系数最大的条目
         max_correlation = 0
         max_correlation_item = None
         max_eval_date = None
         
-        for result in batch_results['detailed_results']:
+        for result in final_result['batch_results']['detailed_results']:
             for period in result['high_correlation_periods']:
                 if period['avg_correlation'] > max_correlation:
                     max_correlation = period['avg_correlation']
