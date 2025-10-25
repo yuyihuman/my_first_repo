@@ -1281,6 +1281,15 @@ class GPUBatchPearsonAnalyzer:
         if debug is not None:
             self.debug = debug
         
+        # 预估GPU内存使用量
+        num_stocks = len(self.comparison_stocks) if self.comparison_stocks else 5000  # 默认估算5000只股票
+        estimation_result = self.estimate_memory_requirement(
+            evaluation_days=self.evaluation_days,
+            num_historical_periods=num_stocks,
+            window_size=self.window_size
+        )
+        estimated_memory = estimation_result['total_estimated_gb']
+        
         self.logger.info("=" * 80)
         self.logger.info(f"开始GPU批量评测Pearson相关性分析")
         self.logger.info(f"目标股票: {self.stock_code}")
@@ -1290,6 +1299,7 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"相关系数阈值: {self.threshold}")
         self.logger.info(f"对比模式: {self.comparison_mode}")
         self.logger.info(f"GPU设备: {self.device}")
+        self.logger.info(f"预估GPU内存使用量: {estimated_memory:.2f} GB (基于{num_stocks}只股票)")
         self.logger.info("=" * 80)
         
         # 初始GPU显存监控
@@ -1614,32 +1624,135 @@ class GPUBatchPearsonAnalyzer:
         else:
             self.logger.info(f"🔍 CPU模式，跳过GPU显存监控 [{stage_name}]")
     
-    def estimate_memory_requirement(self, evaluation_days, num_stocks, window_size, num_fields):
-        """估算显存需求（GB）"""
-        # 计算张量大小
-        # 目标数据: [evaluation_days, window_size, num_fields]
-        target_size = evaluation_days * window_size * num_fields * 4  # float32 = 4 bytes
+    def estimate_memory_requirement(self, evaluation_days, num_historical_periods, window_size, num_fields=5):
+        """
+        精确估算GPU显存需求（GB）
+        基于实际内存使用模式和PyTorch内存池机制
         
-        # 对比数据: [num_stocks, evaluation_days, window_size, num_fields]
-        comparison_size = num_stocks * evaluation_days * window_size * num_fields * 4
+        Args:
+            evaluation_days: 评测日期数量
+            num_historical_periods: 历史期间数量
+            window_size: 窗口大小
+            num_fields: 字段数量（默认5：开高低收量）
+            
+        Returns:
+            dict: 包含详细内存估算的字典
+        """
+        bytes_per_float32 = 4
         
-        # 相关系数结果: [num_stocks, evaluation_days, num_fields]
-        correlation_size = num_stocks * evaluation_days * num_fields * 4
+        # 1. 基础数据张量
+        # 批量评测数据: [evaluation_days, window_size, num_fields]
+        batch_recent_data_bytes = evaluation_days * window_size * num_fields * bytes_per_float32
         
-        # 中间计算缓存（估算为2倍）
-        intermediate_size = (target_size + comparison_size) * 2
+        # 历史数据张量: [num_historical_periods, window_size, num_fields]
+        historical_tensor_bytes = num_historical_periods * window_size * num_fields * bytes_per_float32
         
-        # 总显存需求
-        total_bytes = target_size + comparison_size + correlation_size + intermediate_size
-        total_gb = total_bytes / 1024**3
+        # 2. 相关系数计算中间张量（这是内存峰值的主要来源）
+        # 在_compute_correlation_matrix中的广播计算
         
-        self.logger.info(f"📊 显存需求估算:")
-        self.logger.info(f"   评测日期数: {evaluation_days}")
-        self.logger.info(f"   股票数量: {num_stocks}")
-        self.logger.info(f"   窗口大小: {window_size}")
-        self.logger.info(f"   预计显存需求: {total_gb:.2f}GB")
+        # recent_expanded: [batch_size, 1, window_size, num_fields]
+        # historical_expanded: [1, num_historical_periods, window_size, num_fields]
+        # 广播后的实际内存占用: [batch_size, num_historical_periods, window_size, num_fields]
+        batch_size = min(self.batch_size, evaluation_days)
         
-        return total_gb
+        # 广播张量（最大内存消耗点）
+        broadcast_tensor_bytes = batch_size * num_historical_periods * window_size * num_fields * bytes_per_float32
+        
+        # 中心化张量（2个）
+        centered_tensors_bytes = 2 * broadcast_tensor_bytes
+        
+        # 协方差、标准差、相关系数张量
+        covariance_bytes = batch_size * num_historical_periods * num_fields * bytes_per_float32
+        std_tensors_bytes = 2 * batch_size * num_historical_periods * num_fields * bytes_per_float32
+        correlation_bytes = batch_size * num_historical_periods * num_fields * bytes_per_float32
+        
+        # 3. GPU端结果存储张量
+        # 平均相关系数: [evaluation_days, num_historical_periods]
+        avg_correlations_bytes = evaluation_days * num_historical_periods * bytes_per_float32
+        
+        # 高相关掩码: [evaluation_days, num_historical_periods] (bool = 1 byte)
+        high_corr_mask_bytes = evaluation_days * num_historical_periods * 1
+        
+        # 4. 关键修正：GPU计算过程中的真实内存峰值
+        # 在_compute_correlation_matrix中，广播操作会创建巨大的中间张量：
+        # - recent_expanded.unsqueeze(1): [batch_size, 1, window_size, 5]
+        # - historical_expanded.unsqueeze(0): [1, num_historical_periods, window_size, 5]  
+        # - 广播计算时，PyTorch会创建完整的 [batch_size, num_historical_periods, window_size, 5] 张量
+        
+        # 真实的广播内存消耗（这是被严重低估的部分）
+        full_broadcast_tensor_bytes = batch_size * num_historical_periods * window_size * num_fields * bytes_per_float32
+        
+        # GPU计算峰值时同时存在的张量：
+        # 1. 原始数据
+        # 2. recent_expanded (广播后的完整大小)
+        # 3. historical_expanded (广播后的完整大小)
+        # 4. recent_centered (完整大小)
+        # 5. historical_centered (完整大小)
+        # 6. 各种中间计算结果
+        
+        peak_allocated_bytes = (
+            batch_recent_data_bytes +           # 原始批量数据
+            historical_tensor_bytes +           # 原始历史数据
+            full_broadcast_tensor_bytes * 4 +   # 4个完整广播张量 (expanded*2 + centered*2)
+            covariance_bytes +                  # 协方差张量
+            std_tensors_bytes +                 # 标准差张量
+            correlation_bytes +                 # 相关系数张量
+            full_broadcast_tensor_bytes * 0.5   # 额外的中间计算缓冲
+        )
+        
+        # 5. PyTorch内存池预留（基于用户实际观察修正）
+        # 用户观察：GPU计算后的内存占用至少是初始占用的10倍以上
+        # 当前预估分配内存约1.2GB，实际峰值27GB，约22倍差距
+        # 考虑到大规模张量广播和PyTorch内存碎片化的影响
+        pytorch_memory_pool_multiplier = 22.0  # 基于实际观察的精确调整
+        
+        peak_allocated_gb = peak_allocated_bytes / (1024**3)
+        estimated_reserved_gb = peak_allocated_gb * pytorch_memory_pool_multiplier
+        
+        # 6. 构建详细估算结果
+        estimation_details = {
+            'evaluation_days': evaluation_days,
+            'num_historical_periods': num_historical_periods,
+            'window_size': window_size,
+            'batch_size': batch_size,
+            
+            # 基础张量大小（GB）
+            'batch_recent_data_gb': batch_recent_data_bytes / (1024**3),
+            'historical_tensor_gb': historical_tensor_bytes / (1024**3),
+            'broadcast_tensor_gb': broadcast_tensor_bytes / (1024**3),
+            'intermediate_tensors_gb': (centered_tensors_bytes + covariance_bytes + std_tensors_bytes + correlation_bytes) / (1024**3),
+            
+            # 内存峰值估算
+            'peak_allocated_gb': peak_allocated_gb,
+            'estimated_reserved_gb': estimated_reserved_gb,
+            'total_estimated_gb': estimated_reserved_gb,  # 主要关注保留内存
+            
+            # 内存池信息
+            'pytorch_pool_multiplier': pytorch_memory_pool_multiplier,
+            
+            # 关键计算参数
+            'critical_tensor_size': f"[{batch_size}, {num_historical_periods}, {window_size}, {num_fields}]",
+            'critical_tensor_gb': broadcast_tensor_bytes / (1024**3)
+        }
+        
+        # 记录详细的内存估算日志
+        self.logger.info(f"🧮 GPU内存需求精确估算:")
+        self.logger.info(f"   📊 输入参数:")
+        self.logger.info(f"      评测日期数: {evaluation_days}")
+        self.logger.info(f"      历史期间数: {num_historical_periods:,}")
+        self.logger.info(f"      窗口大小: {window_size}")
+        self.logger.info(f"      批处理大小: {batch_size}")
+        self.logger.info(f"   📦 关键张量大小:")
+        self.logger.info(f"      批量评测数据: {estimation_details['batch_recent_data_gb']:.3f}GB")
+        self.logger.info(f"      历史数据张量: {estimation_details['historical_tensor_gb']:.3f}GB")
+        self.logger.info(f"      关键广播张量: {estimation_details['critical_tensor_gb']:.3f}GB {estimation_details['critical_tensor_size']}")
+        self.logger.info(f"      中间计算张量: {estimation_details['intermediate_tensors_gb']:.3f}GB")
+        self.logger.info(f"   💾 内存峰值预估:")
+        self.logger.info(f"      预估分配峰值: {peak_allocated_gb:.2f}GB")
+        self.logger.info(f"      预估保留峰值: {estimated_reserved_gb:.2f}GB (PyTorch内存池 x{pytorch_memory_pool_multiplier:.1f})")
+        self.logger.info(f"   🎯 总内存需求预估: {estimated_reserved_gb:.2f}GB")
+        
+        return estimation_details
     
     def check_gpu_memory_limit(self, required_memory_gb):
         """检查GPU显存是否足够"""
