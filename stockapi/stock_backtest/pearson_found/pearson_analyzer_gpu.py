@@ -755,6 +755,265 @@ class GPUBatchPearsonAnalyzer:
         
         self.end_timer('integrated_result_processing')
         return final_result
+
+    def calculate_batch_gpu_correlation_optimized(self, batch_recent_data, historical_periods_data, evaluation_dates=None):
+        """
+        优化版批量GPU相关性计算 - 将4-3和4-5步骤合并，减少CPU-GPU通信开销
+        
+        Args:
+            batch_recent_data: 批量评测数据 [evaluation_days, window_size, 5]
+            historical_periods_data: 历史期间数据列表
+            evaluation_dates: 评测日期列表
+            
+        Returns:
+            dict: 批量相关性结果
+        """
+        
+        if batch_recent_data is None or len(historical_periods_data) == 0:
+            return {}
+
+        evaluation_days, window_size, num_fields = batch_recent_data.shape
+        num_historical_periods = len(historical_periods_data)
+        
+        self.logger.info(f"开始优化版批量GPU相关性计算")
+        self.logger.info(f"评测日期数: {evaluation_days}, 历史期间数: {num_historical_periods}")
+        
+        # 子步骤1/3: 历史数据准备（已优化：数据在阶段3已预处理）
+        self.start_timer('gpu_step1_data_preparation')
+        self.logger.info(f"  🔍 [子步骤1/3] 历史数据准备（已优化） - 开始")
+        
+        # 数据已在阶段3预处理，直接提取
+        historical_data_list = []
+        period_info_list = []
+        
+        for historical_values, start_date, end_date, stock_code in historical_periods_data:
+            historical_data_list.append(historical_values)
+            period_info_list.append({
+                'start_date': start_date,
+                'end_date': end_date,
+                'stock_code': stock_code
+            })
+        
+        valid_periods = len(historical_data_list)
+        self.logger.info(f"历史数据准备完成: 有效期间={valid_periods}（数据已在阶段3预处理）")
+        self.end_timer('gpu_step1_data_preparation')
+        self.logger.info(f"  🔍 [子步骤1/3] 历史数据准备（已优化） - 完成")
+        
+        if not historical_data_list:
+            self.logger.warning("没有有效的历史期间数据")
+            return {}
+        
+        # 子步骤2/3: 创建GPU历史数据张量
+        self.start_timer('gpu_step2_tensor_creation')
+        self.logger.info(f"  📊 [子步骤2/3] 创建GPU历史数据张量 - 开始")
+        self.logger.info(f"张量形状将为: [{len(historical_data_list)}, {window_size}, 5]")
+        
+        historical_tensor = torch.tensor(
+            np.stack(historical_data_list, axis=0), 
+            dtype=torch.float32, 
+            device=self.device
+        )  # [num_historical_periods, window_size, 5]
+        
+        self.logger.info(f"GPU历史数据张量创建完成: {historical_tensor.shape}, 设备: {historical_tensor.device}")
+        self.end_timer('gpu_step2_tensor_creation')
+        self.logger.info(f"  📊 [子步骤2/3] 创建GPU历史数据张量 - 完成")
+        
+        # 监控数据张量创建后的GPU显存
+        self.monitor_gpu_memory("张量创建完成")
+        
+        # 子步骤3/3: 合并的GPU相关系数计算和结果处理
+        self.start_timer('gpu_step3_integrated_correlation_processing')
+        self.logger.info(f"  ⚡ [子步骤3/3] 合并的GPU相关系数计算和结果处理 - 开始")
+        self.logger.info(f"输入张量形状: batch_recent_data={batch_recent_data.shape}, historical_tensor={historical_tensor.shape}")
+        
+        # 使用优化的GPU端一体化处理
+        results = self._compute_and_process_correlations_gpu(
+            batch_recent_data, historical_tensor, period_info_list, 
+            evaluation_days, evaluation_dates
+        )
+        
+        self.end_timer('gpu_step3_integrated_correlation_processing')
+        self.logger.info(f"  ⚡ [子步骤3/3] 合并的GPU相关系数计算和结果处理 - 完成")
+        
+        self.logger.info(f"优化版批量GPU相关性计算全部完成，返回结果包含 {len(results) if results else 0} 个字段")
+        return results
+
+    def _compute_and_process_correlations_gpu(self, batch_recent_data, historical_tensor, 
+                                            period_info_list, evaluation_days, evaluation_dates):
+        """
+        GPU端一体化相关系数计算和结果处理
+        
+        Args:
+            batch_recent_data: [evaluation_days, window_size, 5]
+            historical_tensor: [num_historical_periods, window_size, 5]
+            period_info_list: 历史期间信息列表
+            evaluation_days: 评测日期数量
+            evaluation_dates: 评测日期列表
+            
+        Returns:
+            dict: 处理后的完整最终结果
+        """
+        # 分批处理以避免内存溢出
+        batch_size = min(self.batch_size, evaluation_days)
+        total_batches = (evaluation_days + batch_size - 1) // batch_size
+        
+        self.logger.info(f"GPU一体化处理配置: batch_size={batch_size}, total_batches={total_batches}")
+        
+        # GPU端存储所有结果
+        all_avg_correlations = []
+        all_high_corr_masks = []
+        all_high_corr_counts = []
+        
+        # 创建阈值张量（在GPU上）
+        threshold_tensor = torch.tensor(self.threshold, device=self.device, dtype=torch.float32)
+        self_correlation_threshold = torch.tensor(0.9999, device=self.device, dtype=torch.float32)
+        
+        for batch_idx, i in enumerate(range(0, evaluation_days, batch_size)):
+            end_idx = min(i + batch_size, evaluation_days)
+            current_batch = batch_recent_data[i:end_idx]  # [batch_size, window_size, 5]
+            
+            self.logger.info(f"GPU处理批次 {batch_idx + 1}/{total_batches}: 评测日期 {i+1}-{end_idx} (形状: {current_batch.shape})")
+            
+            # 计算当前批次的相关系数
+            batch_correlations = self._compute_correlation_matrix(current_batch, historical_tensor)
+            # batch_correlations: [batch_size, num_historical_periods, 5]
+            
+            # GPU端计算平均相关系数
+            batch_avg_correlations = batch_correlations.mean(dim=2)  # [batch_size, num_historical_periods]
+            
+            # GPU端过滤自相关（相关性 >= 0.9999）
+            self_corr_mask = batch_avg_correlations >= self_correlation_threshold
+            batch_avg_correlations_filtered = batch_avg_correlations.clone()
+            batch_avg_correlations_filtered[self_corr_mask] = 0.0
+            
+            # GPU端计算高相关性掩码
+            batch_high_corr_mask = batch_avg_correlations_filtered > threshold_tensor
+            
+            # GPU端计算每个评测日期的高相关数量
+            batch_high_corr_counts = batch_high_corr_mask.sum(dim=1)  # [batch_size]
+            
+            # 存储批次结果（仍在GPU上）
+            all_avg_correlations.append(batch_avg_correlations_filtered)
+            all_high_corr_masks.append(batch_high_corr_mask)
+            all_high_corr_counts.append(batch_high_corr_counts)
+            
+            # 监控每个批次后的GPU显存
+            if batch_idx % max(1, total_batches // 5) == 0:  # 每20%进度监控一次
+                self.monitor_gpu_memory(f"GPU批次{batch_idx + 1}完成")
+        
+        # 合并所有批次的结果（仍在GPU上）
+        all_avg_correlations_tensor = torch.cat(all_avg_correlations, dim=0)  # [evaluation_days, num_historical_periods]
+        all_high_corr_masks_tensor = torch.cat(all_high_corr_masks, dim=0)    # [evaluation_days, num_historical_periods]
+        all_high_corr_counts_tensor = torch.cat(all_high_corr_counts, dim=0)  # [evaluation_days]
+        
+        # GPU端计算全局统计
+        total_high_correlations = all_high_corr_masks_tensor.sum()
+        avg_high_correlations_per_day = all_high_corr_counts_tensor.float().mean()
+        max_high_correlations_per_day = all_high_corr_counts_tensor.max()
+        
+        # 计算整体平均相关系数（只对高相关性的）
+        high_corr_values = all_avg_correlations_tensor[all_high_corr_masks_tensor]
+        overall_avg_correlation = high_corr_values.mean() if high_corr_values.numel() > 0 else torch.tensor(0.0, device=self.device)
+        
+        self.logger.info(f"GPU端统计完成 - 总高相关数: {total_high_correlations.item()}, "
+                        f"平均每日高相关数: {avg_high_correlations_per_day.item():.2f}")
+        
+        # 只在需要详细结果时才传输到CPU
+        if evaluation_dates and len(evaluation_dates) > 0:
+            # 传输必要的数据到CPU进行详细结果构建
+            avg_correlations_cpu = all_avg_correlations_tensor.cpu().numpy()
+            high_corr_masks_cpu = all_high_corr_masks_tensor.cpu().numpy()
+            
+            detailed_results = self._build_detailed_results_cpu(
+                avg_correlations_cpu, high_corr_masks_cpu, period_info_list, evaluation_dates
+            )
+        else:
+            detailed_results = []
+        
+        # 构建最终结果（大部分数据已在GPU上计算完成）
+        batch_results = {
+            'evaluation_days': evaluation_days,
+            'num_historical_periods': len(period_info_list),
+            'high_correlation_counts': all_high_corr_counts_tensor.cpu().tolist(),
+            'avg_correlations': all_avg_correlations_tensor.cpu().tolist(),
+            'period_info': period_info_list,
+            'detailed_results': detailed_results,
+            'summary': {
+                'total_high_correlations': int(total_high_correlations.item()),
+                'avg_high_correlations_per_day': float(avg_high_correlations_per_day.item()),
+                'max_high_correlations_per_day': int(max_high_correlations_per_day.item()),
+                'overall_avg_correlation': float(overall_avg_correlation.item())
+            }
+        }
+        
+        # 构建最终结果
+        final_result = {
+            'stock_code': self.stock_code,
+            'backtest_date': self.backtest_date,
+            'evaluation_days': len(evaluation_dates) if evaluation_dates else evaluation_days,
+            'window_size': self.window_size,
+            'threshold': self.threshold,
+            'evaluation_dates': evaluation_dates if evaluation_dates else [],
+            'batch_results': batch_results,
+            'performance_stats': self._get_performance_stats()
+        }
+        
+        # 保存结果到CSV
+        if getattr(self, 'save_results', True):
+            self.logger.info("开始保存优化版批量结果到CSV文件...")
+            self.save_batch_results_to_csv(final_result)
+        
+        return final_result
+
+    def _build_detailed_results_cpu(self, avg_correlations_cpu, high_corr_masks_cpu, 
+                                   period_info_list, evaluation_dates):
+        """
+        在CPU上构建详细结果（仅在需要时调用）
+        
+        Args:
+            avg_correlations_cpu: CPU上的平均相关系数 [evaluation_days, num_historical_periods]
+            high_corr_masks_cpu: CPU上的高相关性掩码 [evaluation_days, num_historical_periods]
+            period_info_list: 历史期间信息列表
+            evaluation_dates: 评测日期列表
+            
+        Returns:
+            list: 详细结果列表
+        """
+        detailed_results = []
+        
+        for eval_idx, eval_date in enumerate(evaluation_dates):
+            if eval_idx < avg_correlations_cpu.shape[0]:
+                eval_correlations = avg_correlations_cpu[eval_idx]
+                eval_high_corr_mask = high_corr_masks_cpu[eval_idx]
+                
+                # 找到高相关性期间
+                high_corr_periods = []
+                high_corr_indices = np.where(eval_high_corr_mask)[0]
+                
+                for hist_idx in high_corr_indices:
+                    if hist_idx < len(period_info_list):
+                        period_data = period_info_list[hist_idx]
+                        correlation = eval_correlations[hist_idx]
+                        
+                        high_corr_periods.append({
+                            'start_date': period_data['start_date'],
+                            'end_date': period_data['end_date'],
+                            'avg_correlation': float(correlation),
+                            'stock_code': period_data['stock_code'],
+                            'source': 'gpu_optimized'
+                        })
+                
+                # 计算该评测日期的预测统计
+                stats = self.calculate_future_performance_stats(self.data, high_corr_periods)
+                
+                detailed_results.append({
+                    'evaluation_date': eval_date,
+                    'high_correlation_periods': high_corr_periods,
+                    'daily_high_count': len(high_corr_periods),
+                    'prediction_stats': stats
+                })
+        
+        return detailed_results
     
     def _print_detailed_evaluation_data(self, correlations_np, avg_correlations_filtered, 
                                        period_info_list, high_corr_mask, fields,
@@ -1074,12 +1333,12 @@ class GPUBatchPearsonAnalyzer:
             return None
         self.logger.info("📚 [阶段3/5] 历史数据收集 - 完成")
         
-        # 🚀 第4阶段：GPU计算与结果处理 - 开始（整合了原阶段4-5和5）
-        self.logger.info("🚀 [阶段4/5] GPU计算与结果处理 - 开始")
+        # 🚀 第4阶段：GPU计算与结果处理 - 开始（优化版：4-3和4-5步骤合并）
+        self.logger.info("🚀 [阶段4/5] GPU计算与结果处理 - 开始（优化版）")
         self.monitor_gpu_memory("GPU计算开始")
-        batch_correlations = self.calculate_batch_gpu_correlation(batch_recent_data, historical_periods_data, valid_dates)
+        batch_correlations = self.calculate_batch_gpu_correlation_optimized(batch_recent_data, historical_periods_data, valid_dates)
         self.monitor_gpu_memory("GPU计算完成")
-        self.logger.info("🚀 [阶段4/5] GPU计算与结果处理 - 完成")
+        self.logger.info("🚀 [阶段4/5] GPU计算与结果处理 - 完成（优化版）")
         
         if not batch_correlations:
             self.logger.error("批量相关性计算失败")
