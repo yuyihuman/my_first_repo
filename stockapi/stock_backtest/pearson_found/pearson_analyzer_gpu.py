@@ -1281,15 +1281,6 @@ class GPUBatchPearsonAnalyzer:
         if debug is not None:
             self.debug = debug
         
-        # 预估GPU内存使用量
-        num_stocks = len(self.comparison_stocks) if self.comparison_stocks else 5000  # 默认估算5000只股票
-        estimation_result = self.estimate_memory_requirement(
-            evaluation_days=self.evaluation_days,
-            num_historical_periods=num_stocks,
-            window_size=self.window_size
-        )
-        estimated_memory = estimation_result['total_estimated_gb']
-        
         self.logger.info("=" * 80)
         self.logger.info(f"开始GPU批量评测Pearson相关性分析")
         self.logger.info(f"目标股票: {self.stock_code}")
@@ -1299,7 +1290,6 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"相关系数阈值: {self.threshold}")
         self.logger.info(f"对比模式: {self.comparison_mode}")
         self.logger.info(f"GPU设备: {self.device}")
-        self.logger.info(f"预估GPU内存使用量: {estimated_memory:.2f} GB (基于{num_stocks}只股票)")
         self.logger.info("=" * 80)
         
         # 初始GPU显存监控
@@ -1342,6 +1332,18 @@ class GPUBatchPearsonAnalyzer:
             self.logger.error("没有有效的历史期间数据")
             return None
         self.logger.info("📚 [阶段3/5] 历史数据收集 - 完成")
+        
+        # 💾 基于实际历史期间数据量进行GPU内存预估
+        self.logger.info("💾 基于实际数据量进行GPU内存预估...")
+        estimation_result = self.estimate_memory_requirement(
+            evaluation_days=self.evaluation_days,
+            num_historical_periods=len(historical_periods_data),
+            window_size=self.window_size
+        )
+        estimated_memory = estimation_result['total_estimated_gb']
+        self.logger.info(f"📊 实际历史期间数据量: {len(historical_periods_data):,}")
+        self.logger.info(f"💾 预估GPU内存使用量: {estimated_memory:.2f} GB (基于实际{len(historical_periods_data):,}个历史期间)")
+        self.logger.info("=" * 60)
         
         # 🚀 第4阶段：GPU计算与结果处理 - 开始（优化版：4-3和4-5步骤合并）
         self.logger.info("🚀 [阶段4/5] GPU计算与结果处理 - 开始（优化版）")
@@ -1690,21 +1692,22 @@ class GPUBatchPearsonAnalyzer:
         # 5. historical_centered (完整大小)
         # 6. 各种中间计算结果
         
+        # 实际内存峰值主要来源：
+        # 1. 历史数据张量（持续存在）
+        # 2. 广播计算时的临时张量（峰值时刻）
+        # 3. 少量中间结果张量
         peak_allocated_bytes = (
-            batch_recent_data_bytes +           # 原始批量数据
-            historical_tensor_bytes +           # 原始历史数据
-            full_broadcast_tensor_bytes * 4 +   # 4个完整广播张量 (expanded*2 + centered*2)
+            historical_tensor_bytes +           # 原始历史数据（持续存在）
+            full_broadcast_tensor_bytes +       # 主要的广播张量峰值
             covariance_bytes +                  # 协方差张量
             std_tensors_bytes +                 # 标准差张量
-            correlation_bytes +                 # 相关系数张量
-            full_broadcast_tensor_bytes * 0.5   # 额外的中间计算缓冲
+            correlation_bytes                   # 相关系数张量
         )
         
-        # 5. PyTorch内存池预留（基于用户实际观察修正）
-        # 用户观察：GPU计算后的内存占用至少是初始占用的10倍以上
-        # 当前预估分配内存约1.2GB，实际峰值27GB，约22倍差距
-        # 考虑到大规模张量广播和PyTorch内存碎片化的影响
-        pytorch_memory_pool_multiplier = 22.0  # 基于实际观察的精确调整
+        # 5. PyTorch内存池预留（基于实际观察修正）
+        # 实际观察：预估分配29.2GB，实际峰值27GB，约0.9倍
+        # 说明我们的基础计算略有过度估算，PyTorch实际使用更高效
+        pytorch_memory_pool_multiplier = 0.9  # 基于实际观察的精确调整
         
         peak_allocated_gb = peak_allocated_bytes / (1024**3)
         estimated_reserved_gb = peak_allocated_gb * pytorch_memory_pool_multiplier
