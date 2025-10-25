@@ -38,9 +38,64 @@ import threading
 from collections import defaultdict
 import warnings
 import gc
+import multiprocessing as mp
+from functools import partial
 
 # 忽略一些不重要的警告
 warnings.filterwarnings('ignore', category=UserWarning)
+
+
+def _process_stock_historical_data_worker(args):
+    """
+    多进程工作函数：处理单只股票的历史数据
+    
+    Args:
+        args: (stock_code, stock_data, window_size, fields, debug)
+    
+    Returns:
+        tuple: (stock_code, historical_data_list, stats)
+    """
+    stock_code, stock_data, window_size, fields, debug = args
+    
+    historical_data = []
+    stock_valid_periods = 0
+    stock_invalid_periods = 0
+    
+    try:
+        # 使用所有可用数据
+        available_data = stock_data
+        
+        if len(available_data) < window_size:
+            return stock_code, [], {'valid_periods': 0, 'invalid_periods': 0, 'skipped': True}
+        
+        # 生成该股票的历史期间并直接进行筛选和预处理
+        for i in range(len(available_data) - window_size + 1):
+            period_data = available_data.iloc[i:i + window_size]
+            
+            # 检查数据长度是否正确
+            if len(period_data) == window_size:
+                start_date = period_data.index[0]
+                end_date = period_data.index[-1]
+                
+                # 直接提取并预处理数据
+                historical_values = period_data[fields].values
+                
+                # 存储预处理后的数据
+                historical_data.append((historical_values, start_date, end_date, stock_code))
+                stock_valid_periods += 1
+            else:
+                stock_invalid_periods += 1
+        
+        return stock_code, historical_data, {
+            'valid_periods': stock_valid_periods, 
+            'invalid_periods': stock_invalid_periods, 
+            'skipped': False
+        }
+        
+    except Exception as e:
+        if debug:
+            print(f"处理股票 {stock_code} 时出错: {str(e)}")
+        return stock_code, [], {'valid_periods': 0, 'invalid_periods': 0, 'error': str(e)}
 
 
 class GPUBatchPearsonAnalyzer:
@@ -48,7 +103,8 @@ class GPUBatchPearsonAnalyzer:
                  evaluation_days=1, debug=False, comparison_stocks=None, 
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
-                 batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01'):
+                 batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01',
+                 num_processes=None):
         """
         初始化GPU批量评测Pearson相关性分析器
         
@@ -67,6 +123,7 @@ class GPUBatchPearsonAnalyzer:
             batch_size: GPU批处理大小
             gpu_memory_limit: GPU内存使用限制（0.0-1.0）
             earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
+            num_processes: 多进程数量，None表示自动检测（默认为CPU核心数-1）
         """
         self.stock_code = stock_code
         
@@ -87,6 +144,9 @@ class GPUBatchPearsonAnalyzer:
         self.gpu_memory_limit = gpu_memory_limit
         self.data_loader = None
         self.logger = None
+        
+        # 多进程设置
+        self.num_processes = num_processes if num_processes is not None else max(1, mp.cpu_count() - 1)
         
         # GPU设备设置
         self.device = self._setup_device()
@@ -225,10 +285,9 @@ class GPUBatchPearsonAnalyzer:
     def load_data(self):
         """加载目标股票数据"""
         self.start_timer('target_stock_loading')
-        self.logger.info("初始化数据加载器")
+        self.logger.info("📊 数据加载中...")
         self.data_loader = StockDataLoader()
         
-        self.logger.info(f"开始加载目标股票 {self.stock_code} 的数据")
         data = self.data_loader.load_stock_data(self.stock_code)
         
         if data is None or data.empty:
@@ -237,6 +296,7 @@ class GPUBatchPearsonAnalyzer:
             return None
         
         self.data = self._filter_data(data, self.stock_code)
+        self.logger.info(f"✅ 目标股票 {self.stock_code} 数据加载完成 ({len(self.data)} 条记录)")
         self.end_timer('target_stock_loading')
         
         # 加载对比股票数据
@@ -268,24 +328,24 @@ class GPUBatchPearsonAnalyzer:
         quality_removed_count = date_filtered_count - final_count
         
         if date_removed_count > 0:
-            self.logger.info(f"股票 {stock_code} 日期过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_count} 条数据")
+            self.logger.debug(f"股票 {stock_code} 日期过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_count} 条数据")
         
         if quality_removed_count > 0:
-            self.logger.info(f"股票 {stock_code} 数据质量过滤完成，移除 {quality_removed_count} 条异常数据")
+            self.logger.debug(f"股票 {stock_code} 数据质量过滤完成，移除 {quality_removed_count} 条异常数据")
         
         if not data.empty:
-            self.logger.info(f"股票 {stock_code} 成功加载 {len(data)} 条记录，日期范围: {data.index[0]} 到 {data.index[-1]}")
+            self.logger.debug(f"股票 {stock_code} 成功加载 {len(data)} 条记录，日期范围: {data.index[0]} 到 {data.index[-1]}")
         
         return data
     
     def _load_comparison_stocks_data(self):
         """加载对比股票数据"""
         if self.comparison_mode == 'self_only':
-            self.logger.info("使用自身历史数据对比模式，跳过其他股票数据加载")
+            self.logger.info("📈 使用自身历史数据对比模式")
             return
         
         self.start_timer('comparison_stocks_loading')
-        self.logger.info(f"开始加载 {len(self.comparison_stocks)} 只对比股票的数据")
+        self.logger.info(f"📈 加载对比股票数据中... ({len(self.comparison_stocks)} 只)")
         successful_loads = 0
         
         for stock_code in self.comparison_stocks:
@@ -311,7 +371,7 @@ class GPUBatchPearsonAnalyzer:
                     self.logger.warning(f"加载股票 {stock_code} 时出错: {str(e)}")
                 continue
         
-        self.logger.info(f"成功加载 {successful_loads} 只对比股票的数据")
+        self.logger.info(f"✅ 对比股票数据加载完成 ({successful_loads}/{len(self.comparison_stocks)} 只)")
         self.end_timer('comparison_stocks_loading')
     
     def prepare_evaluation_dates(self, end_date):
@@ -1096,7 +1156,11 @@ class GPUBatchPearsonAnalyzer:
         
         # 收集对比股票数据
         if self.comparison_mode != 'self_only':
-            comparison_historical_data = self._collect_comparison_historical_data(earliest_eval_date)
+            # 根据股票数量决定是否使用多进程
+            if len(self.loaded_stocks_data) >= 10 and self.num_processes > 1:
+                comparison_historical_data = self._collect_comparison_historical_data_multiprocess(earliest_eval_date)
+            else:
+                comparison_historical_data = self._collect_comparison_historical_data(earliest_eval_date)
             historical_periods_data.extend(comparison_historical_data)
         
         self.logger.info(f"收集到 {len(historical_periods_data)} 个历史期间数据")
@@ -1189,6 +1253,65 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.info(f"对比股票数据收集进度: {processed_stocks}/{len(self.loaded_stocks_data)} 只股票")
         
         self.logger.info(f"对比股票历史数据收集完成: 处理股票={processed_stocks}, 有效期间={total_valid_periods}, 无效期间={total_invalid_periods}")
+        return historical_data
+    
+    def _collect_comparison_historical_data_multiprocess(self, earliest_eval_date):
+        """收集对比股票历史数据（多进程版本）"""
+        if not self.loaded_stocks_data:
+            return []
+        
+        # 定义需要的字段
+        fields = ['open', 'high', 'low', 'close', 'volume']
+        
+        # 准备多进程任务参数
+        tasks = []
+        for stock_code, stock_data in self.loaded_stocks_data.items():
+            tasks.append((stock_code, stock_data, self.window_size, fields, self.debug))
+        
+        self.logger.info(f"🚀 启动多进程数据预处理: {len(tasks)} 只股票，{self.num_processes} 个进程")
+        
+        historical_data = []
+        total_valid_periods = 0
+        total_invalid_periods = 0
+        processed_stocks = 0
+        
+        try:
+            # 使用进程池处理任务
+            with mp.Pool(processes=self.num_processes) as pool:
+                # 分批处理以显示进度
+                batch_size = max(1, len(tasks) // 10)  # 分成10批显示进度
+                
+                for i in range(0, len(tasks), batch_size):
+                    batch_tasks = tasks[i:i + batch_size]
+                    batch_results = pool.map(_process_stock_historical_data_worker, batch_tasks)
+                    
+                    # 处理批次结果
+                    for stock_code, stock_historical_data, stats in batch_results:
+                        if 'error' in stats:
+                            if self.debug:
+                                self.logger.warning(f"股票 {stock_code} 处理出错: {stats['error']}")
+                            continue
+                        
+                        if stats.get('skipped', False):
+                            if self.debug:
+                                self.logger.debug(f"股票 {stock_code} 数据不足，跳过")
+                            continue
+                        
+                        # 添加到总结果中
+                        historical_data.extend(stock_historical_data)
+                        total_valid_periods += stats['valid_periods']
+                        total_invalid_periods += stats['invalid_periods']
+                        processed_stocks += 1
+                    
+                    # 显示进度
+                    progress = min(i + batch_size, len(tasks))
+                    self.logger.info(f"📊 多进程处理进度: {progress}/{len(tasks)} 只股票 ({progress/len(tasks)*100:.1f}%)")
+        
+        except Exception as e:
+            self.logger.error(f"多进程处理出错，回退到单进程模式: {str(e)}")
+            return self._collect_comparison_historical_data(earliest_eval_date)
+        
+        self.logger.info(f"✅ 多进程对比股票历史数据收集完成: 处理股票={processed_stocks}, 有效期间={total_valid_periods}, 无效期间={total_invalid_periods}")
         return historical_data
     
 
@@ -1495,7 +1618,8 @@ class GPUBatchPearsonAnalyzer:
 def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evaluation_days=1, 
                                          window_size=15, threshold=0.85, comparison_mode='default', 
                                          comparison_stocks=None, debug=False, csv_filename=None, 
-                                         use_gpu=True, batch_size=1000, earliest_date='2020-01-01'):
+                                         use_gpu=True, batch_size=1000, earliest_date='2020-01-01',
+                                         num_processes=None):
     """
     GPU批量评测Pearson相关性分析的便捷函数
     
@@ -1534,7 +1658,8 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         csv_filename=csv_filename,
         use_gpu=use_gpu,
         batch_size=batch_size,
-        earliest_date=earliest_date
+        earliest_date=earliest_date,
+        num_processes=num_processes
     )
     
     result = analyzer.analyze_batch()
@@ -1562,7 +1687,9 @@ if __name__ == "__main__":
                             '推荐值：RTX 3060(8GB)=500-1000, RTX 3080(10GB)=1000-2000, RTX 4090(24GB)=2000-5000 (默认: 1000)')
     parser.add_argument('--earliest_date', type=str, default='2022-01-01', 
                        help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2022-01-01)')
-    
+    parser.add_argument('--num_processes', type=int, default=None,
+                       help='多进程数量，None表示自动检测（默认为CPU核心数-1）')
+
     args = parser.parse_args()
     
     print(f"开始GPU批量评测分析，股票代码: {args.stock_code}")
@@ -1582,7 +1709,8 @@ if __name__ == "__main__":
         csv_filename=args.csv_filename,
         use_gpu=not args.no_gpu,
         batch_size=args.batch_size,
-        earliest_date=args.earliest_date
+        earliest_date=args.earliest_date,
+        num_processes=args.num_processes
     )
     
     if result:

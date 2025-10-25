@@ -323,10 +323,9 @@ class PearsonAnalyzer:
     def load_data(self):
         """加载目标股票数据"""
         self.start_timer('target_stock_loading')
-        self.logger.info("初始化数据加载器")
+        self.logger.info("📊 数据加载中...")
         self.data_loader = StockDataLoader()
         
-        self.logger.info(f"开始加载目标股票 {self.stock_code} 的数据")
         data = self.data_loader.load_stock_data(self.stock_code)
         
         if data is None or data.empty:
@@ -336,6 +335,7 @@ class PearsonAnalyzer:
         
         # 数据过滤：确保价格为正数，成交量大于0
         self.data = self._filter_data(data, self.stock_code)
+        self.logger.info(f"✅ 目标股票 {self.stock_code} 数据加载完成 ({len(self.data)} 条记录)")
         self.end_timer('target_stock_loading')
         
         # 加载对比股票数据
@@ -367,24 +367,24 @@ class PearsonAnalyzer:
         quality_removed_count = date_filtered_count - final_count
         
         if date_removed_count > 0:
-            self.logger.info(f"股票 {stock_code} 日期过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_count} 条数据")
+            self.logger.debug(f"股票 {stock_code} 日期过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_count} 条数据")
         
         if quality_removed_count > 0:
-            self.logger.info(f"股票 {stock_code} 数据质量过滤完成，移除 {quality_removed_count} 条异常数据")
+            self.logger.debug(f"股票 {stock_code} 数据质量过滤完成，移除 {quality_removed_count} 条异常数据")
         
         if not data.empty:
-            self.logger.info(f"股票 {stock_code} 成功加载 {len(data)} 条记录，日期范围: {data.index[0]} 到 {data.index[-1]}")
+            self.logger.debug(f"股票 {stock_code} 成功加载 {len(data)} 条记录，日期范围: {data.index[0]} 到 {data.index[-1]}")
         
         return data
     
     def _load_comparison_stocks_data(self):
         """加载对比股票数据"""
         if self.comparison_mode == 'self_only':
-            self.logger.info("使用自身历史数据对比模式，跳过其他股票数据加载")
+            self.logger.info("📈 使用自身历史数据对比模式")
             return
         
         self.start_timer('comparison_stocks_loading')
-        self.logger.info(f"开始加载 {len(self.comparison_stocks)} 只对比股票的数据")
+        self.logger.info(f"📈 加载对比股票数据中... ({len(self.comparison_stocks)} 只)")
         successful_loads = 0
         
         for stock_code in self.comparison_stocks:
@@ -411,7 +411,7 @@ class PearsonAnalyzer:
                     self.logger.warning(f"加载股票 {stock_code} 时出错: {str(e)}")
                 continue
         
-        self.logger.info(f"成功加载 {successful_loads} 只对比股票的数据")
+        self.logger.info(f"✅ 对比股票数据加载完成 ({successful_loads}/{len(self.comparison_stocks)} 只)")
         if successful_loads == 0:
             self.logger.warning("未能加载任何对比股票数据，将使用自身历史数据对比")
         self.end_timer('comparison_stocks_loading')

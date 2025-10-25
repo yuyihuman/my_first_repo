@@ -95,7 +95,7 @@ class StockDataLoader:
                 return None
             
             # 读取CSV文件（注意UTF-8-BOM编码）
-            logger.info(f"正在加载数据: {file_path}")
+            logger.debug(f"正在加载数据: {file_path}")
             df = pd.read_csv(file_path, encoding='utf-8-sig')
             
             # 数据预处理
@@ -134,7 +134,7 @@ class StockDataLoader:
             column_fields = [field for field in available_fields if field in df.columns]
             result_df = df[column_fields].copy() if column_fields else df.copy()
             
-            logger.info(f"数据加载成功，股票: {stock_code}, 时间粒度: {time_frame}, 数据行数: {len(result_df)}")
+            logger.debug(f"数据加载成功，股票: {stock_code}, 时间粒度: {time_frame}, 数据行数: {len(result_df)}")
             return result_df
             
         except Exception as e:
