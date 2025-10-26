@@ -302,9 +302,6 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"✅ 目标股票 {self.stock_code} 数据加载完成 ({len(self.data)} 条记录)")
         self.end_timer('target_stock_loading')
         
-        # 加载对比股票数据
-        self._load_comparison_stocks_data()
-        
         return self.data
     
     def _filter_data(self, data, stock_code):
@@ -341,41 +338,7 @@ class GPUBatchPearsonAnalyzer:
         
         return data
     
-    def _load_comparison_stocks_data(self):
-        """加载对比股票数据"""
-        if self.comparison_mode == 'self_only':
-            self.logger.info("📈 使用自身历史数据对比模式")
-            return
-        
-        self.start_timer('comparison_stocks_loading')
-        self.logger.info(f"📈 加载对比股票数据中... ({len(self.comparison_stocks)} 只)")
-        successful_loads = 0
-        
-        for stock_code in self.comparison_stocks:
-            try:
-                if self.debug:
-                    self.logger.info(f"正在加载对比股票: {stock_code}")
-                
-                data = self.data_loader.load_stock_data(stock_code)
-                if data is not None and not data.empty:
-                    filtered_data = self._filter_data(data, stock_code)
-                    if not filtered_data.empty:
-                        self.loaded_stocks_data[stock_code] = filtered_data
-                        successful_loads += 1
-                    else:
-                        if self.debug:
-                            self.logger.warning(f"股票 {stock_code} 过滤后数据为空")
-                else:
-                    if self.debug:
-                        self.logger.warning(f"无法加载股票 {stock_code} 的数据")
-                        
-            except Exception as e:
-                if self.debug:
-                    self.logger.warning(f"加载股票 {stock_code} 时出错: {str(e)}")
-                continue
-        
-        self.logger.info(f"✅ 对比股票数据加载完成 ({successful_loads}/{len(self.comparison_stocks)} 只)")
-        self.end_timer('comparison_stocks_loading')
+
     
     def prepare_evaluation_dates(self, end_date):
         """
@@ -1408,66 +1371,64 @@ class GPUBatchPearsonAnalyzer:
         return final_result
     
     def _collect_historical_periods_data(self, earliest_eval_date):
-        """收集历史期间数据"""
+        """收集历史期间数据（合并了对比股票数据加载逻辑，不再加载自身数据）"""
         self.start_timer('historical_data_collection')
         
         historical_periods_data = []
         
-        # 在all模式下，自身历史数据已经包含在对比股票数据中，无需单独收集
-        if self.comparison_mode != 'all':
-            # 收集自身历史数据
-            self_historical_data = self._collect_self_historical_data(earliest_eval_date)
-            historical_periods_data.extend(self_historical_data)
+        # 检查self_only模式的特殊情况
+        if self.comparison_mode == 'self_only':
+            self.logger.warning("⚠️ self_only模式下不再加载自身数据，将没有历史数据可供对比")
+            self.logger.info(f"收集到 {len(historical_periods_data)} 个历史期间数据")
+            self.end_timer('historical_data_collection')
+            return historical_periods_data
         
-        # 收集对比股票数据
-        if self.comparison_mode != 'self_only':
-            # 根据股票数量决定是否使用多进程
-            if len(self.loaded_stocks_data) >= 10 and self.num_processes > 1:
-                comparison_historical_data = self._collect_comparison_historical_data_multiprocess(earliest_eval_date)
-            else:
-                comparison_historical_data = self._collect_comparison_historical_data(earliest_eval_date)
-            historical_periods_data.extend(comparison_historical_data)
+        # 首先加载对比股票数据（原步骤1-2的逻辑）
+        self._load_comparison_stocks_data_inline()
+        
+        # 收集对比股票历史数据（不再加载自身数据）
+        # 根据股票数量决定是否使用多进程
+        if len(self.loaded_stocks_data) >= 10 and self.num_processes > 1:
+            comparison_historical_data = self._collect_comparison_historical_data_multiprocess(earliest_eval_date)
+        else:
+            comparison_historical_data = self._collect_comparison_historical_data(earliest_eval_date)
+        historical_periods_data.extend(comparison_historical_data)
         
         self.logger.info(f"收集到 {len(historical_periods_data)} 个历史期间数据")
         self.end_timer('historical_data_collection')
         return historical_periods_data
     
-    def _collect_self_historical_data(self, earliest_eval_date):
-        """收集自身历史数据（已优化：直接筛选和预处理）"""
-        historical_data = []
-        valid_periods = 0
-        invalid_periods = 0
+    def _load_comparison_stocks_data_inline(self):
+        """内联加载对比股票数据（原步骤1-2逻辑）"""
+        self.logger.info(f"📈 加载对比股票数据中... ({len(self.comparison_stocks)} 只)")
+        successful_loads = 0
         
-        # 使用所有可用数据，不进行日期截断
-        available_data = self.data
-        
-        if len(available_data) < self.window_size:
-            self.logger.info(f"自身数据长度 {len(available_data)} 小于窗口大小 {self.window_size}，跳过")
-            return historical_data
-        
-        # 定义需要的字段
-        fields = ['open', 'high', 'low', 'close', 'volume']
-        
-        # 生成历史期间并直接进行筛选和预处理
-        for i in range(len(available_data) - self.window_size + 1):
-            period_data = available_data.iloc[i:i + self.window_size]
-            
-            # 检查数据长度是否正确
-            if len(period_data) == self.window_size:
-                start_date = period_data.index[0]
-                end_date = period_data.index[-1]
+        for stock_code in self.comparison_stocks:
+            try:
+                if self.debug:
+                    self.logger.info(f"正在加载对比股票: {stock_code}")
                 
-                # 直接提取并预处理数据
-                historical_values = period_data[fields].values
-                
-                # 存储预处理后的数据
-                historical_data.append((historical_values, start_date, end_date, self.stock_code))
-                valid_periods += 1
-            else:
-                invalid_periods += 1
+                data = self.data_loader.load_stock_data(stock_code)
+                if data is not None and not data.empty:
+                    filtered_data = self._filter_data(data, stock_code)
+                    if not filtered_data.empty:
+                        self.loaded_stocks_data[stock_code] = filtered_data
+                        successful_loads += 1
+                    else:
+                        if self.debug:
+                            self.logger.warning(f"股票 {stock_code} 过滤后数据为空")
+                else:
+                    if self.debug:
+                        self.logger.warning(f"无法加载股票 {stock_code} 的数据")
+                        
+            except Exception as e:
+                if self.debug:
+                    self.logger.warning(f"加载股票 {stock_code} 时出错: {str(e)}")
+                continue
         
-        self.logger.info(f"自身历史数据收集完成: 有效期间={valid_periods}, 无效期间={invalid_periods}")
-        return historical_data
+        self.logger.info(f"✅ 对比股票数据加载完成 ({successful_loads}/{len(self.comparison_stocks)} 只)")
+    
+
     
     def _collect_comparison_historical_data(self, earliest_eval_date):
         """收集对比股票历史数据（已优化：直接筛选和预处理）"""
@@ -1825,14 +1786,13 @@ class GPUBatchPearsonAnalyzer:
         step_mapping = {
             # 第1阶段：数据加载
             'target_stock_loading': ('1-1', '目标股票数据加载'),
-            'comparison_stocks_loading': ('1-2', '对比股票数据加载'),
             
             # 第2阶段：数据准备
             'evaluation_dates_preparation': ('2-1', '评测日期准备'),
             'batch_data_preparation': ('2-2', '批量数据准备'),
             
-            # 第3阶段：历史数据收集
-            'historical_data_collection': ('3-1', '历史数据收集'),
+            # 第3阶段：历史数据收集（合并了原1-2对比股票数据加载）
+            'historical_data_collection': ('3-1', '历史数据收集（含对比股票数据加载）'),
             
             # 第4阶段：GPU计算（详细拆分为5个子步骤）
             'gpu_step1_data_preparation': ('4-1', '历史数据准备和筛选'),
@@ -1854,9 +1814,9 @@ class GPUBatchPearsonAnalyzer:
         # 按步骤顺序显示
         current_stage = 0
         stage_names = {
-            1: "🔄 第1阶段：数据加载",
+            1: "🔄 第1阶段：目标股票数据加载",
             2: "📋 第2阶段：数据准备", 
-            3: "📚 第3阶段：历史数据收集",
+            3: "📚 第3阶段：历史数据收集（含对比股票数据加载）",
             4: "🚀 第4阶段：GPU计算",
             5: "⚙️  第5阶段：结果处理",
             6: "📊 第6阶段：最终处理"
