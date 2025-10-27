@@ -1169,13 +1169,12 @@ class PearsonAnalyzer:
                 # 有回测日期时，取回测日期之前的最近window_size天数据
                 backtest_data = data[data.index <= pd.to_datetime(self.backtest_date)]
                 recent_data_for_self = backtest_data.iloc[-self.window_size:]
-                # 比较回测日期之前的历史数据段，包含所有可能的窗口
-                max_historical_periods = len(backtest_data) - self.window_size + 1
             else:
                 # 没有回测日期时，取最近window_size天数据
                 recent_data_for_self = data.iloc[-self.window_size:]
-                # 比较除了最后window_size天之外的历史数据段，包含所有可能的窗口
-                max_historical_periods = len(data) - self.window_size + 1
+            
+            # 比较所有历史数据段，不受回测日期限制，这样可以检测到回测日期之后的高相关性时间段
+            max_historical_periods = len(data) - self.window_size + 1
             
             for i in range(max_historical_periods):
                 historical_data = data.iloc[i:i + self.window_size]
@@ -1255,15 +1254,9 @@ class PearsonAnalyzer:
                 stock_comparison_count = 0
                 
                 # 遍历对比股票的历史数据
-                # 当使用全部数据时，我们需要比较不同的历史时间段
-                # 如果指定了回测日期，则比较该日期之前的历史数据段
-                # 如果没有指定回测日期，则比较除了最后window_size天之外的历史数据段
-                if self.backtest_date:
-                    # 有回测日期时，比较回测日期之前的历史数据段，包含所有可能的窗口
-                    max_comp_historical_periods = len(comp_data[comp_data.index <= pd.to_datetime(self.backtest_date)]) - self.window_size + 1
-                else:
-                    # 没有回测日期时，比较除了最后window_size天之外的历史数据段，包含所有可能的窗口
-                    max_comp_historical_periods = len(comp_data) - self.window_size + 1
+                # 比较对比股票的所有历史数据段，不受回测日期限制
+                # 这样可以检测到回测日期之后的高相关性时间段
+                max_comp_historical_periods = len(comp_data) - self.window_size + 1
                 
                 for i in range(max_comp_historical_periods):
                     historical_data = comp_data.iloc[i:i + self.window_size]
