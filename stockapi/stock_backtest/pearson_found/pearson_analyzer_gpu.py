@@ -1258,17 +1258,14 @@ class GPUBatchPearsonAnalyzer:
         # 初始GPU显存监控
         self.monitor_gpu_memory("分析开始")
         
-        # 🔄 第1阶段：数据加载 - 开始
-        self.logger.info("🔄 [阶段1/6] 数据加载 - 开始")
+        # 🔄 第1阶段：初始化与数据准备 - 开始
+        self.logger.info("🔄 [阶段1/4] 初始化与数据准备 - 开始")
         if not hasattr(self, 'data') or self.data is None:
             self.data = self.load_data()
             if self.data is None:
                 self.logger.error("数据加载失败")
                 return None
-        self.logger.info("🔄 [阶段1/5] 数据加载 - 完成")
         
-        # 📋 第2阶段：数据准备 - 开始
-        self.logger.info("📋 [阶段2/5] 数据准备 - 开始")
         evaluation_dates = self.prepare_evaluation_dates(self.backtest_date)
         
         if not evaluation_dates:
@@ -1284,17 +1281,17 @@ class GPUBatchPearsonAnalyzer:
         
         # 监控数据准备后的GPU显存
         self.monitor_gpu_memory("数据准备完成")
-        self.logger.info("📋 [阶段2/5] 数据准备 - 完成")
+        self.logger.info("🔄 [阶段1/4] 初始化与数据准备 - 完成")
         
-        # 📚 第3阶段：历史数据收集 - 开始
-        self.logger.info("📚 [阶段3/5] 历史数据收集 - 开始")
+        # 📚 第2阶段：多进程历史数据处理 - 开始
+        self.logger.info("📚 [阶段2/4] 多进程历史数据处理 - 开始")
         earliest_eval_date = min(valid_dates)
         historical_periods_data = self._collect_historical_periods_data(earliest_eval_date)
         
         if not historical_periods_data:
             self.logger.error("没有有效的历史期间数据")
             return None
-        self.logger.info("📚 [阶段3/5] 历史数据收集 - 完成")
+        self.logger.info("📚 [阶段2/4] 多进程历史数据处理 - 完成")
         
         # 💾 基于实际历史期间数据量进行GPU内存预估
         self.logger.info("💾 基于实际数据量进行GPU内存预估...")
@@ -1308,19 +1305,19 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"💾 预估GPU内存使用量: {estimated_memory:.2f} GB (基于实际{len(historical_periods_data):,}个历史期间)")
         self.logger.info("=" * 60)
         
-        # 🚀 第4阶段：GPU计算与结果处理 - 开始（优化版：4-3和4-5步骤合并）
-        self.logger.info("🚀 [阶段4/5] GPU计算与结果处理 - 开始（优化版）")
+        # 🚀 第3阶段：GPU计算与结果处理 - 开始
+        self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 开始")
         self.monitor_gpu_memory("GPU计算开始")
         batch_correlations = self.calculate_batch_gpu_correlation_optimized(batch_recent_data, historical_periods_data, valid_dates)
         self.monitor_gpu_memory("GPU计算完成")
-        self.logger.info("🚀 [阶段4/5] GPU计算与结果处理 - 完成（优化版）")
+        self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 完成")
         
         if not batch_correlations:
             self.logger.error("批量相关性计算失败")
             return None
         
-        # 📊 第5阶段：最终处理 - 已整合到阶段4-5中
-        self.logger.info("📊 [阶段5/5] 最终处理 - 已整合完成")
+        # 📊 第4阶段：最终处理 - 开始
+        self.logger.info("📊 [阶段4/4] 最终处理 - 开始")
         
         # 直接使用阶段4-5的整合结果（已包含保存和最终结果构建）
         final_result = batch_correlations
@@ -1332,7 +1329,7 @@ class GPUBatchPearsonAnalyzer:
         
         # 最终GPU显存监控
         self.monitor_gpu_memory("分析完成")
-        self.logger.info("📊 [阶段5/5] 最终处理 - 完成")
+        self.logger.info("📊 [阶段4/4] 最终处理 - 完成")
         
         # 输出分析总结
         self.logger.info("=" * 80)
@@ -1782,44 +1779,35 @@ class GPUBatchPearsonAnalyzer:
         # 获取性能统计
         stats = self._get_performance_stats()
         
-        # 定义步骤映射和显示顺序
+        # 定义步骤映射和显示顺序 - 新的4阶段划分
         step_mapping = {
-            # 第1阶段：数据加载
+            # 第1阶段：初始化与数据准备（合并原1-3阶段）
             'target_stock_loading': ('1-1', '目标股票数据加载'),
+            'evaluation_dates_preparation': ('1-2', '评测日期准备'),
+            'batch_data_preparation': ('1-3', '批量数据准备'),
             
-            # 第2阶段：数据准备
-            'evaluation_dates_preparation': ('2-1', '评测日期准备'),
-            'batch_data_preparation': ('2-2', '批量数据准备'),
+            # 第2阶段：多进程历史数据处理（保持原第3阶段）
+            'historical_data_collection': ('2-1', '历史数据收集（含对比股票数据加载）'),
             
-            # 第3阶段：历史数据收集（合并了原1-2对比股票数据加载）
-            'historical_data_collection': ('3-1', '历史数据收集（含对比股票数据加载）'),
-            
-            # 第4阶段：GPU计算（详细拆分为5个子步骤）
-            'gpu_step1_data_preparation': ('4-1', '历史数据准备和筛选'),
-            'gpu_step2_tensor_creation': ('4-2', '创建GPU历史数据张量'),
-            'gpu_step3_correlation_calculation': ('4-3', '批量相关系数计算'),
-            'gpu_step4_batch_merging': ('4-4', '合并批次结果'),
-            'gpu_step5_result_processing': ('4-5', '处理批量相关性结果'),
-            
-            # 第5阶段：结果处理
-            'batch_result_processing': ('5-1', '相关性结果处理'),
-            
-            # 第6阶段：最终处理
-            'batch_results_processing': ('6-1', '批量结果整合'),
+            # 第3阶段：GPU计算与结果处理（合并原4-6阶段）
+            'gpu_step1_data_preparation': ('3-1', '历史数据准备和筛选'),
+            'gpu_step2_tensor_creation': ('3-2', '创建GPU历史数据张量'),
+            'gpu_step3_correlation_calculation': ('3-3', '批量相关系数计算'),
+            'gpu_step3_integrated_correlation_processing': ('3-4', '集成相关性处理'),
+            'gpu_step4_batch_merging': ('3-5', '合并批次结果'),
+            'gpu_step5_result_processing': ('3-6', '处理批量相关性结果'),
+            'integrated_result_processing': ('3-7', '集成结果处理'),
             
             # 总体统计
             'total_batch_analysis': ('总计', '完整批量分析')
         }
         
-        # 按步骤顺序显示
+        # 按步骤顺序显示 - 新的4阶段划分
         current_stage = 0
         stage_names = {
-            1: "🔄 第1阶段：目标股票数据加载",
-            2: "📋 第2阶段：数据准备", 
-            3: "📚 第3阶段：历史数据收集（含对比股票数据加载）",
-            4: "🚀 第4阶段：GPU计算",
-            5: "⚙️  第5阶段：结果处理",
-            6: "📊 第6阶段：最终处理"
+            1: "🔄 第1阶段：初始化与数据准备",
+            2: "📚 第2阶段：多进程历史数据处理",
+            3: "🚀 第3阶段：GPU计算与结果处理"
         }
         
         for timer_name, (step_id, step_name) in step_mapping.items():
