@@ -104,7 +104,7 @@ class GPUBatchPearsonAnalyzer:
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
                  batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01',
-                 num_processes=None):
+                 num_processes=None, evaluation_batch_size=20):
         """
         初始化GPU批量评测Pearson相关性分析器
         
@@ -124,6 +124,7 @@ class GPUBatchPearsonAnalyzer:
             gpu_memory_limit: GPU内存使用限制（0.0-1.0）
             earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
             num_processes: 多进程数量，None表示自动检测（默认为CPU核心数-1）
+            evaluation_batch_size: 每批次处理的评测日期数量，用于控制GPU内存使用 (默认: 20)
         """
         self.stock_code = stock_code
         
@@ -135,6 +136,7 @@ class GPUBatchPearsonAnalyzer:
         self.window_size = window_size
         self.threshold = threshold
         self.evaluation_days = evaluation_days  # 新增：评测日期数量
+        self.evaluation_batch_size = evaluation_batch_size  # 每批次处理的评测日期数量
         self.debug = debug
         self.comparison_mode = comparison_mode
         self.backtest_date = pd.to_datetime(backtest_date) if backtest_date else None
@@ -856,6 +858,13 @@ class GPUBatchPearsonAnalyzer:
             # GPU端计算每个评测日期的高相关数量
             batch_high_corr_counts = batch_high_corr_mask.sum(dim=1)  # [batch_size]
             
+            # 🔍 Debug模式：为第一个评测日期打印详细信息
+            if self.debug and batch_idx == 0 and evaluation_dates and len(evaluation_dates) > 0:
+                self._log_first_evaluation_debug_info(
+                    batch_avg_correlations_filtered, batch_high_corr_mask, 
+                    period_info_list, evaluation_dates, current_batch, historical_tensor, i
+                )
+            
             # 存储批次结果（仍在GPU上）
             all_avg_correlations.append(batch_avg_correlations_filtered)
             all_high_corr_masks.append(batch_high_corr_mask)
@@ -1093,6 +1102,91 @@ class GPUBatchPearsonAnalyzer:
         
         self.logger.info("=" * 80)
     
+    def _log_first_evaluation_debug_info(self, batch_avg_correlations_filtered, batch_high_corr_mask, 
+                                        period_info_list, evaluation_dates, current_batch, historical_tensor, batch_start_idx):
+        """
+        为第一个评测日期打印详细的debug信息
+        
+        Args:
+            batch_avg_correlations_filtered: 过滤后的平均相关系数 [batch_size, num_historical_periods]
+            batch_high_corr_mask: 高相关性掩码 [batch_size, num_historical_periods]
+            period_info_list: 历史期间信息列表
+            evaluation_dates: 评测日期列表
+            current_batch: 当前批次的评测数据 [batch_size, window_size, 5]
+            historical_tensor: 历史数据张量 [num_historical_periods, window_size, 5]
+            batch_start_idx: 当前批次的起始索引
+        """
+        # 获取第一个评测日期的信息
+        first_eval_date = evaluation_dates[batch_start_idx]
+        first_eval_correlations = batch_avg_correlations_filtered[0]  # [num_historical_periods]
+        first_eval_high_corr_mask = batch_high_corr_mask[0]  # [num_historical_periods]
+        first_eval_data = current_batch[0]  # [window_size, 5]
+        
+        # 转换为CPU numpy数组以便处理
+        first_eval_correlations_np = first_eval_correlations.cpu().numpy()
+        first_eval_high_corr_mask_np = first_eval_high_corr_mask.cpu().numpy()
+        first_eval_data_np = first_eval_data.cpu().numpy()
+        
+        # 找到所有超过阈值的对比日期
+        high_corr_indices = np.where(first_eval_high_corr_mask_np)[0]
+        
+        self.logger.info("🔍" + "=" * 80)
+        self.logger.info(f"🔍 DEBUG模式 - 第一个评测日期详细信息")
+        self.logger.info("🔍" + "=" * 80)
+        self.logger.info(f"🔍 评测日期: {first_eval_date.strftime('%Y-%m-%d')}")
+        self.logger.info(f"🔍 评测数据窗口: {first_eval_date - pd.Timedelta(days=self.window_size-1)} 到 {first_eval_date}")
+        self.logger.info(f"🔍 超过阈值的对比期间数量: {len(high_corr_indices)}")
+        
+        if len(high_corr_indices) > 0:
+            self.logger.info("🔍 超过阈值的对比日期和相关系数:")
+            
+            # 按相关系数降序排列
+            sorted_indices = high_corr_indices[np.argsort(-first_eval_correlations_np[high_corr_indices])]
+            
+            for rank, hist_idx in enumerate(sorted_indices[:10], 1):  # 只显示前10个
+                period_info = period_info_list[hist_idx]
+                correlation = first_eval_correlations_np[hist_idx]
+                
+                self.logger.info(f"🔍   #{rank} 历史期间 {hist_idx}: {period_info['start_date']} 到 {period_info['end_date']}")
+                self.logger.info(f"🔍       来源股票: {period_info['stock_code']}")
+                self.logger.info(f"🔍       平均相关系数: {correlation:.6f}")
+                
+                # 获取对应的历史数据
+                historical_data_np = historical_tensor[hist_idx].cpu().numpy()  # [window_size, 5]
+                
+                # 打印源数据列的详细对比
+                fields = ['open', 'high', 'low', 'close', 'volume']
+                self.logger.info(f"🔍       源数据列对比 (前3天和后3天):")
+                
+                for field_idx, field in enumerate(fields):
+                    eval_field_data = first_eval_data_np[:, field_idx]
+                    hist_field_data = historical_data_np[:, field_idx]
+                    
+                    # 计算相关系数
+                    field_correlation = np.corrcoef(eval_field_data, hist_field_data)[0, 1]
+                    
+                    self.logger.info(f"🔍         {field} (相关系数: {field_correlation:.6f}):")
+                    self.logger.info(f"🔍           评测数据前3天: {eval_field_data[:3].tolist()}")
+                    self.logger.info(f"🔍           历史数据前3天: {hist_field_data[:3].tolist()}")
+                    self.logger.info(f"🔍           评测数据后3天: {eval_field_data[-3:].tolist()}")
+                    self.logger.info(f"🔍           历史数据后3天: {hist_field_data[-3:].tolist()}")
+                
+                self.logger.info("🔍" + "-" * 60)
+            
+            if len(high_corr_indices) > 10:
+                self.logger.info(f"🔍   ... 还有 {len(high_corr_indices) - 10} 个超过阈值的期间")
+        else:
+            self.logger.info("🔍 没有找到超过阈值的对比期间")
+        
+        # 打印评测数据的统计信息
+        self.logger.info("🔍 评测数据统计信息:")
+        fields = ['open', 'high', 'low', 'close', 'volume']
+        for field_idx, field in enumerate(fields):
+            field_data = first_eval_data_np[:, field_idx]
+            self.logger.info(f"🔍   {field}: 均值={np.mean(field_data):.4f}, 标准差={np.std(field_data):.4f}, 最小值={np.min(field_data):.4f}, 最大值={np.max(field_data):.4f}")
+        
+        self.logger.info("🔍" + "=" * 80)
+    
     def calculate_future_performance_stats(self, data, high_correlation_periods):
         """
         计算高相关性期间的未来交易日表现统计
@@ -1250,10 +1344,18 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"目标股票: {self.stock_code}")
         self.logger.info(f"回测结束日期: {self.backtest_date}")
         self.logger.info(f"评测日期数量: {self.evaluation_days}")
+        self.logger.info(f"每批次处理数量: {self.evaluation_batch_size}")
         self.logger.info(f"窗口大小: {self.window_size}")
         self.logger.info(f"相关系数阈值: {self.threshold}")
         self.logger.info(f"对比模式: {self.comparison_mode}")
         self.logger.info(f"GPU设备: {self.device}")
+        
+        # 计算需要分多少批次
+        total_batches = (self.evaluation_days + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+        if total_batches > 1:
+            self.logger.info(f"🔄 分批处理策略: 将 {self.evaluation_days} 个评测日期分成 {total_batches} 批处理")
+            self.logger.info(f"💾 预计GPU内存节省: {((self.evaluation_days / self.evaluation_batch_size) - 1) * 100 / (self.evaluation_days / self.evaluation_batch_size):.1f}%")
+        
         self.logger.info("=" * 80)
         
         # 初始GPU显存监控
@@ -1305,6 +1407,14 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"📊 实际历史期间数据量: {len(historical_periods_data):,}")
         self.logger.info(f"💾 预估GPU内存使用量: {estimated_memory:.2f} GB (基于实际{len(historical_periods_data):,}个历史期间)")
         self.logger.info("=" * 60)
+        
+        # 🔄 检查是否需要分批处理
+        total_batches = (len(valid_dates) + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+        if total_batches > 1:
+            self.logger.info(f"🔄 启用分批处理模式: {len(valid_dates)} 个评测日期分成 {total_batches} 批")
+            return self._process_evaluation_batches(valid_dates, batch_recent_data, historical_periods_data)
+        else:
+            self.logger.info("🔄 单批处理模式: 所有评测日期一次性处理")
         
         # 🚀 第3阶段：GPU计算与结果处理 - 开始
         self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 开始")
@@ -1816,6 +1926,111 @@ class GPUBatchPearsonAnalyzer:
         
         return stats
     
+    def _process_evaluation_batches(self, valid_dates, batch_recent_data, historical_periods_data):
+        """
+        分批处理评测日期，避免GPU内存溢出
+        
+        Args:
+            valid_dates: 有效的评测日期列表
+            batch_recent_data: 批量最近数据
+            historical_periods_data: 历史期间数据
+            
+        Returns:
+            dict: 合并后的分析结果
+        """
+        self.logger.info("🔄 开始分批处理评测日期...")
+        
+        # 初始化合并结果
+        merged_results = {
+            'evaluation_days': len(valid_dates),
+            'batch_results': {
+                'detailed_results': [],
+                'summary': {
+                    'total_high_correlations': 0,
+                    'avg_high_correlations_per_day': 0.0,
+                    'max_high_correlations_per_day': 0,
+                    'overall_avg_correlation': 0.0
+                }
+            }
+        }
+        
+        # 计算批次数量
+        total_batches = (len(valid_dates) + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+        
+        # 分批处理
+        for batch_idx in range(total_batches):
+            start_idx = batch_idx * self.evaluation_batch_size
+            end_idx = min(start_idx + self.evaluation_batch_size, len(valid_dates))
+            
+            batch_dates = valid_dates[start_idx:end_idx]
+            batch_size = len(batch_dates)
+            
+            self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {batch_size} 个评测日期")
+            self.logger.info(f"📅 日期范围: {batch_dates[0]} 到 {batch_dates[-1]}")
+            
+            # 提取当前批次的数据 (batch_recent_data 是 PyTorch 张量)
+            batch_recent_subset = batch_recent_data[start_idx:end_idx]
+            
+            # 监控GPU内存
+            self.monitor_gpu_memory(f"批次 {batch_idx + 1} 开始")
+            
+            # 🚀 GPU计算当前批次
+            self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 开始")
+            batch_correlations = self.calculate_batch_gpu_correlation_optimized(
+                batch_recent_subset, historical_periods_data, batch_dates
+            )
+            self.monitor_gpu_memory(f"批次 {batch_idx + 1} 完成")
+            self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 完成")
+            
+            if not batch_correlations:
+                self.logger.error(f"批次 {batch_idx + 1} 计算失败")
+                continue
+            
+            # 合并结果
+            merged_results['batch_results']['detailed_results'].extend(
+                batch_correlations['batch_results']['detailed_results']
+            )
+            
+            # 累加统计数据
+            batch_summary = batch_correlations['batch_results']['summary']
+            merged_results['batch_results']['summary']['total_high_correlations'] += batch_summary['total_high_correlations']
+            merged_results['batch_results']['summary']['max_high_correlations_per_day'] = max(
+                merged_results['batch_results']['summary']['max_high_correlations_per_day'],
+                batch_summary['max_high_correlations_per_day']
+            )
+            
+            # 清理GPU缓存
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
+                gc.collect()
+            
+            self.logger.info(f"✅ 批次 {batch_idx + 1} 处理完成，累计高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
+        
+        # 计算最终平均值
+        total_days = len(valid_dates)
+        if total_days > 0:
+            merged_results['batch_results']['summary']['avg_high_correlations_per_day'] = (
+                merged_results['batch_results']['summary']['total_high_correlations'] / total_days
+            )
+        
+        # 计算整体平均相关系数
+        if merged_results['batch_results']['detailed_results']:
+            all_correlations = []
+            for result in merged_results['batch_results']['detailed_results']:
+                if 'high_correlations' in result:
+                    for corr_data in result['high_correlations']:
+                        if 'correlation' in corr_data:
+                            all_correlations.append(corr_data['correlation'])
+            
+            if all_correlations:
+                merged_results['batch_results']['summary']['overall_avg_correlation'] = np.mean(all_correlations)
+        
+        self.logger.info("🔄 分批处理完成！")
+        self.logger.info(f"📊 总计处理: {total_days} 个评测日期，分 {total_batches} 批")
+        self.logger.info(f"📈 总高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
+        
+        return merged_results
+    
     def _log_performance_summary(self):
         """输出分层性能总结"""
         self.logger.info("=" * 80)
@@ -1978,7 +2193,7 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
                                          window_size=15, threshold=0.85, comparison_mode='default', 
                                          comparison_stocks=None, debug=False, csv_filename=None, 
                                          use_gpu=True, batch_size=1000, earliest_date='2020-01-01',
-                                         num_processes=None):
+                                         num_processes=None, evaluation_batch_size=20):
     """
     GPU批量评测Pearson相关性分析的便捷函数
     
@@ -1995,6 +2210,7 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         use_gpu: 是否使用GPU
         batch_size: 批处理大小
         earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
+        evaluation_batch_size: 每批次处理的评测日期数量
         
     Returns:
         dict: 分析结果
@@ -2018,7 +2234,8 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         use_gpu=use_gpu,
         batch_size=batch_size,
         earliest_date=earliest_date,
-        num_processes=num_processes
+        num_processes=num_processes,
+        evaluation_batch_size=evaluation_batch_size
     )
     
     result = analyzer.analyze_batch()
@@ -2048,6 +2265,8 @@ if __name__ == "__main__":
                        help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2022-01-01)')
     parser.add_argument('--num_processes', type=int, default=None,
                        help='多进程数量，None表示自动检测（默认为CPU核心数-1）')
+    parser.add_argument('--evaluation_batch_size', type=int, default=20,
+                       help='每批次处理的评测日期数量，用于控制GPU内存使用。如果evaluation_days=100且evaluation_batch_size=20，则分5批处理 (默认: 20)')
 
     args = parser.parse_args()
     
@@ -2069,7 +2288,8 @@ if __name__ == "__main__":
         use_gpu=not args.no_gpu,
         batch_size=args.batch_size,
         earliest_date=args.earliest_date,
-        num_processes=args.num_processes
+        num_processes=args.num_processes,
+        evaluation_batch_size=args.evaluation_batch_size
     )
     
     if result:

@@ -933,6 +933,87 @@ class PearsonAnalyzer:
                 self.logger.info(f"      评测数据统计: 均值={recent_mean:.2f}, 标准差={recent_std:.2f}")
                 self.logger.info(f"      历史数据统计: 均值={historical_mean:.2f}, 标准差={historical_std:.2f}")
 
+    def _log_first_evaluation_debug_info(self, recent_data, evaluation_date, high_correlation_periods):
+        """
+        为第一个评测日期打印详细的debug信息（CPU版本）
+        
+        Args:
+            recent_data: 最近的评测数据
+            evaluation_date: 评测日期
+            high_correlation_periods: 高相关性期间列表
+        """
+        if not self.debug:
+            return
+            
+        self.logger.info("🔍" + "=" * 80)
+        self.logger.info(f"🔍 DEBUG模式 - 第一个评测日期详细信息")
+        self.logger.info("🔍" + "=" * 80)
+        self.logger.info(f"🔍 评测日期: {evaluation_date.strftime('%Y-%m-%d')}")
+        self.logger.info(f"🔍 评测数据窗口: {recent_data.index[0].strftime('%Y-%m-%d')} 到 {recent_data.index[-1].strftime('%Y-%m-%d')}")
+        self.logger.info(f"🔍 超过阈值的对比期间数量: {len(high_correlation_periods)}")
+        
+        if len(high_correlation_periods) > 0:
+            self.logger.info("🔍 超过阈值的对比日期和相关系数:")
+            
+            # 按相关系数降序排列，只显示前10个
+            sorted_periods = sorted(high_correlation_periods, key=lambda x: x['avg_correlation'], reverse=True)[:10]
+            
+            for rank, period in enumerate(sorted_periods, 1):
+                self.logger.info(f"🔍   #{rank} 历史期间: {period['start_date'].strftime('%Y-%m-%d')} 到 {period['end_date'].strftime('%Y-%m-%d')}")
+                self.logger.info(f"🔍       来源股票: {period['stock_code']}")
+                self.logger.info(f"🔍       平均相关系数: {period['avg_correlation']:.6f}")
+                
+                # 获取历史数据进行详细对比
+                if period['stock_code'] == self.stock_code:
+                    # 自身历史数据
+                    historical_data = self.data.loc[period['start_date']:period['end_date']]
+                elif period['stock_code'] in self.loaded_stocks_data:
+                    # 对比股票数据
+                    historical_data = self.loaded_stocks_data[period['stock_code']].loc[period['start_date']:period['end_date']]
+                else:
+                    self.logger.info(f"🔍       无法获取历史数据进行详细对比")
+                    continue
+                
+                # 打印源数据列的详细对比
+                fields = ['open', 'high', 'low', 'close', 'volume']
+                self.logger.info(f"🔍       源数据列对比 (前3天和后3天):")
+                
+                for field in fields:
+                    if field in recent_data.columns and field in historical_data.columns:
+                        eval_field_data = recent_data[field].values
+                        hist_field_data = historical_data[field].values
+                        
+                        # 计算相关系数
+                        if len(eval_field_data) == len(hist_field_data):
+                            field_correlation = np.corrcoef(eval_field_data, hist_field_data)[0, 1]
+                            if np.isnan(field_correlation):
+                                field_correlation = 0.0
+                        else:
+                            field_correlation = 0.0
+                        
+                        self.logger.info(f"🔍         {field} (相关系数: {field_correlation:.6f}):")
+                        self.logger.info(f"🔍           评测数据前3天: {eval_field_data[:3].tolist()}")
+                        self.logger.info(f"🔍           历史数据前3天: {hist_field_data[:3].tolist()}")
+                        self.logger.info(f"🔍           评测数据后3天: {eval_field_data[-3:].tolist()}")
+                        self.logger.info(f"🔍           历史数据后3天: {hist_field_data[-3:].tolist()}")
+                
+                self.logger.info("🔍" + "-" * 60)
+            
+            if len(high_correlation_periods) > 10:
+                self.logger.info(f"🔍   ... 还有 {len(high_correlation_periods) - 10} 个超过阈值的期间")
+        else:
+            self.logger.info("🔍 没有找到超过阈值的对比期间")
+        
+        # 打印评测数据的统计信息
+        self.logger.info("🔍 评测数据统计信息:")
+        fields = ['open', 'high', 'low', 'close', 'volume']
+        for field in fields:
+            if field in recent_data.columns:
+                field_data = recent_data[field].values
+                self.logger.info(f"🔍   {field}: 均值={np.mean(field_data):.4f}, 标准差={np.std(field_data):.4f}, 最小值={np.min(field_data):.4f}, 最大值={np.max(field_data):.4f}")
+        
+        self.logger.info("🔍" + "=" * 80)
+
     def save_stats_to_file(self, stats):
         """
         将统计结果保存到CSV文件
@@ -1311,6 +1392,14 @@ class PearsonAnalyzer:
             self.logger.info(f"未发现相关系数超过 {self.threshold} 的历史期间")
             # 即使未发现高相关性期间，也保存基本信息到CSV
             self.save_evaluation_result(recent_end_date, None, 0)
+        
+        # Debug模式下打印第一个评测日期的详细信息
+        if self.debug and high_correlation_periods:
+            self._log_first_evaluation_debug_info(
+                recent_data_for_self if 'recent_data_for_self' in locals() else recent_data,
+                recent_end_date, 
+                high_correlation_periods
+            )
         
         # Debug模式下打印前10条评测数据的详细信息
         if self.debug and high_correlation_periods:
