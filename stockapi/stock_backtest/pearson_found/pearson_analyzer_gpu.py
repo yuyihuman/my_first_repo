@@ -169,8 +169,9 @@ class GPUBatchPearsonAnalyzer:
             self.comparison_stocks = [stock_code]
         else:
             self.comparison_stocks = get_comparison_stocks(comparison_mode)
-            if stock_code in self.comparison_stocks:
-                self.comparison_stocks.remove(stock_code)
+            # 确保目标股票不在对比列表中（避免重复）
+            # if stock_code in self.comparison_stocks:
+            #     self.comparison_stocks.remove(stock_code)
         
         # 存储已加载的股票数据
         self.loaded_stocks_data = {}
@@ -1375,7 +1376,10 @@ class GPUBatchPearsonAnalyzer:
         
         # 检查self_only模式的特殊情况
         if self.comparison_mode == 'self_only':
-            self.logger.warning("⚠️ self_only模式下不再加载自身数据，将没有历史数据可供对比")
+            self.logger.info("📈 使用自身历史数据对比模式")
+            # 在self_only模式下，收集目标股票自身的历史数据
+            self_historical_data = self._collect_self_historical_data(earliest_eval_date)
+            historical_periods_data.extend(self_historical_data)
             self.logger.info(f"收集到 {len(historical_periods_data)} 个历史期间数据")
             self.end_timer('historical_data_collection')
             return historical_periods_data
@@ -1535,6 +1539,48 @@ class GPUBatchPearsonAnalyzer:
             return self._collect_comparison_historical_data(earliest_eval_date)
         
         self.logger.info(f"✅ 多进程对比股票历史数据收集完成: 处理股票={processed_stocks}, 有效期间={total_valid_periods}, 无效期间={total_invalid_periods}")
+        return historical_data
+    
+    def _collect_self_historical_data(self, earliest_eval_date):
+        """收集目标股票自身的历史数据（用于self_only模式）"""
+        historical_data = []
+        
+        if self.data is None or self.data.empty:
+            self.logger.warning(f"目标股票 {self.stock_code} 数据为空，无法收集历史数据")
+            return historical_data
+        
+        # 定义需要的字段
+        fields = ['open', 'high', 'low', 'close', 'volume']
+        
+        # 使用目标股票的所有可用数据
+        available_data = self.data
+        
+        if len(available_data) < self.window_size:
+            self.logger.warning(f"目标股票 {self.stock_code} 数据长度 {len(available_data)} 小于窗口大小 {self.window_size}")
+            return historical_data
+        
+        valid_periods = 0
+        invalid_periods = 0
+        
+        # 生成目标股票的历史期间数据
+        for i in range(len(available_data) - self.window_size + 1):
+            period_data = available_data.iloc[i:i + self.window_size]
+            
+            # 检查数据长度是否正确
+            if len(period_data) == self.window_size:
+                start_date = period_data.index[0]
+                end_date = period_data.index[-1]
+                
+                # 直接提取并预处理数据
+                historical_values = period_data[fields].values
+                
+                # 存储预处理后的数据
+                historical_data.append((historical_values, start_date, end_date, self.stock_code))
+                valid_periods += 1
+            else:
+                invalid_periods += 1
+        
+        self.logger.info(f"目标股票 {self.stock_code} 历史数据收集完成: 有效期间={valid_periods}, 无效期间={invalid_periods}")
         return historical_data
     
 
@@ -1881,12 +1927,8 @@ class GPUBatchPearsonAnalyzer:
                 prediction_stats = daily_result.get('prediction_stats', {})
                 
                 # 计算对比股票数量
-                # 在self_only模式下，只对比自身历史数据，不需要额外加1
-                # 在其他模式下，需要加上目标股票自身
-                if self.comparison_mode == 'self_only':
-                    comparison_stock_count = len(self.comparison_stocks)
-                else:
-                    comparison_stock_count = len(self.comparison_stocks) + 1
+                # 统一记录实际用于对比的股票数量，不包括目标股票本身
+                comparison_stock_count = len(self.comparison_stocks)
                 
                 # 准备单日结果数据
                 row_data = {

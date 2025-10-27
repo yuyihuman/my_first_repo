@@ -77,8 +77,8 @@ class PearsonAnalyzer:
         else:
             self.comparison_stocks = get_comparison_stocks(comparison_mode)
             # 确保目标股票不在对比列表中（避免重复）
-            if stock_code in self.comparison_stocks:
-                self.comparison_stocks.remove(stock_code)
+            # if stock_code in self.comparison_stocks:
+            #     self.comparison_stocks.remove(stock_code)
         
         # 存储已加载的股票数据
         self.loaded_stocks_data = {}
@@ -168,12 +168,8 @@ class PearsonAnalyzer:
         """
         try:
             # 计算对比股票数量
-            # 在self_only模式下，只对比自身历史数据，不需要额外加1
-            # 在其他模式下，需要加上目标股票自身
-            if self.comparison_mode == 'self_only':
-                comparison_stock_count = len(self.comparison_stocks)
-            else:
-                comparison_stock_count = len(self.comparison_stocks) + 1
+            # 统一记录实际用于对比的股票数量，不包括目标股票本身
+            comparison_stock_count = len(self.comparison_stocks)
             
             # 准备要保存的数据
             result_data = {
