@@ -1075,70 +1075,72 @@ class PearsonAnalyzer:
         max_correlation = 0
         max_correlation_period = None
         
-        # 1. 分析自身历史数据
-        self.start_timer('self_analysis')
-        self.start_timer('correlation_calculation')
-        self.logger.info(f"开始分析自身历史数据...")
-        comparison_count = 0
-        
-        # 为自身历史数据分析重新定义recent_data，只包含最近window_size天的数据
-        if self.backtest_date:
-            # 有回测日期时，取回测日期之前的最近window_size天数据
-            backtest_data = data[data.index <= pd.to_datetime(self.backtest_date)]
-            recent_data_for_self = backtest_data.iloc[-self.window_size:]
-            # 比较回测日期之前的历史数据段，包含所有可能的窗口
-            max_historical_periods = len(backtest_data) - self.window_size + 1
-        else:
-            # 没有回测日期时，取最近window_size天数据
-            recent_data_for_self = data.iloc[-self.window_size:]
-            # 比较除了最后window_size天之外的历史数据段，包含所有可能的窗口
-            max_historical_periods = len(data) - self.window_size + 1
-        
-        for i in range(max_historical_periods):
-            historical_data = data.iloc[i:i + self.window_size]
-            historical_start_date = historical_data.index[0]
-            historical_end_date = historical_data.index[-1]
+        # 1. 分析自身历史数据（仅在self_only模式下）
+        if self.comparison_mode == 'self_only':
+            self.start_timer('self_analysis')
+            self.start_timer('correlation_calculation')
+            self.logger.info(f"📈 使用自身历史数据对比模式")
+            self.logger.info(f"开始分析自身历史数据...")
+            comparison_count = 0
             
-            comparison_count += 1
+            # 为自身历史数据分析重新定义recent_data，只包含最近window_size天的数据
+            if self.backtest_date:
+                # 有回测日期时，取回测日期之前的最近window_size天数据
+                backtest_data = data[data.index <= pd.to_datetime(self.backtest_date)]
+                recent_data_for_self = backtest_data.iloc[-self.window_size:]
+                # 比较回测日期之前的历史数据段，包含所有可能的窗口
+                max_historical_periods = len(backtest_data) - self.window_size + 1
+            else:
+                # 没有回测日期时，取最近window_size天数据
+                recent_data_for_self = data.iloc[-self.window_size:]
+                # 比较除了最后window_size天之外的历史数据段，包含所有可能的窗口
+                max_historical_periods = len(data) - self.window_size + 1
             
-            # 计算相关系数
-            avg_correlation, correlations = self.calculate_pearson_correlation(recent_data_for_self, historical_data)
-            
-            # 更新最高相关系数（剔除相关性系数>=0.9999的结果）
-            if avg_correlation > max_correlation and avg_correlation < 0.9999:
-                max_correlation = avg_correlation
-                max_correlation_period = (historical_start_date, historical_end_date, self.stock_code)
-            
-            # Debug模式下的详细日志
-            if self.debug and comparison_count % 500 == 0:
-                self.logger.info(f"DEBUG - 自身历史第{comparison_count}次比较:")
-                self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
-                self.logger.info(f"  平均相关系数: {avg_correlation:.6f}")
-            
-            # 检查是否超过阈值，并剔除相关性系数>=0.9999的结果
-            if avg_correlation >= self.threshold and avg_correlation < 0.9999:
-                high_correlation_periods.append({
-                    'start_date': historical_start_date,
-                    'end_date': historical_end_date,
-                    'avg_correlation': avg_correlation,
-                    'correlations': correlations,
-                    'stock_code': self.stock_code,
-                    'source': 'self'
-                })
+            for i in range(max_historical_periods):
+                historical_data = data.iloc[i:i + self.window_size]
+                historical_start_date = historical_data.index[0]
+                historical_end_date = historical_data.index[-1]
                 
-                # 记录发现的高相关性数据
-                self.logger.info("发现高相关性数据 (自身历史):")
-                self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
-                self.logger.info(f"  平均相关系数: {avg_correlation:.4f}")
-            elif avg_correlation >= 1.0:
-                # 记录被过滤的相关性系数等于1的数据
-                if self.debug:
-                    self.logger.info(f"过滤相关性系数等于1的数据 (自身历史): {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
-        
-        # 结束自身历史的相关性计算计时
-        correlation_elapsed_time = self.end_timer('correlation_calculation')
-        self.logger.info(f"自身历史数据分析完成，比较了 {comparison_count} 个期间，相关性计算耗时: {correlation_elapsed_time:.3f}秒")
-        self.end_timer('self_analysis')
+                comparison_count += 1
+                
+                # 计算相关系数
+                avg_correlation, correlations = self.calculate_pearson_correlation(recent_data_for_self, historical_data)
+                
+                # 更新最高相关系数（剔除相关性系数>=0.9999的结果）
+                if avg_correlation > max_correlation and avg_correlation < 0.9999:
+                    max_correlation = avg_correlation
+                    max_correlation_period = (historical_start_date, historical_end_date, self.stock_code)
+                
+                # Debug模式下的详细日志
+                if self.debug and comparison_count % 500 == 0:
+                    self.logger.info(f"DEBUG - 自身历史第{comparison_count}次比较:")
+                    self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
+                    self.logger.info(f"  平均相关系数: {avg_correlation:.6f}")
+                
+                # 检查是否超过阈值，并剔除相关性系数>=0.9999的结果
+                if avg_correlation >= self.threshold and avg_correlation < 0.9999:
+                    high_correlation_periods.append({
+                        'start_date': historical_start_date,
+                        'end_date': historical_end_date,
+                        'avg_correlation': avg_correlation,
+                        'correlations': correlations,
+                        'stock_code': self.stock_code,
+                        'source': 'self'
+                    })
+                    
+                    # 记录发现的高相关性数据
+                    self.logger.info("发现高相关性数据 (自身历史):")
+                    self.logger.info(f"  历史期间: {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
+                    self.logger.info(f"  平均相关系数: {avg_correlation:.4f}")
+                elif avg_correlation >= 1.0:
+                    # 记录被过滤的相关性系数等于1的数据
+                    if self.debug:
+                        self.logger.info(f"过滤相关性系数等于1的数据 (自身历史): {historical_start_date.strftime('%Y-%m-%d')} 到 {historical_end_date.strftime('%Y-%m-%d')}")
+            
+            # 结束自身历史的相关性计算计时
+            correlation_elapsed_time = self.end_timer('correlation_calculation')
+            self.logger.info(f"自身历史数据分析完成，比较了 {comparison_count} 个期间，相关性计算耗时: {correlation_elapsed_time:.3f}秒")
+            self.end_timer('self_analysis')
         
         # 2. 分析对比股票数据
         if self.comparison_stocks:
@@ -1242,15 +1244,19 @@ class PearsonAnalyzer:
         self.logger.info(f"分析的最近交易日期间: {recent_start_date.strftime('%Y-%m-%d')} 到 {recent_end_date.strftime('%Y-%m-%d')}")
         
         # 统计不同来源的比较次数
-        total_comparisons = comparison_count
-        if self.comparison_stocks:
-            cross_comparison_count = sum(1 for _ in self.loaded_stocks_data.values() if _ is not None)
-            total_comparisons += cross_comparison_count
-            self.logger.info(f"自身历史期间比较数: {comparison_count}")
-            self.logger.info(f"跨股票期间比较数: {cross_comparison_count}")
-            self.logger.info(f"总比较期间数: {total_comparisons}")
-        else:
+        if self.comparison_mode == 'self_only':
+            total_comparisons = comparison_count
             self.logger.info(f"总共比较的历史期间数: {comparison_count}")
+        else:
+            # 在非self_only模式下，只有跨股票比较
+            if self.comparison_stocks:
+                cross_comparison_count = sum(1 for _ in self.loaded_stocks_data.values() if _ is not None)
+                total_comparisons = cross_comparison_count
+                self.logger.info(f"跨股票期间比较数: {cross_comparison_count}")
+                self.logger.info(f"总比较期间数: {total_comparisons}")
+            else:
+                total_comparisons = 0
+                self.logger.info("没有进行任何比较")
         
         self.logger.info(f"相关系数阈值: {self.threshold}")
         self.logger.info(f"发现的高相关性期间数: {len(high_correlation_periods)}")
