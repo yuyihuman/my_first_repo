@@ -330,11 +330,11 @@ class GPUBatchPearsonAnalyzer:
         
         # 数据质量过滤（对所有股票都应用）
         data = data[
-            (data['open'] > 0) & 
-            (data['high'] > 0) & 
-            (data['low'] > 0) & 
-            (data['close'] > 0) & 
-            (data['volume'] > 0)
+            (data['open'] > 1) & 
+            (data['high'] > 1) & 
+            (data['low'] > 1) & 
+            (data['close'] > 1) & 
+            (data['volume'] > 1)
         ]
         final_count = len(data)
         quality_removed_count = date_filtered_count - final_count

@@ -329,7 +329,7 @@ class PearsonAnalyzer:
             self.end_timer('target_stock_loading')
             return None
         
-        # 数据过滤：确保价格为正数，成交量大于0
+        # 数据过滤：确保价格和成交量大于1
         self.data = self._filter_data(data, self.stock_code, is_target_stock=True)
         self.logger.info(f"✅ 目标股票 {self.stock_code} 数据加载完成 ({len(self.data)} 条记录)")
         self.end_timer('target_stock_loading')
@@ -362,11 +362,11 @@ class PearsonAnalyzer:
         
         # 数据质量过滤（对所有股票都应用）
         data = data[
-            (data['open'] > 0) & 
-            (data['high'] > 0) & 
-            (data['low'] > 0) & 
-            (data['close'] > 0) & 
-            (data['volume'] > 0)
+            (data['open'] > 1) & 
+            (data['high'] > 1) & 
+            (data['low'] > 1) & 
+            (data['close'] > 1) & 
+            (data['volume'] > 1)
         ]
         final_count = len(data)
         quality_removed_count = date_filtered_count - final_count
