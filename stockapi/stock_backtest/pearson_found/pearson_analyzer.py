@@ -330,7 +330,7 @@ class PearsonAnalyzer:
             return None
         
         # 数据过滤：确保价格为正数，成交量大于0
-        self.data = self._filter_data(data, self.stock_code)
+        self.data = self._filter_data(data, self.stock_code, is_target_stock=True)
         self.logger.info(f"✅ 目标股票 {self.stock_code} 数据加载完成 ({len(self.data)} 条记录)")
         self.end_timer('target_stock_loading')
         
@@ -339,19 +339,28 @@ class PearsonAnalyzer:
         
         return self.data
     
-    def _filter_data(self, data, stock_code):
-        """过滤股票数据，确保数据质量和日期范围"""
+    def _filter_data(self, data, stock_code, is_target_stock=False):
+        """过滤股票数据，确保数据质量和日期范围
+        
+        Args:
+            data: 股票数据DataFrame
+            stock_code: 股票代码
+            is_target_stock: 是否为目标股票，目标股票不受earliest_date限制
+        """
         if data is None or data.empty:
             return data
             
         original_count = len(data)
+        date_filtered_count = original_count
+        date_removed_count = 0
         
-        # 首先按日期过滤
-        data = data[data.index >= self.earliest_date]
-        date_filtered_count = len(data)
-        date_removed_count = original_count - date_filtered_count
+        # 只对对比股票应用日期过滤，目标股票使用完整历史数据
+        if not is_target_stock:
+            data = data[data.index >= self.earliest_date]
+            date_filtered_count = len(data)
+            date_removed_count = original_count - date_filtered_count
         
-        # 然后按数据质量过滤
+        # 数据质量过滤（对所有股票都应用）
         data = data[
             (data['open'] > 0) & 
             (data['high'] > 0) & 
@@ -363,7 +372,9 @@ class PearsonAnalyzer:
         quality_removed_count = date_filtered_count - final_count
         
         if date_removed_count > 0:
-            self.logger.debug(f"股票 {stock_code} 日期过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_count} 条数据")
+            self.logger.debug(f"对比股票 {stock_code} 日期过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_count} 条数据")
+        elif is_target_stock:
+            self.logger.debug(f"目标股票 {stock_code} 使用完整历史数据，无日期过滤")
         
         if quality_removed_count > 0:
             self.logger.debug(f"股票 {stock_code} 数据质量过滤完成，移除 {quality_removed_count} 条异常数据")
