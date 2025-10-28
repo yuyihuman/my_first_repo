@@ -2274,7 +2274,7 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='GPU批量评测Pearson相关性分析')
-    parser.add_argument('stock_code', help='股票代码')
+    parser.add_argument('--stock_code', required=True, help='股票代码')
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')

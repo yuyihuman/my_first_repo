@@ -1490,7 +1490,7 @@ class PearsonAnalyzer:
 
 def main():
     parser = argparse.ArgumentParser(description='股票Pearson相关性分析工具')
-    parser.add_argument('stock_code', help='股票代码')
+    parser.add_argument('--stock_code', required=True, help='股票代码')
     parser.add_argument('--log_dir', default='logs', help='日志目录 (默认: logs)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
     parser.add_argument('--threshold', type=float, default=0.85, help='相关系数阈值 (默认: 0.85)')
