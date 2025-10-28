@@ -1372,13 +1372,34 @@ class GPUBatchPearsonAnalyzer:
         # 初始GPU显存监控
         self.monitor_gpu_memory("分析开始")
         
-        # 🔄 第1阶段：初始化与数据准备 - 开始
-        self.logger.info("🔄 [阶段1/4] 初始化与数据准备 - 开始")
-        if not hasattr(self, 'data') or self.data is None:
-            self.data = self.load_data()
-            if self.data is None:
-                self.logger.error("数据加载失败")
+        # 📚 第1阶段：多进程历史数据处理 - 开始
+        self.logger.info("📚 [阶段1/4] 多进程历史数据处理 - 开始")
+        # 先收集历史期间数据，这会加载所有对比股票数据（包括目标股票如果在对比列表中）
+        historical_periods_data = self._collect_historical_periods_data()
+        
+        if not historical_periods_data:
+            self.logger.error("没有有效的历史期间数据")
+            return None
+        self.logger.info("📚 [阶段1/4] 多进程历史数据处理 - 完成")
+        
+        # 🔄 第2阶段：初始化与数据准备 - 开始
+        self.logger.info("🔄 [阶段2/4] 初始化与数据准备 - 开始")
+        
+        # 检查阶段1是否已经加载了目标股票数据
+        if self.stock_code in self.loaded_stocks_data:
+            self.logger.info(f"✅ 复用阶段1已加载的目标股票 {self.stock_code} 数据")
+            self.data = self.loaded_stocks_data[self.stock_code]
+            if self.data is None or self.data.empty:
+                self.logger.error("阶段1加载的目标股票数据为空")
                 return None
+        else:
+            # 阶段1没有加载目标股票数据，需要单独加载
+            self.logger.info(f"⚠️ 阶段1未包含目标股票 {self.stock_code}，单独加载数据")
+            if not hasattr(self, 'data') or self.data is None:
+                self.data = self.load_data()
+                if self.data is None:
+                    self.logger.error("目标股票数据加载失败")
+                    return None
         
         evaluation_dates = self.prepare_evaluation_dates(self.backtest_date)
         
@@ -1395,17 +1416,7 @@ class GPUBatchPearsonAnalyzer:
         
         # 监控数据准备后的GPU显存
         self.monitor_gpu_memory("数据准备完成")
-        self.logger.info("🔄 [阶段1/4] 初始化与数据准备 - 完成")
-        
-        # 📚 第2阶段：多进程历史数据处理 - 开始
-        self.logger.info("📚 [阶段2/4] 多进程历史数据处理 - 开始")
-        earliest_eval_date = min(valid_dates)
-        historical_periods_data = self._collect_historical_periods_data(earliest_eval_date)
-        
-        if not historical_periods_data:
-            self.logger.error("没有有效的历史期间数据")
-            return None
-        self.logger.info("📚 [阶段2/4] 多进程历史数据处理 - 完成")
+        self.logger.info("🔄 [阶段2/4] 初始化与数据准备 - 完成")
         
         # 💾 基于实际历史期间数据量进行GPU内存预估
         self.logger.info("💾 基于实际数据量进行GPU内存预估...")
@@ -1489,8 +1500,8 @@ class GPUBatchPearsonAnalyzer:
         
         return final_result
     
-    def _collect_historical_periods_data(self, earliest_eval_date):
-        """收集历史期间数据（合并了对比股票数据加载逻辑，不再加载自身数据）"""
+    def _collect_historical_periods_data(self):
+        """收集历史期间数据（合并了对比股票数据加载逻辑）"""
         self.start_timer('historical_data_collection')
         
         historical_periods_data = []
@@ -1499,7 +1510,7 @@ class GPUBatchPearsonAnalyzer:
         if self.comparison_mode == 'self_only':
             self.logger.info("📈 使用自身历史数据对比模式")
             # 在self_only模式下，收集目标股票自身的历史数据
-            self_historical_data = self._collect_self_historical_data(earliest_eval_date)
+            self_historical_data = self._collect_self_historical_data()
             historical_periods_data.extend(self_historical_data)
             self.logger.info(f"收集到 {len(historical_periods_data)} 个历史期间数据")
             self.end_timer('historical_data_collection')
@@ -1508,12 +1519,12 @@ class GPUBatchPearsonAnalyzer:
         # 首先加载对比股票数据（原步骤1-2的逻辑）
         self._load_comparison_stocks_data_inline()
         
-        # 收集对比股票历史数据（不再加载自身数据）
+        # 收集对比股票历史数据
         # 根据股票数量决定是否使用多进程
         if len(self.loaded_stocks_data) >= 10 and self.num_processes > 1:
-            comparison_historical_data = self._collect_comparison_historical_data_multiprocess(earliest_eval_date)
+            comparison_historical_data = self._collect_comparison_historical_data_multiprocess()
         else:
-            comparison_historical_data = self._collect_comparison_historical_data(earliest_eval_date)
+            comparison_historical_data = self._collect_comparison_historical_data()
         historical_periods_data.extend(comparison_historical_data)
         
         self.logger.info(f"收集到 {len(historical_periods_data)} 个历史期间数据")
@@ -1522,6 +1533,10 @@ class GPUBatchPearsonAnalyzer:
     
     def _load_comparison_stocks_data_inline(self):
         """内联加载对比股票数据（原步骤1-2逻辑）"""
+        # 确保data_loader已初始化
+        if self.data_loader is None:
+            self.data_loader = StockDataLoader()
+            
         self.logger.info(f"📈 加载对比股票数据中... ({len(self.comparison_stocks)} 只)")
         successful_loads = 0
         
@@ -1552,7 +1567,7 @@ class GPUBatchPearsonAnalyzer:
     
 
     
-    def _collect_comparison_historical_data(self, earliest_eval_date):
+    def _collect_comparison_historical_data(self):
         """收集对比股票历史数据（已优化：直接筛选和预处理）"""
         historical_data = []
         total_valid_periods = 0
@@ -1603,7 +1618,7 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"对比股票历史数据收集完成: 处理股票={processed_stocks}, 有效期间={total_valid_periods}, 无效期间={total_invalid_periods}")
         return historical_data
     
-    def _collect_comparison_historical_data_multiprocess(self, earliest_eval_date):
+    def _collect_comparison_historical_data_multiprocess(self):
         """收集对比股票历史数据（多进程版本）"""
         if not self.loaded_stocks_data:
             return []
@@ -1662,7 +1677,7 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"✅ 多进程对比股票历史数据收集完成: 处理股票={processed_stocks}, 有效期间={total_valid_periods}, 无效期间={total_invalid_periods}")
         return historical_data
     
-    def _collect_self_historical_data(self, earliest_eval_date):
+    def _collect_self_historical_data(self):
         """收集目标股票自身的历史数据（用于self_only模式）"""
         historical_data = []
         
@@ -2056,13 +2071,13 @@ class GPUBatchPearsonAnalyzer:
         
         # 定义步骤映射和显示顺序 - 新的4阶段划分
         step_mapping = {
-            # 第1阶段：初始化与数据准备（合并原1-3阶段）
-            'target_stock_loading': ('1-1', '目标股票数据加载'),
-            'evaluation_dates_preparation': ('1-2', '评测日期准备'),
-            'batch_data_preparation': ('1-3', '批量数据准备'),
+            # 第1阶段：多进程历史数据处理（含对比股票数据加载）
+            'historical_data_collection': ('1-1', '历史数据收集（含对比股票数据加载）'),
             
-            # 第2阶段：多进程历史数据处理（保持原第3阶段）
-            'historical_data_collection': ('2-1', '历史数据收集（含对比股票数据加载）'),
+            # 第2阶段：初始化与数据准备
+            'target_stock_loading': ('2-1', '目标股票数据加载'),
+            'evaluation_dates_preparation': ('2-2', '评测日期准备'),
+            'batch_data_preparation': ('2-3', '批量数据准备'),
             
             # 第3阶段：GPU计算与结果处理（合并原4-6阶段）
             'gpu_step1_data_preparation': ('3-1', '历史数据准备和筛选'),
@@ -2080,8 +2095,8 @@ class GPUBatchPearsonAnalyzer:
         # 按步骤顺序显示 - 新的4阶段划分
         current_stage = 0
         stage_names = {
-            1: "🔄 第1阶段：初始化与数据准备",
-            2: "📚 第2阶段：多进程历史数据处理",
+            1: "📚 第1阶段：多进程历史数据处理",
+            2: "🔄 第2阶段：初始化与数据准备",
             3: "🚀 第3阶段：GPU计算与结果处理"
         }
         
