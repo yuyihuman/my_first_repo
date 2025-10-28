@@ -2040,6 +2040,9 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"📊 总计处理: {total_days} 个评测日期，分 {total_batches} 批")
         self.logger.info(f"📈 总高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
         
+        # 输出性能统计（分批处理模式）
+        self._log_performance_summary()
+        
         return merged_results
     
     def _log_performance_summary(self):
