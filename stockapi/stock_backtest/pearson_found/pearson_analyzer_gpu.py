@@ -2817,7 +2817,7 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='GPU批量评测Pearson相关性分析')
-    parser.add_argument('--stock_code', required=True, help='股票代码，支持单个(000001)或多个逗号分隔(000001,000002)')
+    parser.add_argument('--stock_code', required=True, help='股票代码或模式名称。支持: 1)单个股票代码(000001) 2)多个逗号分隔(000001,000002) 3)预定义模式(top10/industry/all)')
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
@@ -2844,8 +2844,22 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     
-    # 解析股票代码，支持逗号分隔的多个股票
-    stock_codes = [code.strip() for code in args.stock_code.split(',')]
+    # 解析股票代码，支持逗号分隔的多个股票或模式名称
+    input_value = args.stock_code.strip()
+    
+    # 检查是否为预定义的模式名称
+    predefined_modes = ['top10', 'industry', 'all']
+    if input_value in predefined_modes:
+        # 使用模式获取股票列表
+        from stock_config import get_comparison_stocks, get_all_stocks_list
+        if input_value == 'all':
+            stock_codes = get_all_stocks_list()
+        else:
+            stock_codes = get_comparison_stocks(input_value)
+        print(f"使用预定义模式 '{input_value}'，获取到 {len(stock_codes)} 个股票")
+    else:
+        # 传统的股票代码解析，支持逗号分隔的多个股票
+        stock_codes = [code.strip() for code in input_value.split(',')]
     
     print(f"开始GPU批量评测分析，股票代码: {stock_codes}")
     print(f"评测日期数量: {args.evaluation_days}")
