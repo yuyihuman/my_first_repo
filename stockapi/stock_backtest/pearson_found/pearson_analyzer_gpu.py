@@ -124,7 +124,10 @@ class GPUBatchPearsonAnalyzer:
             gpu_memory_limit: GPU内存使用限制（0.0-1.0）
             earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
             num_processes: 多进程数量，None表示自动检测（默认为CPU核心数-1）
-            evaluation_batch_size: 每批次处理的评测日期数量，用于控制GPU内存使用 (默认: 20)
+            evaluation_batch_size: 每批次处理的计算单元数量，用于控制GPU内存使用
+                              单股票模式: 直接表示评测日期数量
+                              多股票模式: 表示总计算单元数 (股票数 × 评测日期数)
+                              例如: 100股票×15评测日期=1500计算单元，batch_size=20时分75批处理 (默认: 20)
         """
         # 支持多个股票代码
         if isinstance(stock_code, str):
@@ -319,41 +322,11 @@ class GPUBatchPearsonAnalyzer:
         # 存储所有对比股票的数据（避免重复加载）
         self.loaded_stocks_data = {}
         
-        # 1. 加载所有目标股票数据
-        self.logger.info(f"📈 [1/2] 加载目标股票数据...")
-        successful_target_loads = 0
-        for stock_code in self.stock_codes:
-            try:
-                data = self.data_loader.load_stock_data(stock_code)
-                
-                if data is None or data.empty:
-                    self.logger.error(f"无法加载目标股票 {stock_code} 的数据")
-                    continue
-                
-                filtered_data = self._filter_data(data, stock_code, is_target_stock=True)
-                self.multi_stock_data[stock_code] = filtered_data
-                successful_target_loads += 1
-                self.logger.info(f"✅ 目标股票 {stock_code} 数据加载完成 ({len(filtered_data)} 条记录)")
-            except Exception as e:
-                self.logger.error(f"加载目标股票 {stock_code} 时出错: {str(e)}")
-                continue
-        
-        if not self.multi_stock_data:
-            self.logger.error("没有成功加载任何目标股票数据")
-            self.end_timer('all_data_loading')
-            return None
-        
-        # 2. 一次性加载所有对比股票数据
-        self.logger.info(f"📈 [2/2] 加载对比股票数据...")
+        # 1. 首先加载所有对比股票数据
+        self.logger.info(f"📈 [1/2] 加载对比股票数据...")
         successful_comparison_loads = 0
         for stock_code in self.comparison_stocks:
             try:
-                # 避免重复加载（如果对比股票中包含目标股票）
-                if stock_code in self.multi_stock_data:
-                    self.loaded_stocks_data[stock_code] = self.multi_stock_data[stock_code]
-                    successful_comparison_loads += 1
-                    continue
-                
                 data = self.data_loader.load_stock_data(stock_code)
                 if data is not None and not data.empty:
                     filtered_data = self._filter_data(data, stock_code, is_target_stock=False)
@@ -371,6 +344,44 @@ class GPUBatchPearsonAnalyzer:
                 if self.debug:
                     self.logger.warning(f"加载对比股票 {stock_code} 时出错: {str(e)}")
                 continue
+        
+        # 2. 然后加载目标股票数据（检查是否已在对比股票中）
+        self.logger.info(f"📈 [2/2] 加载目标股票数据...")
+        successful_target_loads = 0
+        for stock_code in self.stock_codes:
+            try:
+                # 检查目标股票是否已经在对比股票数据中
+                if stock_code in self.loaded_stocks_data:
+                    # 如果已经在对比股票中，直接使用，但需要重新过滤为目标股票格式
+                    original_data = self.data_loader.load_stock_data(stock_code)
+                    if original_data is not None and not original_data.empty:
+                        filtered_data = self._filter_data(original_data, stock_code, is_target_stock=True)
+                        self.multi_stock_data[stock_code] = filtered_data
+                        successful_target_loads += 1
+                        self.logger.info(f"✅ 目标股票 {stock_code} 数据已存在于对比股票中，重新过滤完成 ({len(filtered_data)} 条记录)")
+                    else:
+                        self.logger.error(f"无法重新加载目标股票 {stock_code} 的数据")
+                        continue
+                else:
+                    # 如果不在对比股票中，单独加载
+                    data = self.data_loader.load_stock_data(stock_code)
+                    
+                    if data is None or data.empty:
+                        self.logger.error(f"无法加载目标股票 {stock_code} 的数据")
+                        continue
+                    
+                    filtered_data = self._filter_data(data, stock_code, is_target_stock=True)
+                    self.multi_stock_data[stock_code] = filtered_data
+                    successful_target_loads += 1
+                    self.logger.info(f"✅ 目标股票 {stock_code} 数据单独加载完成 ({len(filtered_data)} 条记录)")
+            except Exception as e:
+                self.logger.error(f"加载目标股票 {stock_code} 时出错: {str(e)}")
+                continue
+        
+        if not self.multi_stock_data:
+            self.logger.error("没有成功加载任何目标股票数据")
+            self.end_timer('all_data_loading')
+            return None
         
         # 为了保持向后兼容性，将第一个股票的数据设为主数据
         self.data = self.multi_stock_data[self.stock_codes[0]]
@@ -431,12 +442,17 @@ class GPUBatchPearsonAnalyzer:
         准备批量评测日期列表
         
         Args:
-            end_date: 结束日期
+            end_date: 结束日期，如果为None则使用数据的最新日期
             
         Returns:
             list: 评测日期列表
         """
         self.start_timer('evaluation_dates_preparation')
+        
+        # 如果end_date为None，使用数据的最新日期
+        if end_date is None:
+            end_date = self.data.index.max()
+            self.logger.info(f"未指定结束日期，使用数据最新日期: {end_date}")
         
         # 获取所有可用的交易日期（包含end_date当天，如果数据可用）
         available_dates = self.data[self.data.index <= end_date].index
@@ -1276,8 +1292,14 @@ class GPUBatchPearsonAnalyzer:
         if is_multi_stock:
             # 多股票模式：计算所有股票的总体统计
             total_high_correlations = all_high_corr_masks_tensor.sum()
-            avg_high_correlations_per_day = all_high_corr_counts_tensor.float().mean()
-            max_high_correlations_per_day = all_high_corr_counts_tensor.max()
+            
+            # 检查张量是否为空，避免空张量调用统计方法
+            if all_high_corr_counts_tensor.numel() > 0:
+                avg_high_correlations_per_day = all_high_corr_counts_tensor.float().mean()
+                max_high_correlations_per_day = all_high_corr_counts_tensor.max()
+            else:
+                avg_high_correlations_per_day = torch.tensor(0.0, device=self.device)
+                max_high_correlations_per_day = torch.tensor(0, device=self.device)
             
             # 计算每个股票的统计信息
             stock_summary = {}
@@ -1298,8 +1320,14 @@ class GPUBatchPearsonAnalyzer:
             all_high_corr_counts_tensor = all_high_corr_counts_tensor.squeeze(0)  # [evaluation_days]
             
             total_high_correlations = all_high_corr_masks_tensor.sum()
-            avg_high_correlations_per_day = all_high_corr_counts_tensor.float().mean()
-            max_high_correlations_per_day = all_high_corr_counts_tensor.max()
+            
+            # 检查张量是否为空，避免空张量调用统计方法
+            if all_high_corr_counts_tensor.numel() > 0:
+                avg_high_correlations_per_day = all_high_corr_counts_tensor.float().mean()
+                max_high_correlations_per_day = all_high_corr_counts_tensor.max()
+            else:
+                avg_high_correlations_per_day = torch.tensor(0.0, device=self.device)
+                max_high_correlations_per_day = torch.tensor(0, device=self.device)
             stock_summary = None
         
         # 计算整体平均相关系数（只对高相关性的）
@@ -1810,11 +1838,34 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"对比模式: {self.comparison_mode}")
         self.logger.info(f"GPU设备: {self.device}")
         
-        # 计算需要分多少批次
-        total_batches = (self.evaluation_days + self.evaluation_batch_size - 1) // self.evaluation_batch_size
-        if total_batches > 1:
-            self.logger.info(f"🔄 分批处理策略: 将 {self.evaluation_days} 个评测日期分成 {total_batches} 批处理")
-            self.logger.info(f"💾 预计GPU内存节省: {((self.evaluation_days / self.evaluation_batch_size) - 1) * 100 / (self.evaluation_days / self.evaluation_batch_size):.1f}%")
+        # 计算需要分多少批次（考虑多股票模式）
+        if self.is_multi_stock:
+            # 多股票模式：总计算量 = 股票数 × 评测日期数
+            total_computation_units = len(self.stock_codes) * self.evaluation_days
+            self.logger.info(f"📊 多股票模式总计算量: {len(self.stock_codes)} 股票 × {self.evaluation_days} 评测日期 = {total_computation_units} 计算单元")
+            
+            # 根据总计算量计算批次数
+            total_batches = (total_computation_units + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+            
+            # 计算每批次实际处理的评测日期数（向下取整，确保不超过内存限制）
+            actual_batch_size = self.evaluation_batch_size // len(self.stock_codes)
+            if actual_batch_size < 1:
+                actual_batch_size = 1  # 至少处理1个评测日期
+                self.logger.warning(f"⚠️  股票数量({len(self.stock_codes)})超过批次大小({self.evaluation_batch_size})，强制每批处理1个评测日期")
+            
+            # 重新计算实际批次数
+            total_batches = (self.evaluation_days + actual_batch_size - 1) // actual_batch_size
+            
+            if total_batches > 1:
+                self.logger.info(f"🔄 多股票分批处理策略: 将 {self.evaluation_days} 个评测日期分成 {total_batches} 批处理")
+                self.logger.info(f"📦 每批处理: {actual_batch_size} 个评测日期 × {len(self.stock_codes)} 个股票 = {actual_batch_size * len(self.stock_codes)} 计算单元")
+                self.logger.info(f"💾 预计GPU内存节省: {((total_computation_units / self.evaluation_batch_size) - 1) * 100 / (total_computation_units / self.evaluation_batch_size):.1f}%")
+        else:
+            # 单股票模式：保持原有逻辑
+            total_batches = (self.evaluation_days + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+            if total_batches > 1:
+                self.logger.info(f"🔄 单股票分批处理策略: 将 {self.evaluation_days} 个评测日期分成 {total_batches} 批处理")
+                self.logger.info(f"💾 预计GPU内存节省: {((self.evaluation_days / self.evaluation_batch_size) - 1) * 100 / (self.evaluation_days / self.evaluation_batch_size):.1f}%")
         
         self.logger.info("=" * 80)
         
@@ -2191,6 +2242,7 @@ class GPUBatchPearsonAnalyzer:
         """
         精确估算GPU显存需求（GB）
         基于实际内存使用模式和PyTorch内存池机制
+        支持多股票模式的内存估算
         
         Args:
             evaluation_days: 评测日期数量
@@ -2203,9 +2255,13 @@ class GPUBatchPearsonAnalyzer:
         """
         bytes_per_float32 = 4
         
+        # 获取股票数量（多股票模式下需要考虑）
+        num_stocks = len(self.stock_codes) if self.is_multi_stock else 1
+        
         # 1. 基础数据张量
-        # 批量评测数据: [evaluation_days, window_size, num_fields]
-        batch_recent_data_bytes = evaluation_days * window_size * num_fields * bytes_per_float32
+        # 多股票模式: [num_stocks, evaluation_days, window_size, num_fields]
+        # 单股票模式: [evaluation_days, window_size, num_fields]
+        batch_recent_data_bytes = num_stocks * evaluation_days * window_size * num_fields * bytes_per_float32
         
         # 历史数据张量: [num_historical_periods, window_size, num_fields]
         historical_tensor_bytes = num_historical_periods * window_size * num_fields * bytes_per_float32
@@ -2213,28 +2269,30 @@ class GPUBatchPearsonAnalyzer:
         # 2. 相关系数计算中间张量（这是内存峰值的主要来源）
         # 在_compute_correlation_matrix中的广播计算
         
-        # recent_expanded: [batch_size, 1, window_size, num_fields]
+        # 多股票模式下的张量形状：
+        # recent_expanded: [num_stocks, batch_size, 1, window_size, num_fields]
         # historical_expanded: [1, num_historical_periods, window_size, num_fields]
-        # 广播后的实际内存占用: [batch_size, num_historical_periods, window_size, num_fields]
+        # 广播后的实际内存占用: [num_stocks, batch_size, num_historical_periods, window_size, num_fields]
         batch_size = min(self.batch_size, evaluation_days)
         
-        # 广播张量（最大内存消耗点）
-        broadcast_tensor_bytes = batch_size * num_historical_periods * window_size * num_fields * bytes_per_float32
+        # 广播张量（最大内存消耗点）- 考虑多股票模式
+        broadcast_tensor_bytes = num_stocks * batch_size * num_historical_periods * window_size * num_fields * bytes_per_float32
         
         # 中心化张量（2个）
         centered_tensors_bytes = 2 * broadcast_tensor_bytes
         
-        # 协方差、标准差、相关系数张量
-        covariance_bytes = batch_size * num_historical_periods * num_fields * bytes_per_float32
-        std_tensors_bytes = 2 * batch_size * num_historical_periods * num_fields * bytes_per_float32
-        correlation_bytes = batch_size * num_historical_periods * num_fields * bytes_per_float32
+        # 协方差、标准差、相关系数张量 - 考虑多股票模式
+        covariance_bytes = num_stocks * batch_size * num_historical_periods * num_fields * bytes_per_float32
+        std_tensors_bytes = 2 * num_stocks * batch_size * num_historical_periods * num_fields * bytes_per_float32
+        correlation_bytes = num_stocks * batch_size * num_historical_periods * num_fields * bytes_per_float32
         
         # 3. GPU端结果存储张量
-        # 平均相关系数: [evaluation_days, num_historical_periods]
-        avg_correlations_bytes = evaluation_days * num_historical_periods * bytes_per_float32
+        # 多股票模式: [num_stocks, evaluation_days, num_historical_periods]
+        # 单股票模式: [evaluation_days, num_historical_periods]
+        avg_correlations_bytes = num_stocks * evaluation_days * num_historical_periods * bytes_per_float32
         
-        # 高相关掩码: [evaluation_days, num_historical_periods] (bool = 1 byte)
-        high_corr_mask_bytes = evaluation_days * num_historical_periods * 1
+        # 高相关掩码: [num_stocks, evaluation_days, num_historical_periods] (bool = 1 byte)
+        high_corr_mask_bytes = num_stocks * evaluation_days * num_historical_periods * 1
         
         # 4. 关键修正：GPU计算过程中的真实内存峰值
         # 在_compute_correlation_matrix中，广播操作会创建巨大的中间张量：
@@ -2242,8 +2300,8 @@ class GPUBatchPearsonAnalyzer:
         # - historical_expanded.unsqueeze(0): [1, num_historical_periods, window_size, 5]  
         # - 广播计算时，PyTorch会创建完整的 [batch_size, num_historical_periods, window_size, 5] 张量
         
-        # 真实的广播内存消耗（这是被严重低估的部分）
-        full_broadcast_tensor_bytes = batch_size * num_historical_periods * window_size * num_fields * bytes_per_float32
+        # 真实的广播内存消耗（这是被严重低估的部分）- 考虑多股票模式
+        full_broadcast_tensor_bytes = num_stocks * batch_size * num_historical_periods * window_size * num_fields * bytes_per_float32
         
         # GPU计算峰值时同时存在的张量：
         # 1. 原始数据
@@ -2302,7 +2360,12 @@ class GPUBatchPearsonAnalyzer:
         # 记录详细的内存估算日志
         self.logger.info(f"🧮 GPU内存需求精确估算:")
         self.logger.info(f"   📊 输入参数:")
-        self.logger.info(f"      评测日期数: {evaluation_days}")
+        if self.is_multi_stock:
+            self.logger.info(f"      股票数量: {num_stocks}")
+            self.logger.info(f"      评测日期数: {evaluation_days} (每股票)")
+            self.logger.info(f"      总计算单元: {num_stocks * evaluation_days}")
+        else:
+            self.logger.info(f"      评测日期数: {evaluation_days}")
         self.logger.info(f"      历史期间数: {num_historical_periods:,}")
         self.logger.info(f"      窗口大小: {window_size}")
         self.logger.info(f"      批处理大小: {batch_size}")
@@ -2401,13 +2464,22 @@ class GPUBatchPearsonAnalyzer:
             }
         }
         
-        # 计算批次数量
-        total_batches = (len(valid_dates) + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+        # 计算批次数量（考虑多股票模式）
+        if self.is_multi_stock:
+            # 多股票模式：计算每批次实际处理的评测日期数
+            actual_batch_size = self.evaluation_batch_size // len(self.stock_codes)
+            if actual_batch_size < 1:
+                actual_batch_size = 1  # 至少处理1个评测日期
+            total_batches = (len(valid_dates) + actual_batch_size - 1) // actual_batch_size
+        else:
+            # 单股票模式：保持原有逻辑
+            actual_batch_size = self.evaluation_batch_size
+            total_batches = (len(valid_dates) + self.evaluation_batch_size - 1) // self.evaluation_batch_size
         
         # 分批处理
         for batch_idx in range(total_batches):
-            start_idx = batch_idx * self.evaluation_batch_size
-            end_idx = min(start_idx + self.evaluation_batch_size, len(valid_dates))
+            start_idx = batch_idx * actual_batch_size
+            end_idx = min(start_idx + actual_batch_size, len(valid_dates))
             
             batch_dates = valid_dates[start_idx:end_idx]
             batch_size = len(batch_dates)
@@ -2416,7 +2488,14 @@ class GPUBatchPearsonAnalyzer:
             self.logger.info(f"📅 日期范围: {batch_dates[0]} 到 {batch_dates[-1]}")
             
             # 提取当前批次的数据 (batch_recent_data 是 PyTorch 张量)
-            batch_recent_subset = batch_recent_data[start_idx:end_idx]
+            # 多股票模式: [num_stocks, evaluation_days, window_size, 5]
+            # 需要在评测日期维度（第二个维度）上切片，而不是股票维度
+            if len(batch_recent_data.shape) == 4:
+                # 多股票模式：在第二个维度（评测日期）上切片
+                batch_recent_subset = batch_recent_data[:, start_idx:end_idx]
+            else:
+                # 单股票模式：在第一个维度（评测日期）上切片
+                batch_recent_subset = batch_recent_data[start_idx:end_idx]
             
             # 监控GPU内存
             self.monitor_gpu_memory(f"批次 {batch_idx + 1} 开始")
@@ -2751,7 +2830,9 @@ if __name__ == "__main__":
     parser.add_argument('--num_processes', type=int, default=None,
                        help='多进程数量，None表示自动检测（默认为CPU核心数-1）')
     parser.add_argument('--evaluation_batch_size', type=int, default=20,
-                       help='每批次处理的评测日期数量，用于控制GPU内存使用。如果evaluation_days=100且evaluation_batch_size=20，则分5批处理 (默认: 20)')
+                        help='每批次处理的计算单元数量，用于控制GPU内存使用。'
+                             '单股票模式: 直接表示评测日期数量 (如evaluation_days=100, batch_size=20, 分5批处理)。'
+                             '多股票模式: 表示总计算单元数 (如100股票×15评测日期=1500单元, batch_size=20, 分75批处理) (默认: 20)')
 
     args = parser.parse_args()
     
