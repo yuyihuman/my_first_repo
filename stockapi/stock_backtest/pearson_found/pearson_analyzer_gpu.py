@@ -233,15 +233,23 @@ class GPUBatchPearsonAnalyzer:
     
     def _setup_logging(self):
         """设置日志配置"""
-        stock_log_dir = os.path.join(self.log_dir, self.stock_code)
-        os.makedirs(stock_log_dir, exist_ok=True)
+        # 直接使用logs根目录，不创建子文件夹
+        os.makedirs(self.log_dir, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         thread_id = threading.get_ident()
-        log_filename = f"batch_pearson_analysis_{self.stock_code}_{timestamp}_thread_{thread_id}.log"
-        log_path = os.path.join(stock_log_dir, log_filename)
         
-        self.logger = logging.getLogger(f'GPUBatchPearsonAnalyzer_{self.stock_code}')
+        # 根据是否为多股票模式决定日志文件名
+        if self.is_multi_stock:
+            log_filename = f"batch_pearson_analysis_list_{timestamp}_thread_{thread_id}.log"
+            logger_name = 'GPUBatchPearsonAnalyzer_list'
+        else:
+            log_filename = f"batch_pearson_analysis_{self.stock_code}_{timestamp}_thread_{thread_id}.log"
+            logger_name = f'GPUBatchPearsonAnalyzer_{self.stock_code}'
+        
+        log_path = os.path.join(self.log_dir, log_filename)
+        
+        self.logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging.INFO)
         
         for handler in self.logger.handlers[:]:
