@@ -1852,22 +1852,14 @@ class GPUBatchPearsonAnalyzer:
             total_computation_units = len(self.stock_codes) * self.evaluation_days
             self.logger.info(f"📊 多股票模式总计算量: {len(self.stock_codes)} 股票 × {self.evaluation_days} 评测日期 = {total_computation_units} 计算单元")
             
-            # 根据总计算量计算批次数
+            # 简化分批逻辑：严格按照批次大小分批
             total_batches = (total_computation_units + self.evaluation_batch_size - 1) // self.evaluation_batch_size
             
-            # 计算每批次实际处理的评测日期数（向下取整，确保不超过内存限制）
-            actual_batch_size = self.evaluation_batch_size // len(self.stock_codes)
-            if actual_batch_size < 1:
-                actual_batch_size = 1  # 至少处理1个评测日期
-                self.logger.warning(f"⚠️  股票数量({len(self.stock_codes)})超过批次大小({self.evaluation_batch_size})，强制每批处理1个评测日期")
-            
-            # 重新计算实际批次数
-            total_batches = (self.evaluation_days + actual_batch_size - 1) // actual_batch_size
-            
             if total_batches > 1:
-                self.logger.info(f"🔄 多股票分批处理策略: 将 {self.evaluation_days} 个评测日期分成 {total_batches} 批处理")
-                self.logger.info(f"📦 每批处理: {actual_batch_size} 个评测日期 × {len(self.stock_codes)} 个股票 = {actual_batch_size * len(self.stock_codes)} 计算单元")
-                self.logger.info(f"💾 预计GPU内存节省: {((total_computation_units / self.evaluation_batch_size) - 1) * 100 / (total_computation_units / self.evaluation_batch_size):.1f}%")
+                self.logger.info(f"🔄 多股票分批处理策略: 将 {total_computation_units} 个计算单元分成 {total_batches} 批处理")
+                self.logger.info(f"📦 每批处理: {self.evaluation_batch_size} 个计算单元")
+                memory_save_percent = ((total_computation_units - self.evaluation_batch_size) / total_computation_units) * 100
+                self.logger.info(f"💾 预计GPU内存节省: {memory_save_percent:.1f}%")
         else:
             # 单股票模式：保持原有逻辑
             total_batches = (self.evaluation_days + self.evaluation_batch_size - 1) // self.evaluation_batch_size
@@ -2474,47 +2466,97 @@ class GPUBatchPearsonAnalyzer:
         
         # 计算批次数量（考虑多股票模式）
         if self.is_multi_stock:
-            # 多股票模式：计算每批次实际处理的评测日期数
-            actual_batch_size = self.evaluation_batch_size // len(self.stock_codes)
-            if actual_batch_size < 1:
-                actual_batch_size = 1  # 至少处理1个评测日期
-            total_batches = (len(valid_dates) + actual_batch_size - 1) // actual_batch_size
+            # 多股票模式：按计算单元分批
+            total_computation_units = len(self.stock_codes) * len(valid_dates)
+            total_batches = (total_computation_units + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+            
+            # 生成所有计算单元的组合 (stock_idx, date_idx)
+            computation_units = []
+            for stock_idx in range(len(self.stock_codes)):
+                for date_idx in range(len(valid_dates)):
+                    computation_units.append((stock_idx, date_idx))
         else:
             # 单股票模式：保持原有逻辑
-            actual_batch_size = self.evaluation_batch_size
             total_batches = (len(valid_dates) + self.evaluation_batch_size - 1) // self.evaluation_batch_size
         
         # 分批处理
         for batch_idx in range(total_batches):
-            start_idx = batch_idx * actual_batch_size
-            end_idx = min(start_idx + actual_batch_size, len(valid_dates))
-            
-            batch_dates = valid_dates[start_idx:end_idx]
-            batch_size = len(batch_dates)
-            
-            self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {batch_size} 个评测日期")
-            self.logger.info(f"📅 日期范围: {batch_dates[0]} 到 {batch_dates[-1]}")
-            
-            # 提取当前批次的数据 (batch_recent_data 是 PyTorch 张量)
-            # 多股票模式: [num_stocks, evaluation_days, window_size, 5]
-            # 需要在评测日期维度（第二个维度）上切片，而不是股票维度
-            if len(batch_recent_data.shape) == 4:
-                # 多股票模式：在第二个维度（评测日期）上切片
-                batch_recent_subset = batch_recent_data[:, start_idx:end_idx]
+            if self.is_multi_stock:
+                # 多股票模式：按计算单元分批
+                start_unit = batch_idx * self.evaluation_batch_size
+                end_unit = min(start_unit + self.evaluation_batch_size, len(computation_units))
+                batch_units = computation_units[start_unit:end_unit]
+                
+                self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {len(batch_units)} 个计算单元")
+                
+                # 按股票分组处理当前批次的计算单元
+                stock_date_groups = {}
+                for stock_idx, date_idx in batch_units:
+                    if stock_idx not in stock_date_groups:
+                        stock_date_groups[stock_idx] = []
+                    stock_date_groups[stock_idx].append(date_idx)
+                
+                # 处理当前批次的每个股票
+                batch_correlations_list = []
+                for stock_idx, date_indices in stock_date_groups.items():
+                    stock_code = self.stock_codes[stock_idx]
+                    batch_dates = [valid_dates[i] for i in date_indices]
+                    
+                    self.logger.info(f"📊 处理股票 {stock_code}: {len(batch_dates)} 个日期")
+                    
+                    # 提取当前股票和日期的数据
+                    # batch_recent_data: [num_stocks, evaluation_days, window_size, 5]
+                    stock_recent_data = batch_recent_data[stock_idx:stock_idx+1, date_indices, :, :]
+                    
+                    # 监控GPU内存
+                    self.monitor_gpu_memory(f"批次 {batch_idx + 1} 股票 {stock_code} 开始")
+                    
+                    # 🚀 GPU计算当前股票的批次
+                    self.logger.info(f"🚀 [批次 {batch_idx + 1}] 股票 {stock_code} GPU计算 - 开始")
+                    stock_correlations = self.calculate_batch_gpu_correlation_optimized(
+                        stock_recent_data, historical_periods_data, batch_dates
+                    )
+                    self.monitor_gpu_memory(f"批次 {batch_idx + 1} 股票 {stock_code} 完成")
+                    self.logger.info(f"🚀 [批次 {batch_idx + 1}] 股票 {stock_code} GPU计算 - 完成")
+                    
+                    if stock_correlations:
+                        batch_correlations_list.append(stock_correlations)
+                
+                # 合并当前批次所有股票的结果
+                if batch_correlations_list:
+                    batch_correlations = self._merge_batch_correlations(batch_correlations_list)
+                else:
+                    batch_correlations = None
             else:
-                # 单股票模式：在第一个维度（评测日期）上切片
-                batch_recent_subset = batch_recent_data[start_idx:end_idx]
-            
-            # 监控GPU内存
-            self.monitor_gpu_memory(f"批次 {batch_idx + 1} 开始")
-            
-            # 🚀 GPU计算当前批次
-            self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 开始")
-            batch_correlations = self.calculate_batch_gpu_correlation_optimized(
-                batch_recent_subset, historical_periods_data, batch_dates
-            )
-            self.monitor_gpu_memory(f"批次 {batch_idx + 1} 完成")
-            self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 完成")
+                # 单股票模式：按日期分批
+                start_idx = batch_idx * self.evaluation_batch_size
+                end_idx = min(start_idx + self.evaluation_batch_size, len(valid_dates))
+                
+                batch_dates = valid_dates[start_idx:end_idx]
+                batch_size = len(batch_dates)
+                
+                self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {batch_size} 个评测日期")
+                self.logger.info(f"📅 日期范围: {batch_dates[0]} 到 {batch_dates[-1]}")
+                
+                # 提取当前批次的数据 (batch_recent_data 是 PyTorch 张量)
+                # 单股票模式: [1, evaluation_days, window_size, 5] 或 [evaluation_days, window_size, 5]
+                if len(batch_recent_data.shape) == 4:
+                    # 多股票格式但只有一个股票
+                    batch_recent_subset = batch_recent_data[:, start_idx:end_idx]
+                else:
+                    # 单股票格式
+                    batch_recent_subset = batch_recent_data[start_idx:end_idx]
+                
+                # 监控GPU内存
+                self.monitor_gpu_memory(f"批次 {batch_idx + 1} 开始")
+                
+                # 🚀 GPU计算当前批次
+                self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 开始")
+                batch_correlations = self.calculate_batch_gpu_correlation_optimized(
+                    batch_recent_subset, historical_periods_data, batch_dates
+                )
+                self.monitor_gpu_memory(f"批次 {batch_idx + 1} 完成")
+                self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 完成")
             
             if not batch_correlations:
                 self.logger.error(f"批次 {batch_idx + 1} 计算失败")
@@ -2567,6 +2609,72 @@ class GPUBatchPearsonAnalyzer:
         self._log_performance_summary()
         
         return merged_results
+    
+    def _merge_batch_correlations(self, batch_correlations_list):
+        """
+        合并多个股票的批次相关性结果
+        
+        Args:
+            batch_correlations_list: 多个股票的批次结果列表
+            
+        Returns:
+            dict: 合并后的批次结果
+        """
+        if not batch_correlations_list:
+            return None
+        
+        # 初始化合并结果
+        merged_result = {
+            'evaluation_days': 0,
+            'batch_results': {
+                'detailed_results': [],
+                'summary': {
+                    'total_high_correlations': 0,
+                    'avg_high_correlations_per_day': 0.0,
+                    'max_high_correlations_per_day': 0,
+                    'overall_avg_correlation': 0.0
+                }
+            }
+        }
+        
+        # 合并所有详细结果
+        for batch_result in batch_correlations_list:
+            if batch_result and 'batch_results' in batch_result:
+                # 合并详细结果
+                merged_result['batch_results']['detailed_results'].extend(
+                    batch_result['batch_results']['detailed_results']
+                )
+                
+                # 累加统计数据
+                batch_summary = batch_result['batch_results']['summary']
+                merged_result['batch_results']['summary']['total_high_correlations'] += batch_summary['total_high_correlations']
+                merged_result['batch_results']['summary']['max_high_correlations_per_day'] = max(
+                    merged_result['batch_results']['summary']['max_high_correlations_per_day'],
+                    batch_summary['max_high_correlations_per_day']
+                )
+                
+                # 累加评测日期数
+                merged_result['evaluation_days'] += batch_result.get('evaluation_days', 0)
+        
+        # 计算平均值
+        if merged_result['evaluation_days'] > 0:
+            merged_result['batch_results']['summary']['avg_high_correlations_per_day'] = (
+                merged_result['batch_results']['summary']['total_high_correlations'] / merged_result['evaluation_days']
+            )
+        
+        # 计算整体平均相关系数
+        if merged_result['batch_results']['detailed_results']:
+            all_correlations = []
+            for result in merged_result['batch_results']['detailed_results']:
+                if 'high_correlations' in result:
+                    for corr_data in result['high_correlations']:
+                        if 'correlation' in corr_data:
+                            all_correlations.append(corr_data['correlation'])
+            
+            if all_correlations:
+                merged_result['batch_results']['summary']['overall_avg_correlation'] = np.mean(all_correlations)
+        
+        return merged_result
     
     def _log_performance_summary(self):
         """输出分层性能总结"""
