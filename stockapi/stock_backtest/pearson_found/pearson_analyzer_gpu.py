@@ -1846,26 +1846,10 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"对比模式: {self.comparison_mode}")
         self.logger.info(f"GPU设备: {self.device}")
         
-        # 计算需要分多少批次（考虑多股票模式）
+        # 多股票模式总计算量信息（仅用于日志显示）
         if self.is_multi_stock:
-            # 多股票模式：总计算量 = 股票数 × 评测日期数
             total_computation_units = len(self.stock_codes) * self.evaluation_days
             self.logger.info(f"📊 多股票模式总计算量: {len(self.stock_codes)} 股票 × {self.evaluation_days} 评测日期 = {total_computation_units} 计算单元")
-            
-            # 简化分批逻辑：严格按照批次大小分批
-            total_batches = (total_computation_units + self.evaluation_batch_size - 1) // self.evaluation_batch_size
-            
-            if total_batches > 1:
-                self.logger.info(f"🔄 多股票分批处理策略: 将 {total_computation_units} 个计算单元分成 {total_batches} 批处理")
-                self.logger.info(f"📦 每批处理: {self.evaluation_batch_size} 个计算单元")
-                memory_save_percent = ((total_computation_units - self.evaluation_batch_size) / total_computation_units) * 100
-                self.logger.info(f"💾 预计GPU内存节省: {memory_save_percent:.1f}%")
-        else:
-            # 单股票模式：保持原有逻辑
-            total_batches = (self.evaluation_days + self.evaluation_batch_size - 1) // self.evaluation_batch_size
-            if total_batches > 1:
-                self.logger.info(f"🔄 单股票分批处理策略: 将 {self.evaluation_days} 个评测日期分成 {total_batches} 批处理")
-                self.logger.info(f"💾 预计GPU内存节省: {((self.evaluation_days / self.evaluation_batch_size) - 1) * 100 / (self.evaluation_days / self.evaluation_batch_size):.1f}%")
         
         self.logger.info("=" * 80)
         
@@ -1921,20 +1905,26 @@ class GPUBatchPearsonAnalyzer:
         
         # 🔄 检查是否需要分批处理
         if self.is_multi_stock:
-            # 多股票模式：考虑总计算单元数
-            total_computation_units = len(self.stock_codes) * len(valid_dates)
-            total_batches = (total_computation_units + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+            # 多股票模式：按股票数量分批，每批同时处理多只股票
+            stocks_per_batch = min(self.evaluation_batch_size, len(self.stock_codes))
+            total_batches = (len(self.stock_codes) + stocks_per_batch - 1) // stocks_per_batch
             
             if total_batches > 1:
-                self.logger.info(f"🔄 启用多股票分批处理模式: {total_computation_units} 个计算单元分成 {total_batches} 批")
+                self.logger.info(f"🔄 多股票分批处理策略: 将 {len(self.stock_codes)} 只股票分成 {total_batches} 批处理")
+                self.logger.info(f"📦 每批同时处理: 最多 {stocks_per_batch} 只股票，{len(valid_dates)} 个评测日期")
+                memory_save_percent = ((len(self.stock_codes) - stocks_per_batch) / len(self.stock_codes)) * 100
+                self.logger.info(f"💾 预计GPU内存节省: {memory_save_percent:.1f}%")
                 return self._process_evaluation_batches(valid_dates, batch_recent_data, historical_periods_data)
             else:
-                self.logger.info(f"🔄 多股票单批处理模式: {total_computation_units} 个计算单元一次性处理")
+                self.logger.info(f"🔄 多股票单批处理模式: {len(self.stock_codes)} 只股票同时处理，{len(valid_dates)} 个评测日期")
         else:
             # 单股票模式：保持原有逻辑
             total_batches = (len(valid_dates) + self.evaluation_batch_size - 1) // self.evaluation_batch_size
             if total_batches > 1:
-                self.logger.info(f"🔄 启用分批处理模式: {len(valid_dates)} 个评测日期分成 {total_batches} 批")
+                self.logger.info(f"🔄 单股票分批处理策略: 将 {len(valid_dates)} 个评测日期分成 {total_batches} 批处理")
+                self.logger.info(f"📦 每批处理: 最多 {self.evaluation_batch_size} 个评测日期")
+                memory_save_percent = ((len(valid_dates) - self.evaluation_batch_size) / len(valid_dates)) * 100
+                self.logger.info(f"💾 预计GPU内存节省: {memory_save_percent:.1f}%")
                 return self._process_evaluation_batches(valid_dates, batch_recent_data, historical_periods_data)
             else:
                 self.logger.info("🔄 单批处理模式: 所有评测日期一次性处理")
@@ -2478,15 +2468,9 @@ class GPUBatchPearsonAnalyzer:
         
         # 计算批次数量（考虑多股票模式）
         if self.is_multi_stock:
-            # 多股票模式：按计算单元分批
-            total_computation_units = len(self.stock_codes) * len(valid_dates)
-            total_batches = (total_computation_units + self.evaluation_batch_size - 1) // self.evaluation_batch_size
-            
-            # 生成所有计算单元的组合 (stock_idx, date_idx)
-            computation_units = []
-            for stock_idx in range(len(self.stock_codes)):
-                for date_idx in range(len(valid_dates)):
-                    computation_units.append((stock_idx, date_idx))
+            # 多股票模式：按股票数量分批，每批同时处理多只股票
+            stocks_per_batch = min(self.evaluation_batch_size, len(self.stock_codes))
+            total_batches = (len(self.stock_codes) + stocks_per_batch - 1) // stocks_per_batch
         else:
             # 单股票模式：保持原有逻辑
             total_batches = (len(valid_dates) + self.evaluation_batch_size - 1) // self.evaluation_batch_size
@@ -2494,51 +2478,34 @@ class GPUBatchPearsonAnalyzer:
         # 分批处理
         for batch_idx in range(total_batches):
             if self.is_multi_stock:
-                # 多股票模式：按计算单元分批
-                start_unit = batch_idx * self.evaluation_batch_size
-                end_unit = min(start_unit + self.evaluation_batch_size, len(computation_units))
-                batch_units = computation_units[start_unit:end_unit]
+                # 多股票模式：按股票数量分批，每批同时处理多只股票
+                stocks_per_batch = min(self.evaluation_batch_size, len(self.stock_codes))
+                start_stock = batch_idx * stocks_per_batch
+                end_stock = min(start_stock + stocks_per_batch, len(self.stock_codes))
                 
-                self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {len(batch_units)} 个计算单元")
+                batch_stock_codes = self.stock_codes[start_stock:end_stock]
+                actual_stocks_in_batch = len(batch_stock_codes)
                 
-                # 按股票分组处理当前批次的计算单元
-                stock_date_groups = {}
-                for stock_idx, date_idx in batch_units:
-                    if stock_idx not in stock_date_groups:
-                        stock_date_groups[stock_idx] = []
-                    stock_date_groups[stock_idx].append(date_idx)
+                self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {actual_stocks_in_batch} 只股票")
+                self.logger.info(f"📊 批次涉及股票: {', '.join(batch_stock_codes)}")
                 
-                # 处理当前批次的每个股票
-                batch_correlations_list = []
-                for stock_idx, date_indices in stock_date_groups.items():
-                    stock_code = self.stock_codes[stock_idx]
-                    batch_dates = [valid_dates[i] for i in date_indices]
-                    
-                    self.logger.info(f"📊 处理股票 {stock_code}: {len(batch_dates)} 个日期")
-                    
-                    # 提取当前股票和日期的数据
-                    # batch_recent_data: [num_stocks, evaluation_days, window_size, 5]
-                    stock_recent_data = batch_recent_data[stock_idx:stock_idx+1, date_indices, :, :]
-                    
-                    # 监控GPU内存
-                    self.monitor_gpu_memory(f"批次 {batch_idx + 1} 股票 {stock_code} 开始")
-                    
-                    # 🚀 GPU计算当前股票的批次
-                    self.logger.info(f"🚀 [批次 {batch_idx + 1}] 股票 {stock_code} GPU计算 - 开始")
-                    stock_correlations = self.calculate_batch_gpu_correlation_optimized(
-                        stock_recent_data, historical_periods_data, batch_dates
-                    )
-                    self.monitor_gpu_memory(f"批次 {batch_idx + 1} 股票 {stock_code} 完成")
-                    self.logger.info(f"🚀 [批次 {batch_idx + 1}] 股票 {stock_code} GPU计算 - 完成")
-                    
-                    if stock_correlations:
-                        batch_correlations_list.append(stock_correlations)
+                # 提取当前批次的股票数据 - 同时处理多只股票
+                # batch_recent_data: [num_stocks, evaluation_days, window_size, 5]
+                batch_stock_data = batch_recent_data[start_stock:end_stock, :, :, :]
                 
-                # 合并当前批次所有股票的结果
-                if batch_correlations_list:
-                    batch_correlations = self._merge_batch_correlations(batch_correlations_list)
-                else:
-                    batch_correlations = None
+                # 监控GPU内存
+                self.monitor_gpu_memory(f"批次 {batch_idx + 1} 多股票GPU计算开始")
+                
+                # 🚀 GPU批量计算当前批次的所有股票
+                self.logger.info(f"🚀 [批次 {batch_idx + 1}] 多股票GPU计算 - 开始")
+                self.logger.info(f"📦 同时处理 {actual_stocks_in_batch} 只股票，{len(valid_dates)} 个评测日期")
+                
+                batch_correlations = self.calculate_batch_gpu_correlation_optimized(
+                    batch_stock_data, historical_periods_data, valid_dates
+                )
+                
+                self.monitor_gpu_memory(f"批次 {batch_idx + 1} 多股票GPU计算完成")
+                self.logger.info(f"🚀 [批次 {batch_idx + 1}] 多股票GPU计算 - 完成")
             else:
                 # 单股票模式：按日期分批
                 start_idx = batch_idx * self.evaluation_batch_size
