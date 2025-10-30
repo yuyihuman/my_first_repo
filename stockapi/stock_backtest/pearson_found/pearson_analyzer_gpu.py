@@ -1920,12 +1920,24 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info("=" * 60)
         
         # 🔄 检查是否需要分批处理
-        total_batches = (len(valid_dates) + self.evaluation_batch_size - 1) // self.evaluation_batch_size
-        if total_batches > 1:
-            self.logger.info(f"🔄 启用分批处理模式: {len(valid_dates)} 个评测日期分成 {total_batches} 批")
-            return self._process_evaluation_batches(valid_dates, batch_recent_data, historical_periods_data)
+        if self.is_multi_stock:
+            # 多股票模式：考虑总计算单元数
+            total_computation_units = len(self.stock_codes) * len(valid_dates)
+            total_batches = (total_computation_units + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+            
+            if total_batches > 1:
+                self.logger.info(f"🔄 启用多股票分批处理模式: {total_computation_units} 个计算单元分成 {total_batches} 批")
+                return self._process_evaluation_batches(valid_dates, batch_recent_data, historical_periods_data)
+            else:
+                self.logger.info(f"🔄 多股票单批处理模式: {total_computation_units} 个计算单元一次性处理")
         else:
-            self.logger.info("🔄 单批处理模式: 所有评测日期一次性处理")
+            # 单股票模式：保持原有逻辑
+            total_batches = (len(valid_dates) + self.evaluation_batch_size - 1) // self.evaluation_batch_size
+            if total_batches > 1:
+                self.logger.info(f"🔄 启用分批处理模式: {len(valid_dates)} 个评测日期分成 {total_batches} 批")
+                return self._process_evaluation_batches(valid_dates, batch_recent_data, historical_periods_data)
+            else:
+                self.logger.info("🔄 单批处理模式: 所有评测日期一次性处理")
         
         # 🚀 第3阶段：GPU计算与结果处理 - 开始
         self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 开始")
