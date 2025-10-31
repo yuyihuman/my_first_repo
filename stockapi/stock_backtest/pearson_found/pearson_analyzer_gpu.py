@@ -1180,20 +1180,24 @@ class GPUBatchPearsonAnalyzer:
         if batch_recent_data is None or len(historical_periods_data) == 0:
             return {}
 
-        # 检测数据结构：多股票模式还是单股票模式
-        if len(batch_recent_data.shape) == 4:
+        # 使用传参判断模式，不依赖矩阵形状
+        is_multi_stock = self.is_multi_stock
+        if is_multi_stock:
             # 多股票模式: [num_stocks, evaluation_days, window_size, 5]
             num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
-            is_multi_stock = True
-            self.logger.info(f"检测到多股票模式: {num_stocks} 个股票")
+            self.logger.info(f"多股票模式: {num_stocks} 个股票")
         else:
-            # 单股票模式: [evaluation_days, window_size, 5]
-            evaluation_days, window_size, num_fields = batch_recent_data.shape
+            # 单股票模式: 可能是 [evaluation_days, window_size, 5] 或已转换的 [1, evaluation_days, window_size, 5]
+            if len(batch_recent_data.shape) == 3:
+                evaluation_days, window_size, num_fields = batch_recent_data.shape
+                # 为了统一处理，将单股票数据扩展一个维度
+                batch_recent_data = batch_recent_data.unsqueeze(0)  # [1, evaluation_days, window_size, 5]
+                self.logger.info(f"单股票模式，已转换为统一格式")
+            else:
+                # 已经是4维格式 [1, evaluation_days, window_size, 5]
+                num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
+                self.logger.info(f"单股票模式（已为统一格式）")
             num_stocks = 1
-            is_multi_stock = False
-            # 为了统一处理，将单股票数据扩展一个维度
-            batch_recent_data = batch_recent_data.unsqueeze(0)  # [1, evaluation_days, window_size, 5]
-            self.logger.info(f"检测到单股票模式，已转换为统一格式")
         
         num_historical_periods = len(historical_periods_data)
         
@@ -1276,18 +1280,21 @@ class GPUBatchPearsonAnalyzer:
         if batch_recent_data is None or len(historical_periods_data) == 0:
             return {}
         
-        # 检测数据格式并统一处理
-        if len(batch_recent_data.shape) == 4:
+        # 使用传参判断模式，不依赖矩阵形状
+        is_multi_stock = self.is_multi_stock
+        if is_multi_stock:
             # 多股票模式: [num_stocks, evaluation_days, window_size, 5]
             num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
-            is_multi_stock = True
         else:
-            # 单股票模式: [evaluation_days, window_size, 5]
-            evaluation_days, window_size, num_fields = batch_recent_data.shape
+            # 单股票模式: 可能是 [evaluation_days, window_size, 5] 或已转换的 [1, evaluation_days, window_size, 5]
+            if len(batch_recent_data.shape) == 3:
+                evaluation_days, window_size, num_fields = batch_recent_data.shape
+                # 为了统一处理，将单股票数据扩展一个维度
+                batch_recent_data = batch_recent_data.unsqueeze(0)  # [1, evaluation_days, window_size, 5]
+            else:
+                # 已经是4维格式 [1, evaluation_days, window_size, 5]
+                num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
             num_stocks = 1
-            is_multi_stock = False
-            # 为了统一处理，将单股票数据扩展一个维度
-            batch_recent_data = batch_recent_data.unsqueeze(0)  # [1, evaluation_days, window_size, 5]
         
         num_historical_periods = len(historical_periods_data)
         
@@ -2382,7 +2389,15 @@ class GPUBatchPearsonAnalyzer:
         # recent_expanded: [num_stocks, batch_size, 1, window_size, num_fields]
         # historical_expanded: [1, num_historical_periods, window_size, num_fields]
         # 广播后的实际内存占用: [num_stocks, batch_size, num_historical_periods, window_size, num_fields]
-        batch_size = min(self.batch_size, evaluation_days)
+        
+        # 使用实际的GPU分组批处理大小，而不是self.batch_size
+        if self.is_multi_stock:
+            # 多股票模式：批处理大小基于计算单元数量
+            total_computation_units = num_stocks * evaluation_days
+            batch_size = min(self.evaluation_batch_size, total_computation_units)
+        else:
+            # 单股票模式：批处理大小基于评测日期数量
+            batch_size = min(self.evaluation_batch_size, evaluation_days)
         
         # 广播张量（最大内存消耗点）- 考虑多股票模式
         broadcast_tensor_bytes = num_stocks * batch_size * num_historical_periods * window_size * num_fields * bytes_per_float32
@@ -2641,6 +2656,12 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.info(f"🚀 批次 {batch_idx + 1} GPU计算 - 开始")
                 self.logger.info(f"📦 处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
                 
+                # 输出详细的计算单元信息
+                self.logger.info("📋 计算单元详细信息:")
+                for i, (stock_idx, date_idx, date) in enumerate(zip(batch_stock_indices, batch_date_indices, batch_dates_list)):
+                    stock_code = self.stock_codes[stock_idx] if self.is_multi_stock else self.stock_code
+                    self.logger.info(f"   单元 {i+1}: 股票代码={stock_code}, 评测日期={date}")
+                
                 # 开始批次级别的GPU计时
                 self.start_timer('gpu_step1_data_preparation')
                 self.start_timer('gpu_step2_tensor_creation') 
@@ -2695,19 +2716,30 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.info(f"📅 日期范围: {batch_dates[0]} 到 {batch_dates[-1]}")
                 
                 # 提取当前批次的数据 (batch_recent_data 是 PyTorch 张量)
-                # 单股票模式: [1, evaluation_days, window_size, 5] 或 [evaluation_days, window_size, 5]
-                if len(batch_recent_data.shape) == 4:
-                    # 多股票格式但只有一个股票
+                # 使用传参判断模式，不依赖矩阵形状
+                if self.is_multi_stock:
+                    # 多股票模式: [num_stocks, evaluation_days, window_size, 5]
                     batch_recent_subset = batch_recent_data[:, start_idx:end_idx]
                 else:
-                    # 单股票格式
-                    batch_recent_subset = batch_recent_data[start_idx:end_idx]
+                    # 单股票模式: 可能是 [1, evaluation_days, window_size, 5] 或 [evaluation_days, window_size, 5]
+                    if len(batch_recent_data.shape) == 4:
+                        # 已转换为统一格式 [1, evaluation_days, window_size, 5]
+                        batch_recent_subset = batch_recent_data[:, start_idx:end_idx]
+                    else:
+                        # 原始单股票格式 [evaluation_days, window_size, 5]
+                        batch_recent_subset = batch_recent_data[start_idx:end_idx]
                 
                 # 监控GPU内存
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} 开始")
                 
                 # 🚀 GPU计算当前批次
                 self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 开始")
+                
+                # 输出详细的计算单元信息（单股票模式）
+                self.logger.info("📋 计算单元详细信息:")
+                for i, date in enumerate(batch_dates):
+                    self.logger.info(f"   单元 {i+1}: 股票代码={self.stock_code}, 评测日期={date}")
+                
                 batch_correlations = self.calculate_batch_gpu_correlation_optimized(
                     batch_recent_subset, historical_periods_data, batch_dates
                 )
