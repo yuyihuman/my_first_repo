@@ -1348,6 +1348,14 @@ class GPUBatchPearsonAnalyzer:
         Returns:
             dict: 处理后的完整最终结果
         """
+        # 🔍 调试日志：函数参数
+        self.logger.info(f"🔍 _compute_and_process_correlations_gpu 函数参数:")
+        self.logger.info(f"🔍   - num_stocks: {num_stocks}")
+        self.logger.info(f"🔍   - is_multi_stock: {is_multi_stock}")
+        self.logger.info(f"🔍   - evaluation_days: {evaluation_days}")
+        self.logger.info(f"🔍   - evaluation_dates长度: {len(evaluation_dates) if evaluation_dates else 0}")
+        self.logger.info(f"🔍   - stock_codes参数: {stock_codes}")
+        self.logger.info(f"🔍   - self.stock_codes: {getattr(self, 'stock_codes', 'None')}")
         # 分批处理以避免内存溢出
         batch_size = min(self.batch_size, evaluation_days)
         total_batches = (evaluation_days + batch_size - 1) // batch_size
@@ -1466,35 +1474,127 @@ class GPUBatchPearsonAnalyzer:
                         f"平均每日高相关数: {avg_high_correlations_per_day.item():.2f}")
         
         # 只在需要详细结果时才传输到CPU - 支持多股票
+        self.logger.info(f"🔍 detailed_results构建条件检查:")
+        self.logger.info(f"🔍   - evaluation_dates存在: {evaluation_dates is not None}")
+        self.logger.info(f"🔍   - evaluation_dates长度: {len(evaluation_dates) if evaluation_dates else 0}")
+        self.logger.info(f"🔍   - 条件满足: {evaluation_dates and len(evaluation_dates) > 0}")
+        
         if evaluation_dates and len(evaluation_dates) > 0:
+            self.logger.info(f"🔍 进入detailed_results构建分支")
             # 传输必要的数据到CPU进行详细结果构建
             avg_correlations_cpu = all_avg_correlations_tensor.cpu().numpy()
             high_corr_masks_cpu = all_high_corr_masks_tensor.cpu().numpy()
             
             if is_multi_stock:
-                # 多股票模式：为每个股票构建详细结果
+                self.logger.info(f"🔍 多股票模式detailed_results构建")
+                # 多股票模式：构建与evaluation units一一对应的详细结果
                 detailed_results = {}
-                for stock_idx in range(num_stocks):
-                    # 使用传入的stock_codes参数，如果没有则回退到self.stock_codes
-                    if stock_codes and stock_idx < len(stock_codes):
-                        stock_code = stock_codes[stock_idx]
-                    elif hasattr(self, 'stock_codes') and stock_idx < len(self.stock_codes):
-                        stock_code = self.stock_codes[stock_idx]
-                    else:
-                        stock_code = f"stock_{stock_idx}"
-                    stock_avg_correlations = avg_correlations_cpu[stock_idx]
-                    stock_high_corr_masks = high_corr_masks_cpu[stock_idx]
+                self.logger.info(f"📝 [详细结果构建] 初始化detailed_results为空字典: {detailed_results}")
+                
+                # 如果有传入的stock_codes参数，使用它来构建详细结果
+                self.logger.info(f"🔍 stock_codes条件检查:")
+                self.logger.info(f"🔍   - stock_codes存在: {stock_codes is not None}")
+                self.logger.info(f"🔍   - stock_codes内容: {stock_codes if stock_codes else 'None'}")
+                self.logger.info(f"🔍   - stock_codes长度: {len(stock_codes) if stock_codes else 0}")
+                self.logger.info(f"🔍   - evaluation_dates长度: {len(evaluation_dates)}")
+                self.logger.info(f"🔍   - evaluation_dates内容: {evaluation_dates}")
+                self.logger.info(f"🔍   - 长度匹配: {len(stock_codes) == len(evaluation_dates) if stock_codes else False}")
+                self.logger.info(f"🔍   - self.stock_codes存在: {hasattr(self, 'stock_codes')}")
+                self.logger.info(f"🔍   - self.stock_codes内容: {getattr(self, 'stock_codes', 'None')}")
+                
+                if stock_codes and len(stock_codes) == len(evaluation_dates):
+                    self.logger.info(f"🔍 使用传入的stock_codes构建detailed_results")
+                    self.logger.info(f"📝 [详细结果构建] 开始逐个处理evaluation units，总数: {len(evaluation_dates)}")
                     
-                    detailed_results[stock_code] = self._build_detailed_results_cpu(
-                        stock_avg_correlations, stock_high_corr_masks, period_info_list, evaluation_dates
-                    )
+                    # stock_codes与evaluation_dates一一对应
+                    for eval_idx, eval_date in enumerate(evaluation_dates):
+                        stock_code = stock_codes[eval_idx]
+                        self.logger.info(f"📝 [详细结果构建] 处理第{eval_idx+1}个单元: stock_code={stock_code}, eval_date={eval_date}")
+                        
+                        # GPU分批计算时，数据结构被重组，stock_idx直接设置为0
+                        stock_idx = 0
+                        self.logger.info(f"📝 [详细结果构建] GPU分批模式，stock_idx设置为: {stock_idx}")
+                            
+                        # 获取该股票在该评测日期的相关性数据
+                        self.logger.info(f"📝 [详细结果构建] 数据形状检查: avg_correlations_cpu.shape={avg_correlations_cpu.shape}")
+                        self.logger.info(f"📝 [详细结果构建] 索引检查: stock_idx={stock_idx}, eval_idx={eval_idx}")
+                        
+                        if stock_idx < avg_correlations_cpu.shape[0] and eval_idx < avg_correlations_cpu.shape[1]:
+                            eval_avg_correlations = avg_correlations_cpu[stock_idx, eval_idx:eval_idx+1]  # [1, num_historical_periods]
+                            eval_high_corr_masks = high_corr_masks_cpu[stock_idx, eval_idx:eval_idx+1]    # [1, num_historical_periods]
+                            
+                            self.logger.info(f"📝 [详细结果构建] 提取数据成功: eval_avg_correlations.shape={eval_avg_correlations.shape}")
+                            
+                            # 为这个evaluation unit构建详细结果
+                            eval_detailed_results = self._build_detailed_results_cpu(
+                                eval_avg_correlations, eval_high_corr_masks, period_info_list, [eval_date]
+                            )
+                            
+                            self.logger.info(f"📝 [详细结果构建] _build_detailed_results_cpu返回结果: 类型={type(eval_detailed_results)}, 长度={len(eval_detailed_results) if hasattr(eval_detailed_results, '__len__') else 'N/A'}")
+                            
+                            # 将结果添加到对应股票的列表中
+                            if stock_code not in detailed_results:
+                                detailed_results[stock_code] = []
+                                self.logger.info(f"📝 [详细结果构建] 为股票{stock_code}创建新列表")
+                            
+                            before_len = len(detailed_results[stock_code])
+                            detailed_results[stock_code].extend(eval_detailed_results)
+                            after_len = len(detailed_results[stock_code])
+                            self.logger.info(f"📝 [详细结果构建] 股票{stock_code}结果扩展: {before_len} -> {after_len}")
+                        else:
+                            self.logger.warning(f"📝 [详细结果构建] 索引越界，跳过: stock_idx={stock_idx}, eval_idx={eval_idx}, shape={avg_correlations_cpu.shape}")
+                    
+                    self.logger.info(f"📝 [详细结果构建] 完成所有evaluation units处理")
+                else:
+                    self.logger.info(f"🔍 回退到原有逻辑构建detailed_results")
+                    self.logger.info(f"📝 [详细结果构建] 使用原有逻辑，处理股票数量: {num_stocks}")
+                    
+                    # 回退到原有逻辑：为每个股票构建详细结果
+                    for stock_idx in range(num_stocks):
+                        # 使用self.stock_codes获取股票代码
+                        if hasattr(self, 'stock_codes') and stock_idx < len(self.stock_codes):
+                            stock_code = self.stock_codes[stock_idx]
+                        else:
+                            stock_code = f"stock_{stock_idx}"
+                        
+                        self.logger.info(f"📝 [详细结果构建] 处理股票{stock_idx}: {stock_code}")
+                        
+                        stock_avg_correlations = avg_correlations_cpu[stock_idx]
+                        stock_high_corr_masks = high_corr_masks_cpu[stock_idx]
+                        
+                        stock_detailed_results = self._build_detailed_results_cpu(
+                            stock_avg_correlations, stock_high_corr_masks, period_info_list, evaluation_dates
+                        )
+                        
+                        detailed_results[stock_code] = stock_detailed_results
+                        self.logger.info(f"📝 [详细结果构建] 股票{stock_code}结果: 类型={type(stock_detailed_results)}, 长度={len(stock_detailed_results) if hasattr(stock_detailed_results, '__len__') else 'N/A'}")
+                
+                self.logger.info(f"📝 [详细结果构建] 多股票模式最终结果: 包含{len(detailed_results)}个股票")
+                for stock_code, results in detailed_results.items():
+                    self.logger.info(f"📝 [详细结果构建]   - {stock_code}: {len(results) if hasattr(results, '__len__') else 'N/A'}个结果")
             else:
                 # 单股票模式：保持原有逻辑
+                self.logger.info(f"🔍 单股票模式detailed_results构建")
+                self.logger.info(f"📝 [详细结果构建] 单股票模式数据形状: avg_correlations_cpu.shape={avg_correlations_cpu.shape}")
+                self.logger.info(f"📝 [详细结果构建] 单股票模式evaluation_dates: {evaluation_dates}")
+                
                 detailed_results = self._build_detailed_results_cpu(
                     avg_correlations_cpu, high_corr_masks_cpu, period_info_list, evaluation_dates
                 )
+                
+                self.logger.info(f"📝 [详细结果构建] 单股票模式结果: 类型={type(detailed_results)}, 长度={len(detailed_results) if hasattr(detailed_results, '__len__') else 'N/A'}")
         else:
+            self.logger.warning(f"📝 [详细结果构建] evaluation_dates条件不满足，返回空结果")
+            self.logger.info(f"📝 [详细结果构建] evaluation_dates: {evaluation_dates}")
+            self.logger.info(f"📝 [详细结果构建] evaluation_dates长度: {len(evaluation_dates) if evaluation_dates else 0}")
+            self.logger.info(f"📝 [详细结果构建] is_multi_stock: {is_multi_stock}")
+            
             detailed_results = {} if is_multi_stock else []
+            
+            if is_multi_stock:
+                self.logger.info(f"📝 [详细结果构建] 多股票模式返回空字典: {detailed_results}")
+            else:
+                self.logger.info(f"📝 [详细结果构建] 单股票模式返回空列表: {detailed_results}")
         
         # 构建最终结果（大部分数据已在GPU上计算完成）- 支持多股票
         batch_results = {
@@ -1570,21 +1670,39 @@ class GPUBatchPearsonAnalyzer:
         Returns:
             list: 详细结果列表
         """
+        self.logger.info(f"🔧 [_build_detailed_results_cpu] 开始构建详细结果")
+        self.logger.info(f"🔧 [_build_detailed_results_cpu] 输入参数:")
+        self.logger.info(f"🔧   - avg_correlations_cpu.shape: {avg_correlations_cpu.shape}")
+        self.logger.info(f"🔧   - high_corr_masks_cpu.shape: {high_corr_masks_cpu.shape}")
+        self.logger.info(f"🔧   - period_info_list长度: {len(period_info_list)}")
+        self.logger.info(f"🔧   - evaluation_dates长度: {len(evaluation_dates)}")
+        self.logger.info(f"🔧   - evaluation_dates内容: {evaluation_dates}")
+        
         detailed_results = []
         
         for eval_idx, eval_date in enumerate(evaluation_dates):
+            self.logger.info(f"🔧 [_build_detailed_results_cpu] 处理第{eval_idx+1}个评测日期: {eval_date}")
+            
             if eval_idx < avg_correlations_cpu.shape[0]:
                 eval_correlations = avg_correlations_cpu[eval_idx]
                 eval_high_corr_mask = high_corr_masks_cpu[eval_idx]
+                
+                self.logger.info(f"🔧   - eval_correlations.shape: {eval_correlations.shape}")
+                self.logger.info(f"🔧   - eval_high_corr_mask.shape: {eval_high_corr_mask.shape}")
+                self.logger.info(f"🔧   - 高相关性期间数量: {eval_high_corr_mask.sum()}")
                 
                 # 找到高相关性期间
                 high_corr_periods = []
                 high_corr_indices = np.where(eval_high_corr_mask)[0]
                 
+                self.logger.info(f"🔧   - 高相关性索引: {high_corr_indices.tolist()}")
+                
                 for hist_idx in high_corr_indices:
                     if hist_idx < len(period_info_list):
                         period_data = period_info_list[hist_idx]
                         correlation = eval_correlations[hist_idx]
+                        
+                        self.logger.info(f"🔧     - 历史期间{hist_idx}: {period_data['start_date']} ~ {period_data['end_date']}, 相关性: {correlation:.4f}")
                         
                         high_corr_periods.append({
                             'start_date': period_data['start_date'],
@@ -1593,17 +1711,36 @@ class GPUBatchPearsonAnalyzer:
                             'stock_code': period_data['stock_code'],
                             'source': 'gpu_optimized'
                         })
+                    else:
+                        self.logger.warning(f"🔧     - 历史期间索引{hist_idx}超出范围，跳过")
+                
+                self.logger.info(f"🔧   - 构建的高相关性期间数量: {len(high_corr_periods)}")
                 
                 # 计算该评测日期的预测统计
-                stats = self.calculate_future_performance_stats(self.data, high_corr_periods)
+                try:
+                    if hasattr(self, 'data') and self.data is not None:
+                        stats = self.calculate_future_performance_stats(self.data, high_corr_periods)
+                        self.logger.info(f"🔧   - 预测统计计算成功: {len(stats) if stats else 0}个统计项")
+                    else:
+                        stats = {}
+                        self.logger.warning(f"🔧   - 无法计算预测统计: self.data不存在或为空")
+                except Exception as e:
+                    stats = {}
+                    self.logger.error(f"🔧   - 预测统计计算失败: {str(e)}")
                 
-                detailed_results.append({
+                result_item = {
                     'evaluation_date': eval_date,
                     'high_correlation_periods': high_corr_periods,
                     'daily_high_count': len(high_corr_periods),
                     'prediction_stats': stats
-                })
+                }
+                
+                detailed_results.append(result_item)
+                self.logger.info(f"🔧   - 评测日期{eval_date}结果构建完成，包含{len(high_corr_periods)}个高相关性期间")
+            else:
+                self.logger.warning(f"🔧   - 评测索引{eval_idx}超出数据范围，跳过")
         
+        self.logger.info(f"🔧 [_build_detailed_results_cpu] 详细结果构建完成，总计{len(detailed_results)}个评测日期结果")
         return detailed_results
     
     def _print_detailed_evaluation_data(self, correlations_np, avg_correlations_filtered, 
@@ -2074,7 +2211,7 @@ class GPUBatchPearsonAnalyzer:
         if self.is_multi_stock:
             # 多股票模式：为每个股票的每个评测日期创建对应的stock_code
             evaluation_unit_stock_codes = []
-            for stock_code in stock_codes:  # stock_codes是有效的股票代码列表
+            for stock_code in self.stock_codes:  # 使用self.stock_codes获取有效的股票代码列表
                 for _ in valid_dates:  # 为每个评测日期添加该股票代码
                     evaluation_unit_stock_codes.append(stock_code)
         else:
@@ -2610,10 +2747,17 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info("🔄 开始分批处理评测日期...")
         
         # 初始化合并结果
+        self.logger.info(f"🔧 [合并结果初始化] 开始初始化merged_results")
+        self.logger.info(f"🔧 [合并结果初始化] is_multi_stock: {self.is_multi_stock}")
+        self.logger.info(f"🔧 [合并结果初始化] evaluation_days: {len(valid_dates)}")
+        
+        detailed_results_init = {} if self.is_multi_stock else []
+        self.logger.info(f"🔧 [合并结果初始化] detailed_results初始化为: {type(detailed_results_init)} - {detailed_results_init}")
+        
         merged_results = {
             'evaluation_days': len(valid_dates),
             'batch_results': {
-                'detailed_results': [],
+                'detailed_results': detailed_results_init,  # 多股票模式使用字典，单股票模式使用列表
                 'summary': {
                     'total_high_correlations': 0,
                     'avg_high_correlations_per_day': 0.0,
@@ -2622,6 +2766,8 @@ class GPUBatchPearsonAnalyzer:
                 }
             }
         }
+        
+        self.logger.info(f"🔧 [合并结果初始化] merged_results初始化完成")
         
         # 计算批次数量（考虑多股票模式）
         if self.is_multi_stock:
@@ -2722,17 +2868,66 @@ class GPUBatchPearsonAnalyzer:
                 
                 # 合并批次结果
                 if batch_correlations:
-                    merged_results['batch_results']['detailed_results'].extend(
-                        batch_correlations['batch_results']['detailed_results']
-                    )
+                    self.logger.info(f"🔄 [批次合并] 开始合并第{batch_idx + 1}批结果")
+                    
+                    # 处理detailed_results的合并（多股票模式下是字典，需要特殊处理）
+                    batch_detailed = batch_correlations['batch_results']['detailed_results']
+                    merged_detailed = merged_results['batch_results']['detailed_results']
+                    
+                    self.logger.info(f"🔄 [批次合并] 批次detailed_results类型: {type(batch_detailed)}")
+                    self.logger.info(f"🔄 [批次合并] 合并目标detailed_results类型: {type(merged_detailed)}")
+                    
+                    if isinstance(batch_detailed, dict):
+                        self.logger.info(f"🔄 [批次合并] 批次detailed_results包含股票: {list(batch_detailed.keys())}")
+                        for stock_code, stock_data_list in batch_detailed.items():
+                            self.logger.info(f"🔄 [批次合并]   - 股票{stock_code}: {len(stock_data_list)}个结果")
+                    elif isinstance(batch_detailed, list):
+                        self.logger.info(f"🔄 [批次合并] 批次detailed_results列表长度: {len(batch_detailed)}")
+                    
+                    if isinstance(batch_detailed, dict) and isinstance(merged_detailed, dict):
+                        # 多股票模式：detailed_results是字典，按股票代码合并
+                        self.logger.info(f"🔄 [批次合并] 多股票模式字典合并")
+                        for stock_code, stock_data_list in batch_detailed.items():
+                            # 如果股票代码已存在，扩展其结果列表；否则创建新的键
+                            if stock_code not in merged_detailed:
+                                merged_detailed[stock_code] = []
+                                self.logger.info(f"🔄 [批次合并]   - 为股票{stock_code}创建新键")
+                            
+                            before_len = len(merged_detailed[stock_code])
+                            merged_detailed[stock_code].extend(stock_data_list)
+                            after_len = len(merged_detailed[stock_code])
+                            self.logger.info(f"🔄 [批次合并]   - 股票{stock_code}结果扩展: {before_len} -> {after_len} (+{len(stock_data_list)})")
+                    elif isinstance(batch_detailed, list) and isinstance(merged_detailed, list):
+                        # 单股票模式：detailed_results是列表，直接扩展
+                        self.logger.info(f"🔄 [批次合并] 单股票模式列表合并")
+                        before_len = len(merged_detailed)
+                        merged_detailed.extend(batch_detailed)
+                        after_len = len(merged_detailed)
+                        self.logger.info(f"🔄 [批次合并] 列表扩展: {before_len} -> {after_len} (+{len(batch_detailed)})")
+                    else:
+                        self.logger.error(f"🔄 [批次合并] 类型不匹配: batch_detailed={type(batch_detailed)}, merged_detailed={type(merged_detailed)}")
+                    
+                    # 更新日志输出以适应不同格式
+                    detailed_results = merged_results['batch_results']['detailed_results']
+                    if isinstance(detailed_results, dict):
+                        total_results = sum(len(stock_results) for stock_results in detailed_results.values())
+                        self.logger.info(f"🔍 批次 {batch_idx + 1} 合并后detailed_results包含 {len(detailed_results)} 个股票，总计 {total_results} 个结果")
+                        for stock_code, stock_results in detailed_results.items():
+                            self.logger.info(f"🔍   - {stock_code}: {len(stock_results)}个结果")
+                    else:
+                        self.logger.info(f"🔍 批次 {batch_idx + 1} 合并后detailed_results长度: {len(detailed_results)}")
                     
                     # 累加统计数据
                     batch_summary = batch_correlations['batch_results']['summary']
+                    self.logger.info(f"🔄 [批次合并] 累加统计数据 - 批次高相关性期间: {batch_summary['total_high_correlations']}")
                     merged_results['batch_results']['summary']['total_high_correlations'] += batch_summary['total_high_correlations']
                     merged_results['batch_results']['summary']['max_high_correlations_per_day'] = max(
                         merged_results['batch_results']['summary']['max_high_correlations_per_day'],
                         batch_summary['max_high_correlations_per_day']
                     )
+                    self.logger.info(f"🔄 [批次合并] 累加后总高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
+                else:
+                    self.logger.warning(f"🔄 [批次合并] 第{batch_idx + 1}批没有返回结果")
                 
                 # 清理GPU缓存
                 if self.device.type == 'cuda':
@@ -2842,6 +3037,18 @@ class GPUBatchPearsonAnalyzer:
         
         # 输出性能统计（分批处理模式）
         self._log_performance_summary()
+        
+        # 最终结果日志
+        self.logger.info(f"🏁 [最终结果] 准备返回merged_results")
+        detailed_results = merged_results['batch_results']['detailed_results']
+        if isinstance(detailed_results, dict):
+            self.logger.info(f"🏁 [最终结果] detailed_results类型: dict，包含股票: {list(detailed_results.keys())}")
+            total_results = sum(len(results) for results in detailed_results.values())
+            self.logger.info(f"🏁 [最终结果] 总结果数量: {total_results}")
+            for stock_code, results in detailed_results.items():
+                self.logger.info(f"🏁 [最终结果] 股票 {stock_code}: {len(results)} 个结果")
+        else:
+            self.logger.info(f"🏁 [最终结果] detailed_results类型: list，长度: {len(detailed_results)}")
         
         return merged_results
     
@@ -3058,6 +3265,7 @@ class GPUBatchPearsonAnalyzer:
             # 打印detailed_results的详细信息
             detailed_results = batch_results.get('detailed_results', {})
             self.logger.info(f"💾   - detailed_results类型: {type(detailed_results)}")
+            self.logger.info(f"💾   - detailed_results长度: {len(detailed_results) if hasattr(detailed_results, '__len__') else 'N/A'}")
             if isinstance(detailed_results, dict):
                 self.logger.info(f"💾   - detailed_results包含股票: {list(detailed_results.keys())}")
                 for stock_code, stock_data in detailed_results.items():
