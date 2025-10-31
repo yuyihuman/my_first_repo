@@ -2961,35 +2961,107 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info("=" * 80)
     
     def save_batch_results_to_csv(self, result):
-        """保存批量结果到CSV文件 - 逐日详细记录（支持多股票模式）"""
+        """保存批量结果到CSV文件 - 基于评测单元列表确保数据完全对应"""
         self.logger.info("💾 开始保存批量结果到CSV文件...")
         
         # 记录输入参数的详细信息
         self.logger.info(f"💾 输入参数类型: {type(result)}")
         self.logger.info(f"💾 输入参数键: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
         
+        # 详细打印关键传入参数
+        self.logger.info("💾 ========== 关键传入参数详情 ==========")
+        
+        # 1. evaluation_dates - 评测日期列表
+        evaluation_dates = result.get('evaluation_dates', [])
+        self.logger.info(f"💾 evaluation_dates (评测日期列表):")
+        self.logger.info(f"💾   - 类型: {type(evaluation_dates)}")
+        self.logger.info(f"💾   - 长度: {len(evaluation_dates) if evaluation_dates else 0}")
+        if evaluation_dates:
+            self.logger.info(f"💾   - 内容: {evaluation_dates}")
+        else:
+            self.logger.info(f"💾   - 内容: 空列表")
+        
+        # 2. batch_results - 批量分析结果
+        batch_results = result.get('batch_results', {})
+        self.logger.info(f"💾 batch_results (批量分析结果):")
+        self.logger.info(f"💾   - 类型: {type(batch_results)}")
+        if isinstance(batch_results, dict):
+            self.logger.info(f"💾   - 键列表: {list(batch_results.keys())}")
+            
+            # 打印每个主要键的详细信息
+            for key in batch_results.keys():
+                value = batch_results[key]
+                self.logger.info(f"💾   - {key}: {type(value)}")
+                
+                if key == 'summary' and isinstance(value, dict):
+                    self.logger.info(f"💾     summary内容: {value}")
+                elif key == 'evaluation_days':
+                    self.logger.info(f"💾     evaluation_days值: {value}")
+                elif key == 'num_historical_periods':
+                    self.logger.info(f"💾     num_historical_periods值: {value}")
+                elif key == 'high_correlation_counts' and hasattr(value, '__len__'):
+                    self.logger.info(f"💾     high_correlation_counts长度: {len(value)}")
+                    if hasattr(value, 'shape'):
+                        self.logger.info(f"💾     high_correlation_counts形状: {value.shape}")
+                elif key == 'avg_correlations' and hasattr(value, '__len__'):
+                    self.logger.info(f"💾     avg_correlations长度: {len(value)}")
+                    if hasattr(value, 'shape'):
+                        self.logger.info(f"💾     avg_correlations形状: {value.shape}")
+                elif key == 'period_info' and isinstance(value, list):
+                    self.logger.info(f"💾     period_info列表长度: {len(value)}")
+                    if len(value) > 0:
+                        self.logger.info(f"💾     period_info第一个元素: {value[0]}")
+            
+            # 打印detailed_results的详细信息
+            detailed_results = batch_results.get('detailed_results', {})
+            self.logger.info(f"💾   - detailed_results类型: {type(detailed_results)}")
+            if isinstance(detailed_results, dict):
+                self.logger.info(f"💾   - detailed_results包含股票: {list(detailed_results.keys())}")
+                for stock_code, stock_data in detailed_results.items():
+                    self.logger.info(f"💾   - 股票{stock_code}数据类型: {type(stock_data)}, 长度: {len(stock_data) if hasattr(stock_data, '__len__') else 'N/A'}")
+                    
+                    # 打印每个股票的详细数据结构
+                    if isinstance(stock_data, list) and len(stock_data) > 0:
+                        self.logger.info(f"💾     股票{stock_code}第一个元素类型: {type(stock_data[0])}")
+                        if isinstance(stock_data[0], dict):
+                            self.logger.info(f"💾     股票{stock_code}第一个元素键: {list(stock_data[0].keys())}")
+                            # 打印第一个元素的详细内容
+                            first_item = stock_data[0]
+                            for item_key, item_value in first_item.items():
+                                if isinstance(item_value, (int, float, str, bool)):
+                                    self.logger.info(f"💾       {item_key}: {item_value}")
+                                else:
+                                    self.logger.info(f"💾       {item_key}: {type(item_value)} (长度: {len(item_value) if hasattr(item_value, '__len__') else 'N/A'})")
+            elif isinstance(detailed_results, list):
+                self.logger.info(f"💾   - detailed_results列表长度: {len(detailed_results)}")
+        else:
+            self.logger.info(f"💾   - 内容: {batch_results}")
+        
+        # 3. is_multi_stock - 是否为多股票模式的标志
+        is_multi_stock = result.get('is_multi_stock', False)
+        self.logger.info(f"💾 is_multi_stock (多股票模式标志):")
+        self.logger.info(f"💾   - 类型: {type(is_multi_stock)}")
+        self.logger.info(f"💾   - 值: {is_multi_stock}")
+        
+        # 4. 其他重要参数
+        self.logger.info(f"💾 其他重要参数:")
+        other_params = ['stock_codes', 'backtest_date', 'evaluation_days', 'window_size', 'threshold', 'performance_stats']
+        for param in other_params:
+            if param in result:
+                value = result[param]
+                self.logger.info(f"💾   - {param}: {type(value)} = {value}")
+                
+                # 对performance_stats进行详细展示
+                if param == 'performance_stats' and isinstance(value, dict):
+                    for perf_key, perf_value in value.items():
+                        self.logger.info(f"💾     {perf_key}: {perf_value}")
+        
+        self.logger.info("💾 ========================================")
+        
         try:
-            batch_results = result['batch_results']
-            evaluation_dates = result['evaluation_dates']
-            is_multi_stock = result.get('is_multi_stock', False)
             
             # 记录关键参数信息
             self.logger.info(f"💾 评测模式: {'多股票模式' if is_multi_stock else '单股票模式'}")
-            self.logger.info(f"💾 评测日期数量: {len(evaluation_dates) if evaluation_dates else 0}")
-            if evaluation_dates:
-                self.logger.info(f"💾 评测日期范围: {evaluation_dates[0]} 到 {evaluation_dates[-1]}")
-            
-            self.logger.info(f"💾 批量结果类型: {type(batch_results)}")
-            if isinstance(batch_results, dict):
-                self.logger.info(f"💾 批量结果键: {list(batch_results.keys())}")
-                if 'detailed_results' in batch_results:
-                    detailed_results = batch_results['detailed_results']
-                    if is_multi_stock and isinstance(detailed_results, dict):
-                        self.logger.info(f"💾 多股票详细结果包含股票: {list(detailed_results.keys())}")
-                        for stock_code, stock_results in detailed_results.items():
-                            self.logger.info(f"💾 股票 {stock_code} 结果数量: {len(stock_results) if isinstance(stock_results, list) else 'N/A'}")
-                    elif not is_multi_stock and isinstance(detailed_results, list):
-                        self.logger.info(f"💾 单股票详细结果数量: {len(detailed_results)}")
             
             # 记录目标CSV文件信息
             self.logger.info(f"💾 目标CSV文件: {self.csv_results_file}")
@@ -3003,7 +3075,6 @@ class GPUBatchPearsonAnalyzer:
                     self.logger.info(f"💾 成功读取现有CSV文件，现有记录数: {len(df)}")
                     if len(df) > 0:
                         self.logger.info(f"💾 现有CSV列名: {list(df.columns)}")
-                        self.logger.info(f"💾 现有数据类型: {df.dtypes.to_dict()}")
                         # 显示现有数据的基本统计
                         unique_stocks = df['代码'].nunique() if '代码' in df.columns else 0
                         unique_dates = df['评测日期'].nunique() if '评测日期' in df.columns else 0
@@ -3016,84 +3087,107 @@ class GPUBatchPearsonAnalyzer:
                 df = pd.DataFrame()
                 self.logger.info("💾 CSV文件不存在，创建空DataFrame")
             
-            # 为每个评测日期创建一行记录
-            new_rows = []
-            self.logger.info("💾 开始准备CSV数据行...")
+            # 构建评测单元列表 - 使用和批次处理时相同的逻辑
+            evaluation_units = []
+            self.logger.info("💾 开始构建评测单元列表...")
+            
+            # 获取评测日期列表
+            evaluation_dates = result.get('evaluation_dates', [])
+            self.logger.info(f"💾 评测日期数量: {len(evaluation_dates)}")
             
             if is_multi_stock:
-                # 多股票模式：为每个股票的每个评测日期创建记录
-                stock_codes = result.get('stock_codes', [])
+                # 多股票模式：使用和批次处理时相同的逻辑
                 detailed_results = batch_results['detailed_results']
+                self.logger.info(f"💾 多股票模式 - 详细结果包含股票: {list(detailed_results.keys()) if isinstance(detailed_results, dict) else 'N/A'}")
                 
-                self.logger.info(f"💾 多股票模式数据准备，股票数量: {len(stock_codes)}")
-                
-                for stock_idx, stock_code in enumerate(stock_codes):
-                    if stock_code in detailed_results:
-                        stock_daily_results = detailed_results[stock_code]
-                        self.logger.info(f"💾 处理股票 {stock_code} ({stock_idx+1}/{len(stock_codes)})，日结果数量: {len(stock_daily_results)}")
+                if isinstance(detailed_results, dict):
+                    # 按照股票代码和评测日期的组合来构建计算单元
+                    for stock_code, stock_daily_results in detailed_results.items():
+                        self.logger.info(f"💾 处理股票 {stock_code}，日结果数量: {len(stock_daily_results) if isinstance(stock_daily_results, list) else 'N/A'}")
                         
-                        for i, daily_result in enumerate(stock_daily_results):
-                            if i < len(evaluation_dates):
-                                evaluation_date = evaluation_dates[i]
-                                prediction_stats = daily_result.get('prediction_stats', {})
+                        if isinstance(stock_daily_results, list):
+                            for daily_result in stock_daily_results:
+                                evaluation_date = daily_result.get('evaluation_date')
                                 
-                                # 计算对比股票数量
-                                comparison_stock_count = len(self.comparison_stocks)
-                                
-                                # 准备单日结果数据
-                                row_data = {
-                                    '代码': str(stock_code),
-                                    'window_size': result['window_size'],
-                                    '阈值': result['threshold'],
-                                    '评测日期': evaluation_date.strftime('%Y-%m-%d'),
-                                    '对比股票数量': comparison_stock_count,
-                                    '相关数量': daily_result.get('daily_high_count', 0),
-                                    '下1日高开': f"{prediction_stats.get('ratios', {}).get('next_day_gap_up', 0):.2%}" if prediction_stats else 'N/A',
-                                    '下1日上涨': f"{prediction_stats.get('ratios', {}).get('next_1_day_up', 0):.2%}" if prediction_stats else 'N/A',
-                                    '下3日上涨': f"{prediction_stats.get('ratios', {}).get('next_3_day_up', 0):.2%}" if prediction_stats else 'N/A',
-                                    '下5日上涨': f"{prediction_stats.get('ratios', {}).get('next_5_day_up', 0):.2%}" if prediction_stats else 'N/A',
-                                    '下10日上涨': f"{prediction_stats.get('ratios', {}).get('next_10_day_up', 0):.2%}" if prediction_stats else 'N/A'
-                                }
-                                new_rows.append(row_data)
-                                
-                                # 记录每行数据的详细内容（仅在debug模式下或前几行）
-                                if self.debug or len(new_rows) <= 3:
-                                    self.logger.info(f"💾 新增数据行 {len(new_rows)}: {row_data}")
-                    else:
-                        self.logger.warning(f"💾 股票 {stock_code} 在详细结果中未找到")
+                                if evaluation_date:
+                                    evaluation_unit = {
+                                        'stock_code': str(stock_code),  # 直接使用外层的stock_code
+                                        'evaluation_date': evaluation_date,
+                                        'daily_result': daily_result,
+                                        'window_size': result['window_size'],
+                                        'threshold': result['threshold']
+                                    }
+                                    evaluation_units.append(evaluation_unit)
+                                else:
+                                    self.logger.warning(f"💾 股票 {stock_code} 的某个日结果缺少evaluation_date字段")
+                        else:
+                            self.logger.warning(f"💾 股票 {stock_code} 的日结果不是列表格式: {type(stock_daily_results)}")
+                else:
+                    self.logger.error(f"💾 多股票模式下detailed_results不是字典格式: {type(detailed_results)}")
             else:
-                # 单股票模式：保持原有逻辑
+                # 单股票模式：从detailed_results列表中提取评测单元
                 detailed_results_list = batch_results['detailed_results']
-                self.logger.info(f"💾 单股票模式数据准备，目标股票: {result['stock_code']}")
-                self.logger.info(f"💾 单股票日结果数量: {len(detailed_results_list)}")
+                stock_code = result.get('stock_code', self.stock_code)
+                self.logger.info(f"💾 单股票模式 - 目标股票: {stock_code}，日结果数量: {len(detailed_results_list) if isinstance(detailed_results_list, list) else 'N/A'}")
                 
-                for i, daily_result in enumerate(detailed_results_list):
-                    evaluation_date = evaluation_dates[i]
-                    prediction_stats = daily_result.get('prediction_stats', {})
-                    
-                    # 计算对比股票数量
-                    # 统一记录实际用于对比的股票数量，不包括目标股票本身
-                    comparison_stock_count = len(self.comparison_stocks)
-                    
-                    # 准备单日结果数据
-                    row_data = {
-                        '代码': str(result['stock_code']),
-                        'window_size': result['window_size'],
-                        '阈值': result['threshold'],
-                        '评测日期': evaluation_date.strftime('%Y-%m-%d'),
-                        '对比股票数量': comparison_stock_count,
-                        '相关数量': daily_result.get('daily_high_count', 0),
-                        '下1日高开': f"{prediction_stats.get('ratios', {}).get('next_day_gap_up', 0):.2%}" if prediction_stats else 'N/A',
-                        '下1日上涨': f"{prediction_stats.get('ratios', {}).get('next_1_day_up', 0):.2%}" if prediction_stats else 'N/A',
-                        '下3日上涨': f"{prediction_stats.get('ratios', {}).get('next_3_day_up', 0):.2%}" if prediction_stats else 'N/A',
-                        '下5日上涨': f"{prediction_stats.get('ratios', {}).get('next_5_day_up', 0):.2%}" if prediction_stats else 'N/A',
-                        '下10日上涨': f"{prediction_stats.get('ratios', {}).get('next_10_day_up', 0):.2%}" if prediction_stats else 'N/A'
-                    }
-                    new_rows.append(row_data)
-                    
-                    # 记录每行数据的详细内容（仅在debug模式下或前几行）
-                    if self.debug or len(new_rows) <= 3:
-                        self.logger.info(f"💾 新增数据行 {len(new_rows)}: {row_data}")
+                if isinstance(detailed_results_list, list):
+                    for daily_result in detailed_results_list:
+                        evaluation_date = daily_result.get('evaluation_date')
+                        
+                        if evaluation_date:
+                            evaluation_unit = {
+                                'stock_code': str(stock_code),  # 使用统一的stock_code
+                                'evaluation_date': evaluation_date,
+                                'daily_result': daily_result,
+                                'window_size': result['window_size'],
+                                'threshold': result['threshold']
+                            }
+                            evaluation_units.append(evaluation_unit)
+                        else:
+                            self.logger.warning(f"💾 某个日结果缺少evaluation_date字段")
+                else:
+                    self.logger.error(f"💾 单股票模式下detailed_results不是列表格式: {type(detailed_results_list)}")
+            
+            # 记录当前批次的计算单元列表
+            self.logger.info(f"💾 当前批次计算单元列表 (共 {len(evaluation_units)} 个):")
+            if evaluation_units:
+                for i, unit in enumerate(evaluation_units):
+                    self.logger.info(f"   单元 {i+1}: {unit['stock_code']} - {unit['evaluation_date'].strftime('%Y-%m-%d')}")
+            
+            # 基于评测单元列表生成CSV数据行
+            new_rows = []
+            self.logger.info("💾 开始基于评测单元生成CSV数据行...")
+            
+            for unit_idx, unit in enumerate(evaluation_units):
+                stock_code = unit['stock_code']
+                evaluation_date = unit['evaluation_date']
+                daily_result = unit['daily_result']
+                
+                # 提取预测统计信息
+                prediction_stats = daily_result.get('prediction_stats', {})
+                
+                # 计算对比股票数量
+                comparison_stock_count = len(self.comparison_stocks)
+                
+                # 准备单行数据
+                row_data = {
+                    '代码': stock_code,
+                    'window_size': unit['window_size'],
+                    '阈值': unit['threshold'],
+                    '评测日期': evaluation_date.strftime('%Y-%m-%d'),
+                    '对比股票数量': comparison_stock_count,
+                    '相关数量': daily_result.get('daily_high_count', 0),
+                    '下1日高开': f"{prediction_stats.get('ratios', {}).get('next_day_gap_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下1日上涨': f"{prediction_stats.get('ratios', {}).get('next_1_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下3日上涨': f"{prediction_stats.get('ratios', {}).get('next_3_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下5日上涨': f"{prediction_stats.get('ratios', {}).get('next_5_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下10日上涨': f"{prediction_stats.get('ratios', {}).get('next_10_day_up', 0):.2%}" if prediction_stats else 'N/A'
+                }
+                new_rows.append(row_data)
+                
+                # 记录每行数据的详细内容（仅在debug模式下或前几行）
+                if self.debug or unit_idx < 3:
+                    self.logger.info(f"💾 新增数据行 {unit_idx+1}: {row_data}")
             
             # 记录数据准备完成的统计信息
             self.logger.info(f"💾 CSV数据准备完成，共生成 {len(new_rows)} 行新数据")
