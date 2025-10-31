@@ -638,7 +638,7 @@ class GPUBatchPearsonAnalyzer:
             self.end_timer('batch_data_preparation')
             return batch_tensor, valid_dates, [self.stock_code]
     
-    def calculate_batch_gpu_correlation(self, batch_recent_data, historical_periods_data, evaluation_dates=None):
+    def calculate_batch_gpu_correlation(self, batch_recent_data, historical_periods_data, evaluation_dates=None, stock_codes=None):
         """
         批量GPU相关性计算
         
@@ -646,6 +646,7 @@ class GPUBatchPearsonAnalyzer:
             batch_recent_data: 批量评测数据 [evaluation_days, window_size, 5]
             historical_periods_data: 历史期间数据列表
             evaluation_dates: 评测日期列表
+            stock_codes: 实际有效的股票代码列表（多股票模式下使用）
             
         Returns:
             dict: 批量相关性结果
@@ -792,9 +793,8 @@ class GPUBatchPearsonAnalyzer:
         
         # 传递股票代码信息
         if self.is_multi_stock:
-            # 从analyze_batch方法传递的stock_codes参数获取
-            # 这里需要从调用栈中获取stock_codes，暂时使用self.stock_codes
-            target_stock_codes = self.stock_codes
+            # 使用传入的stock_codes参数（来自prepare_batch_evaluation_data的valid_stock_codes）
+            target_stock_codes = stock_codes if stock_codes is not None else self.stock_codes
         else:
             target_stock_codes = [self.stock_code]
         
@@ -1162,7 +1162,7 @@ class GPUBatchPearsonAnalyzer:
         self.end_timer('integrated_result_processing')
         return final_result
 
-    def calculate_batch_gpu_correlation_optimized(self, batch_recent_data, historical_periods_data, evaluation_dates=None):
+    def calculate_batch_gpu_correlation_optimized(self, batch_recent_data, historical_periods_data, evaluation_dates=None, stock_codes=None):
         """
         优化版批量GPU相关性计算 - 支持多目标股票同时处理
         
@@ -1172,6 +1172,7 @@ class GPUBatchPearsonAnalyzer:
                 - 多股票模式: [num_stocks, evaluation_days, window_size, 5]
             historical_periods_data: 历史期间数据列表
             evaluation_dates: 评测日期列表
+            stock_codes: 实际有效的股票代码列表（多股票模式下使用）
             
         Returns:
             dict: 批量相关性结果
@@ -1255,7 +1256,7 @@ class GPUBatchPearsonAnalyzer:
         # 使用优化的GPU端一体化处理
         results = self._compute_and_process_correlations_gpu(
             batch_recent_data, historical_tensor, period_info_list, 
-            evaluation_days, evaluation_dates, num_stocks, is_multi_stock
+            evaluation_days, evaluation_dates, num_stocks, is_multi_stock, stock_codes
         )
         
         self.end_timer('gpu_step3_integrated_correlation_processing')
@@ -1264,7 +1265,7 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"优化版批量GPU相关性计算全部完成，返回结果包含 {len(results) if results else 0} 个字段")
         return results
 
-    def _calculate_batch_gpu_correlation_no_timer(self, batch_recent_data, historical_periods_data, evaluation_dates=None):
+    def _calculate_batch_gpu_correlation_no_timer(self, batch_recent_data, historical_periods_data, evaluation_dates=None, stock_codes=None):
         """
         批量GPU相关性计算（不带计时器版本）- 用于多股票分批处理
         
@@ -1323,14 +1324,14 @@ class GPUBatchPearsonAnalyzer:
         # GPU相关系数计算和结果处理（不计时）
         results = self._compute_and_process_correlations_gpu(
             batch_recent_data, historical_tensor, period_info_list, 
-            evaluation_days, evaluation_dates, num_stocks, is_multi_stock
+            evaluation_days, evaluation_dates, num_stocks, is_multi_stock, stock_codes
         )
         
         return results
 
     def _compute_and_process_correlations_gpu(self, batch_recent_data, historical_tensor, 
                                             period_info_list, evaluation_days, evaluation_dates, 
-                                            num_stocks, is_multi_stock):
+                                            num_stocks, is_multi_stock, stock_codes=None):
         """
         GPU端一体化相关系数计算和结果处理 - 支持多股票
         
@@ -1342,6 +1343,7 @@ class GPUBatchPearsonAnalyzer:
             evaluation_dates: 评测日期列表
             num_stocks: 股票数量
             is_multi_stock: 是否为多股票模式
+            stock_codes: 实际有效的股票代码列表（多股票模式下使用）
             
         Returns:
             dict: 处理后的完整最终结果
@@ -1423,7 +1425,14 @@ class GPUBatchPearsonAnalyzer:
             # 计算每个股票的统计信息
             stock_summary = {}
             for stock_idx in range(num_stocks):
-                stock_code = self.stock_codes[stock_idx] if hasattr(self, 'stock_codes') and stock_idx < len(self.stock_codes) else f"stock_{stock_idx}"
+                # 使用传入的stock_codes参数，如果没有则回退到self.stock_codes
+                if stock_codes and stock_idx < len(stock_codes):
+                    stock_code = stock_codes[stock_idx]
+                elif hasattr(self, 'stock_codes') and stock_idx < len(self.stock_codes):
+                    stock_code = self.stock_codes[stock_idx]
+                else:
+                    stock_code = f"stock_{stock_idx}"
+                    
                 stock_high_corr_count = all_high_corr_masks_tensor[stock_idx].sum()
                 stock_high_corr_values = all_avg_correlations_tensor[stock_idx][all_high_corr_masks_tensor[stock_idx]]
                 stock_avg_correlation = stock_high_corr_values.mean() if stock_high_corr_values.numel() > 0 else torch.tensor(0.0, device=self.device)
@@ -1466,7 +1475,13 @@ class GPUBatchPearsonAnalyzer:
                 # 多股票模式：为每个股票构建详细结果
                 detailed_results = {}
                 for stock_idx in range(num_stocks):
-                    stock_code = self.stock_codes[stock_idx] if hasattr(self, 'stock_codes') and stock_idx < len(self.stock_codes) else f"stock_{stock_idx}"
+                    # 使用传入的stock_codes参数，如果没有则回退到self.stock_codes
+                    if stock_codes and stock_idx < len(stock_codes):
+                        stock_code = stock_codes[stock_idx]
+                    elif hasattr(self, 'stock_codes') and stock_idx < len(self.stock_codes):
+                        stock_code = self.stock_codes[stock_idx]
+                    else:
+                        stock_code = f"stock_{stock_idx}"
                     stock_avg_correlations = avg_correlations_cpu[stock_idx]
                     stock_high_corr_masks = high_corr_masks_cpu[stock_idx]
                     
@@ -1501,8 +1516,16 @@ class GPUBatchPearsonAnalyzer:
         # 构建最终结果 - 支持多股票
         if is_multi_stock:
             # 多股票模式：返回所有股票的结果
+            # 使用传入的stock_codes参数，如果没有则回退到self.stock_codes
+            if stock_codes:
+                result_stock_codes = stock_codes
+            elif hasattr(self, 'stock_codes'):
+                result_stock_codes = self.stock_codes
+            else:
+                result_stock_codes = [f"stock_{i}" for i in range(num_stocks)]
+                
             final_result = {
-                'stock_codes': self.stock_codes if hasattr(self, 'stock_codes') else [f"stock_{i}" for i in range(num_stocks)],
+                'stock_codes': result_stock_codes,
                 'backtest_date': self.backtest_date,
                 'evaluation_days': len(evaluation_dates) if evaluation_dates else evaluation_days,
                 'window_size': self.window_size,
@@ -2046,7 +2069,19 @@ class GPUBatchPearsonAnalyzer:
         # 🚀 第3阶段：GPU计算与结果处理 - 开始
         self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 开始")
         self.monitor_gpu_memory("GPU计算开始")
-        batch_correlations = self.calculate_batch_gpu_correlation_optimized(batch_recent_data, historical_periods_data, valid_dates)
+        
+        # 构建与评测单元一一对应的stock_codes列表
+        if self.is_multi_stock:
+            # 多股票模式：为每个股票的每个评测日期创建对应的stock_code
+            evaluation_unit_stock_codes = []
+            for stock_code in stock_codes:  # stock_codes是有效的股票代码列表
+                for _ in valid_dates:  # 为每个评测日期添加该股票代码
+                    evaluation_unit_stock_codes.append(stock_code)
+        else:
+            # 单股票模式：为每个评测日期重复股票代码
+            evaluation_unit_stock_codes = [self.stock_code] * len(valid_dates)
+        
+        batch_correlations = self.calculate_batch_gpu_correlation_optimized(batch_recent_data, historical_periods_data, valid_dates, evaluation_unit_stock_codes)
         self.monitor_gpu_memory("GPU计算完成")
         self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 完成")
         
@@ -2667,9 +2702,14 @@ class GPUBatchPearsonAnalyzer:
                 self.start_timer('gpu_step2_tensor_creation') 
                 self.start_timer('gpu_step3_integrated_correlation_processing')
                 
+                # 构建与评测单元一一对应的股票代码列表
+                batch_evaluation_unit_stock_codes = []
+                for stock_idx in batch_stock_indices:
+                    batch_evaluation_unit_stock_codes.append(self.stock_codes[stock_idx])
+                
                 # 调用不带计时器的GPU计算函数
                 batch_correlations = self._calculate_batch_gpu_correlation_no_timer(
-                    batch_tensor.unsqueeze(0), historical_periods_data, batch_dates_list
+                    batch_tensor.unsqueeze(0), historical_periods_data, batch_dates_list, stock_codes=batch_evaluation_unit_stock_codes
                 )
                 
                 # 结束批次级别的GPU计时
@@ -2740,8 +2780,11 @@ class GPUBatchPearsonAnalyzer:
                 for i, date in enumerate(batch_dates):
                     self.logger.info(f"   单元 {i+1}: 股票代码={self.stock_code}, 评测日期={date}")
                 
+                # 构建与评测单元一一对应的股票代码列表
+                batch_evaluation_unit_stock_codes = [self.stock_code] * len(batch_dates)
+                
                 batch_correlations = self.calculate_batch_gpu_correlation_optimized(
-                    batch_recent_subset, historical_periods_data, batch_dates
+                    batch_recent_subset, historical_periods_data, batch_dates, stock_codes=batch_evaluation_unit_stock_codes
                 )
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} 完成")
                 self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 完成")
