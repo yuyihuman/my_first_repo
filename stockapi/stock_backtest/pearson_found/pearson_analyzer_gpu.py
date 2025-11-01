@@ -250,13 +250,15 @@ class GPUBatchPearsonAnalyzer:
         log_path = os.path.join(self.log_dir, log_filename)
         
         self.logger = logging.getLogger(logger_name)
-        self.logger.setLevel(logging.INFO)
+        # 根据debug参数设置日志级别
+        self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
         
         for handler in self.logger.handlers[:]:
             self.logger.removeHandler(handler)
         
         file_handler = logging.FileHandler(log_path, encoding='utf-8-sig')
-        file_handler.setLevel(logging.INFO)
+        # 根据debug参数设置文件处理器的日志级别
+        file_handler.setLevel(logging.DEBUG if self.debug else logging.INFO)
         
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(formatter)
@@ -1025,7 +1027,8 @@ class GPUBatchPearsonAnalyzer:
                 stock_correlations = correlations_np[stock_idx]
                 
                 # 计算平均相关系数 [evaluation_days, num_historical_periods]
-                avg_correlations = stock_correlations.mean(axis=2)
+                # 只使用开盘价(0)、收盘价(3)和成交量(4)三个字段
+                avg_correlations = stock_correlations[:, :, [0, 3, 4]].mean(axis=2)
                 
                 # 过滤掉相关性为1.0的结果（自相关）
                 self_correlation_threshold = 0.9999
@@ -1064,7 +1067,8 @@ class GPUBatchPearsonAnalyzer:
         else:
             # 单股票模式: 保持原有逻辑
             # 计算平均相关系数 [evaluation_days, num_historical_periods]
-            avg_correlations = correlations_np.mean(axis=2)
+            # 只使用开盘价(0)、收盘价(3)和成交量(4)三个字段
+            avg_correlations = correlations_np[:, :, [0, 3, 4]].mean(axis=2)
             
             # 过滤掉相关性为1.0的结果（自相关）
             # 设置容差，避免浮点数精度问题
@@ -1474,36 +1478,36 @@ class GPUBatchPearsonAnalyzer:
                         f"平均每日高相关数: {avg_high_correlations_per_day.item():.2f}")
         
         # 只在需要详细结果时才传输到CPU - 支持多股票
-        self.logger.info(f"🔍 detailed_results构建条件检查:")
-        self.logger.info(f"🔍   - evaluation_dates存在: {evaluation_dates is not None}")
-        self.logger.info(f"🔍   - evaluation_dates长度: {len(evaluation_dates) if evaluation_dates else 0}")
-        self.logger.info(f"🔍   - 条件满足: {evaluation_dates and len(evaluation_dates) > 0}")
+        self.logger.debug(f"🔍 detailed_results构建条件检查:")
+        self.logger.debug(f"🔍   - evaluation_dates存在: {evaluation_dates is not None}")
+        self.logger.debug(f"🔍   - evaluation_dates长度: {len(evaluation_dates) if evaluation_dates else 0}")
+        self.logger.debug(f"🔍   - 条件满足: {evaluation_dates and len(evaluation_dates) > 0}")
         
         if evaluation_dates and len(evaluation_dates) > 0:
-            self.logger.info(f"🔍 进入detailed_results构建分支")
+            self.logger.debug(f"🔍 进入detailed_results构建分支")
             # 传输必要的数据到CPU进行详细结果构建
             avg_correlations_cpu = all_avg_correlations_tensor.cpu().numpy()
             high_corr_masks_cpu = all_high_corr_masks_tensor.cpu().numpy()
             
             if is_multi_stock:
-                self.logger.info(f"🔍 多股票模式detailed_results构建")
+                self.logger.debug(f"🔍 多股票模式detailed_results构建")
                 # 多股票模式：构建与evaluation units一一对应的详细结果
                 detailed_results = {}
-                self.logger.info(f"📝 [详细结果构建] 初始化detailed_results为空字典: {detailed_results}")
+                self.logger.debug(f"📝 [详细结果构建] 初始化detailed_results为空字典: {detailed_results}")
                 
                 # 如果有传入的stock_codes参数，使用它来构建详细结果
-                self.logger.info(f"🔍 stock_codes条件检查:")
-                self.logger.info(f"🔍   - stock_codes存在: {stock_codes is not None}")
-                self.logger.info(f"🔍   - stock_codes内容: {stock_codes if stock_codes else 'None'}")
-                self.logger.info(f"🔍   - stock_codes长度: {len(stock_codes) if stock_codes else 0}")
-                self.logger.info(f"🔍   - evaluation_dates长度: {len(evaluation_dates)}")
-                self.logger.info(f"🔍   - evaluation_dates内容: {evaluation_dates}")
-                self.logger.info(f"🔍   - 长度匹配: {len(stock_codes) == len(evaluation_dates) if stock_codes else False}")
-                self.logger.info(f"🔍   - self.stock_codes存在: {hasattr(self, 'stock_codes')}")
-                self.logger.info(f"🔍   - self.stock_codes内容: {getattr(self, 'stock_codes', 'None')}")
+                self.logger.debug(f"🔍 stock_codes条件检查:")
+                self.logger.debug(f"🔍   - stock_codes存在: {stock_codes is not None}")
+                self.logger.debug(f"🔍   - stock_codes内容: {stock_codes if stock_codes else 'None'}")
+                self.logger.debug(f"🔍   - stock_codes长度: {len(stock_codes) if stock_codes else 0}")
+                self.logger.debug(f"🔍   - evaluation_dates长度: {len(evaluation_dates)}")
+                self.logger.debug(f"🔍   - evaluation_dates内容: {evaluation_dates}")
+                self.logger.debug(f"🔍   - 长度匹配: {len(stock_codes) == len(evaluation_dates) if stock_codes else False}")
+                self.logger.debug(f"🔍   - self.stock_codes存在: {hasattr(self, 'stock_codes')}")
+                self.logger.debug(f"🔍   - self.stock_codes内容: {getattr(self, 'stock_codes', 'None')}")
                 
                 if stock_codes and len(stock_codes) == len(evaluation_dates):
-                    self.logger.info(f"🔍 使用传入的stock_codes构建detailed_results")
+                    self.logger.debug(f"🔍 使用传入的stock_codes构建detailed_results")
                     self.logger.info(f"📝 [详细结果构建] 开始逐个处理evaluation units，总数: {len(evaluation_dates)}")
                     
                     # stock_codes与evaluation_dates一一对应
@@ -1546,7 +1550,7 @@ class GPUBatchPearsonAnalyzer:
                     
                     self.logger.info(f"📝 [详细结果构建] 完成所有evaluation units处理")
                 else:
-                    self.logger.info(f"🔍 回退到原有逻辑构建detailed_results")
+                    self.logger.debug(f"🔍 回退到原有逻辑构建detailed_results")
                     self.logger.info(f"📝 [详细结果构建] 使用原有逻辑，处理股票数量: {num_stocks}")
                     
                     # 回退到原有逻辑：为每个股票构建详细结果
@@ -1574,7 +1578,7 @@ class GPUBatchPearsonAnalyzer:
                     self.logger.info(f"📝 [详细结果构建]   - {stock_code}: {len(results) if hasattr(results, '__len__') else 'N/A'}个结果")
             else:
                 # 单股票模式：保持原有逻辑
-                self.logger.info(f"🔍 单股票模式detailed_results构建")
+                self.logger.debug(f"🔍 单股票模式detailed_results构建")
                 self.logger.info(f"📝 [详细结果构建] 单股票模式数据形状: avg_correlations_cpu.shape={avg_correlations_cpu.shape}")
                 self.logger.info(f"📝 [详细结果构建] 单股票模式evaluation_dates: {evaluation_dates}")
                 
@@ -2171,7 +2175,7 @@ class GPUBatchPearsonAnalyzer:
         )
         estimated_memory = estimation_result['total_estimated_gb']
         self.logger.info(f"📊 实际历史期间数据量: {len(historical_periods_data):,}")
-        self.logger.info(f"💾 预估GPU内存使用量: {estimated_memory:.2f} GB (基于实际{len(historical_periods_data):,}个历史期间)")
+        self.logger.debug(f"💾 预估GPU内存使用量: {estimated_memory:.2f} GB (基于实际{len(historical_periods_data):,}个历史期间)")
         self.logger.info("=" * 60)
         
         # 🔄 检查是否需要分批处理
@@ -2391,7 +2395,7 @@ class GPUBatchPearsonAnalyzer:
         for stock_code, stock_data in self.loaded_stocks_data.items():
             tasks.append((stock_code, stock_data, self.window_size, fields, self.debug))
         
-        self.logger.info(f"🚀 启动多进程数据预处理: {len(tasks)} 只股票，{self.num_processes} 个进程")
+        self.logger.debug(f"🚀 启动多进程数据预处理: {len(tasks)} 只股票，{self.num_processes} 个进程")
         
         historical_data = []
         total_valid_periods = 0
@@ -2795,7 +2799,7 @@ class GPUBatchPearsonAnalyzer:
                 end_unit = min(start_unit + self.evaluation_batch_size, total_computation_units)
                 current_batch_units = end_unit - start_unit
                 
-                self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {current_batch_units} 个计算单元")
+                self.logger.debug(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {current_batch_units} 个计算单元")
                 
                 # 获取当前批次的计算单元
                 batch_units = all_computation_units[start_unit:end_unit]
@@ -2834,8 +2838,8 @@ class GPUBatchPearsonAnalyzer:
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算开始")
                 
                 # 🚀 一次性GPU计算整个批次
-                self.logger.info(f"🚀 批次 {batch_idx + 1} GPU计算 - 开始")
-                self.logger.info(f"📦 处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
+                self.logger.debug(f"🚀 批次 {batch_idx + 1} GPU计算 - 开始")
+                self.logger.debug(f"📦 处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
                 
                 # 输出详细的计算单元信息
                 self.logger.info("📋 计算单元详细信息:")
@@ -2911,11 +2915,11 @@ class GPUBatchPearsonAnalyzer:
                     detailed_results = merged_results['batch_results']['detailed_results']
                     if isinstance(detailed_results, dict):
                         total_results = sum(len(stock_results) for stock_results in detailed_results.values())
-                        self.logger.info(f"🔍 批次 {batch_idx + 1} 合并后detailed_results包含 {len(detailed_results)} 个股票，总计 {total_results} 个结果")
+                        self.logger.debug(f"🔍 批次 {batch_idx + 1} 合并后detailed_results包含 {len(detailed_results)} 个股票，总计 {total_results} 个结果")
                         for stock_code, stock_results in detailed_results.items():
                             self.logger.info(f"🔍   - {stock_code}: {len(stock_results)}个结果")
                     else:
-                        self.logger.info(f"🔍 批次 {batch_idx + 1} 合并后detailed_results长度: {len(detailed_results)}")
+                        self.logger.debug(f"🔍 批次 {batch_idx + 1} 合并后detailed_results长度: {len(detailed_results)}")
                     
                     # 累加统计数据
                     batch_summary = batch_correlations['batch_results']['summary']
@@ -2947,7 +2951,7 @@ class GPUBatchPearsonAnalyzer:
                 batch_dates = valid_dates[start_idx:end_idx]
                 batch_size = len(batch_dates)
                 
-                self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {batch_size} 个评测日期")
+                self.logger.debug(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {batch_size} 个评测日期")
                 self.logger.info(f"📅 日期范围: {batch_dates[0]} 到 {batch_dates[-1]}")
                 
                 # 提取当前批次的数据 (batch_recent_data 是 PyTorch 张量)
