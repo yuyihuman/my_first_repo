@@ -1154,7 +1154,7 @@ class GPUBatchPearsonAnalyzer:
         
         # 保存结果到CSV（原阶段5的功能）
         if getattr(self, 'save_results', True):  # 默认为True，确保CSV保存功能正常工作
-            self.logger.info("开始保存批量结果到CSV文件...")
+            self.logger.debug("开始保存批量结果到CSV文件...")
             self.save_batch_results_to_csv(final_result)
         else:
             self.logger.warning("CSV保存功能已禁用，跳过保存步骤")
@@ -1353,19 +1353,19 @@ class GPUBatchPearsonAnalyzer:
             dict: 处理后的完整最终结果
         """
         # 🔍 调试日志：函数参数
-        self.logger.info(f"🔍 _compute_and_process_correlations_gpu 函数参数:")
-        self.logger.info(f"🔍   - num_stocks: {num_stocks}")
-        self.logger.info(f"🔍   - is_multi_stock: {is_multi_stock}")
-        self.logger.info(f"🔍   - evaluation_days: {evaluation_days}")
-        self.logger.info(f"🔍   - evaluation_dates长度: {len(evaluation_dates) if evaluation_dates else 0}")
-        self.logger.info(f"🔍   - stock_codes参数: {stock_codes}")
-        self.logger.info(f"🔍   - self.stock_codes: {getattr(self, 'stock_codes', 'None')}")
+        self.logger.debug(f"🔍 _compute_and_process_correlations_gpu 函数参数:")
+        self.logger.debug(f"🔍   - num_stocks: {num_stocks}")
+        self.logger.debug(f"🔍   - is_multi_stock: {is_multi_stock}")
+        self.logger.debug(f"🔍   - evaluation_days: {evaluation_days}")
+        self.logger.debug(f"🔍   - evaluation_dates长度: {len(evaluation_dates) if evaluation_dates else 0}")
+        self.logger.debug(f"🔍   - stock_codes参数: {stock_codes}")
+        self.logger.debug(f"🔍   - self.stock_codes: {getattr(self, 'stock_codes', 'None')}")
         # 分批处理以避免内存溢出
         batch_size = min(self.batch_size, evaluation_days)
         total_batches = (evaluation_days + batch_size - 1) // batch_size
         
-        self.logger.info(f"GPU一体化处理配置: batch_size={batch_size}, total_batches={total_batches}")
-        self.logger.info(f"多股票处理: {num_stocks} 个股票同时处理")
+        self.logger.debug(f"GPU一体化处理配置: batch_size={batch_size}, total_batches={total_batches}")
+        self.logger.debug(f"多股票处理: {num_stocks} 个股票同时处理")
         
         # GPU端存储所有结果 - 支持多股票
         all_avg_correlations = []  # 每个元素: [num_stocks, batch_size, num_historical_periods]
@@ -1380,7 +1380,7 @@ class GPUBatchPearsonAnalyzer:
             end_idx = min(i + batch_size, evaluation_days)
             current_batch = batch_recent_data[:, i:end_idx]  # [num_stocks, batch_size, window_size, 5]
             
-            self.logger.info(f"GPU处理批次 {batch_idx + 1}/{total_batches}: 评测日期 {i+1}-{end_idx} (形状: {current_batch.shape})")
+            self.logger.debug(f"GPU处理批次 {batch_idx + 1}/{total_batches}: 评测日期 {i+1}-{end_idx} (形状: {current_batch.shape})")
             
             # 计算当前批次的相关系数 - 支持多股票
             batch_correlations = self._compute_correlation_matrix_multi_stock(current_batch, historical_tensor)
@@ -1474,7 +1474,7 @@ class GPUBatchPearsonAnalyzer:
         high_corr_values = all_avg_correlations_tensor[all_high_corr_masks_tensor]
         overall_avg_correlation = high_corr_values.mean() if high_corr_values.numel() > 0 else torch.tensor(0.0, device=self.device)
         
-        self.logger.info(f"GPU端统计完成 - 总高相关数: {total_high_correlations.item()}, "
+        self.logger.debug(f"GPU端统计完成 - 总高相关数: {total_high_correlations.item()}, "
                         f"平均每日高相关数: {avg_high_correlations_per_day.item():.2f}")
         
         # 只在需要详细结果时才传输到CPU - 支持多股票
@@ -1508,50 +1508,50 @@ class GPUBatchPearsonAnalyzer:
                 
                 if stock_codes and len(stock_codes) == len(evaluation_dates):
                     self.logger.debug(f"🔍 使用传入的stock_codes构建detailed_results")
-                    self.logger.info(f"📝 [详细结果构建] 开始逐个处理evaluation units，总数: {len(evaluation_dates)}")
+                    self.logger.debug(f"📝 [详细结果构建] 开始逐个处理evaluation units，总数: {len(evaluation_dates)}")
                     
                     # stock_codes与evaluation_dates一一对应
                     for eval_idx, eval_date in enumerate(evaluation_dates):
                         stock_code = stock_codes[eval_idx]
-                        self.logger.info(f"📝 [详细结果构建] 处理第{eval_idx+1}个单元: stock_code={stock_code}, eval_date={eval_date}")
+                        self.logger.debug(f"📝 [详细结果构建] 处理第{eval_idx+1}个单元: stock_code={stock_code}, eval_date={eval_date}")
                         
                         # GPU分批计算时，数据结构被重组，stock_idx直接设置为0
                         stock_idx = 0
-                        self.logger.info(f"📝 [详细结果构建] GPU分批模式，stock_idx设置为: {stock_idx}")
+                        self.logger.debug(f"📝 [详细结果构建] GPU分批模式，stock_idx设置为: {stock_idx}")
                             
                         # 获取该股票在该评测日期的相关性数据
-                        self.logger.info(f"📝 [详细结果构建] 数据形状检查: avg_correlations_cpu.shape={avg_correlations_cpu.shape}")
-                        self.logger.info(f"📝 [详细结果构建] 索引检查: stock_idx={stock_idx}, eval_idx={eval_idx}")
+                        self.logger.debug(f"📝 [详细结果构建] 数据形状检查: avg_correlations_cpu.shape={avg_correlations_cpu.shape}")
+                        self.logger.debug(f"📝 [详细结果构建] 索引检查: stock_idx={stock_idx}, eval_idx={eval_idx}")
                         
                         if stock_idx < avg_correlations_cpu.shape[0] and eval_idx < avg_correlations_cpu.shape[1]:
                             eval_avg_correlations = avg_correlations_cpu[stock_idx, eval_idx:eval_idx+1]  # [1, num_historical_periods]
                             eval_high_corr_masks = high_corr_masks_cpu[stock_idx, eval_idx:eval_idx+1]    # [1, num_historical_periods]
                             
-                            self.logger.info(f"📝 [详细结果构建] 提取数据成功: eval_avg_correlations.shape={eval_avg_correlations.shape}")
+                            self.logger.debug(f"📝 [详细结果构建] 提取数据成功: eval_avg_correlations.shape={eval_avg_correlations.shape}")
                             
                             # 为这个evaluation unit构建详细结果
                             eval_detailed_results = self._build_detailed_results_cpu(
                                 eval_avg_correlations, eval_high_corr_masks, period_info_list, [eval_date]
                             )
                             
-                            self.logger.info(f"📝 [详细结果构建] _build_detailed_results_cpu返回结果: 类型={type(eval_detailed_results)}, 长度={len(eval_detailed_results) if hasattr(eval_detailed_results, '__len__') else 'N/A'}")
+                            self.logger.debug(f"📝 [详细结果构建] _build_detailed_results_cpu返回结果: 类型={type(eval_detailed_results)}, 长度={len(eval_detailed_results) if hasattr(eval_detailed_results, '__len__') else 'N/A'}")
                             
                             # 将结果添加到对应股票的列表中
                             if stock_code not in detailed_results:
                                 detailed_results[stock_code] = []
-                                self.logger.info(f"📝 [详细结果构建] 为股票{stock_code}创建新列表")
+                                self.logger.debug(f"📝 [详细结果构建] 为股票{stock_code}创建新列表")
                             
                             before_len = len(detailed_results[stock_code])
                             detailed_results[stock_code].extend(eval_detailed_results)
                             after_len = len(detailed_results[stock_code])
-                            self.logger.info(f"📝 [详细结果构建] 股票{stock_code}结果扩展: {before_len} -> {after_len}")
+                            self.logger.debug(f"📝 [详细结果构建] 股票{stock_code}结果扩展: {before_len} -> {after_len}")
                         else:
                             self.logger.warning(f"📝 [详细结果构建] 索引越界，跳过: stock_idx={stock_idx}, eval_idx={eval_idx}, shape={avg_correlations_cpu.shape}")
                     
-                    self.logger.info(f"📝 [详细结果构建] 完成所有evaluation units处理")
+                    self.logger.debug(f"📝 [详细结果构建] 完成所有evaluation units处理")
                 else:
                     self.logger.debug(f"🔍 回退到原有逻辑构建detailed_results")
-                    self.logger.info(f"📝 [详细结果构建] 使用原有逻辑，处理股票数量: {num_stocks}")
+                    self.logger.debug(f"📝 [详细结果构建] 使用原有逻辑，处理股票数量: {num_stocks}")
                     
                     # 回退到原有逻辑：为每个股票构建详细结果
                     for stock_idx in range(num_stocks):
@@ -1573,9 +1573,9 @@ class GPUBatchPearsonAnalyzer:
                         detailed_results[stock_code] = stock_detailed_results
                         self.logger.info(f"📝 [详细结果构建] 股票{stock_code}结果: 类型={type(stock_detailed_results)}, 长度={len(stock_detailed_results) if hasattr(stock_detailed_results, '__len__') else 'N/A'}")
                 
-                self.logger.info(f"📝 [详细结果构建] 多股票模式最终结果: 包含{len(detailed_results)}个股票")
+                self.logger.debug(f"📝 [详细结果构建] 多股票模式最终结果: 包含{len(detailed_results)}个股票")
                 for stock_code, results in detailed_results.items():
-                    self.logger.info(f"📝 [详细结果构建]   - {stock_code}: {len(results) if hasattr(results, '__len__') else 'N/A'}个结果")
+                    self.logger.debug(f"📝 [详细结果构建]   - {stock_code}: {len(results) if hasattr(results, '__len__') else 'N/A'}个结果")
             else:
                 # 单股票模式：保持原有逻辑
                 self.logger.debug(f"🔍 单股票模式detailed_results构建")
@@ -1655,7 +1655,7 @@ class GPUBatchPearsonAnalyzer:
         
         # 保存结果到CSV
         if getattr(self, 'save_results', True):
-            self.logger.info("开始保存优化版批量结果到CSV文件...")
+            self.logger.debug("开始保存优化版批量结果到CSV文件...")
             self.save_batch_results_to_csv(final_result)
         
         return final_result
@@ -1674,39 +1674,39 @@ class GPUBatchPearsonAnalyzer:
         Returns:
             list: 详细结果列表
         """
-        self.logger.info(f"🔧 [_build_detailed_results_cpu] 开始构建详细结果")
-        self.logger.info(f"🔧 [_build_detailed_results_cpu] 输入参数:")
-        self.logger.info(f"🔧   - avg_correlations_cpu.shape: {avg_correlations_cpu.shape}")
-        self.logger.info(f"🔧   - high_corr_masks_cpu.shape: {high_corr_masks_cpu.shape}")
-        self.logger.info(f"🔧   - period_info_list长度: {len(period_info_list)}")
-        self.logger.info(f"🔧   - evaluation_dates长度: {len(evaluation_dates)}")
-        self.logger.info(f"🔧   - evaluation_dates内容: {evaluation_dates}")
+        self.logger.debug(f"🔧 [_build_detailed_results_cpu] 开始构建详细结果")
+        self.logger.debug(f"🔧 [_build_detailed_results_cpu] 输入参数:")
+        self.logger.debug(f"🔧   - avg_correlations_cpu.shape: {avg_correlations_cpu.shape}")
+        self.logger.debug(f"🔧   - high_corr_masks_cpu.shape: {high_corr_masks_cpu.shape}")
+        self.logger.debug(f"🔧   - period_info_list长度: {len(period_info_list)}")
+        self.logger.debug(f"🔧   - evaluation_dates长度: {len(evaluation_dates)}")
+        self.logger.debug(f"🔧   - evaluation_dates内容: {evaluation_dates}")
         
         detailed_results = []
         
         for eval_idx, eval_date in enumerate(evaluation_dates):
-            self.logger.info(f"🔧 [_build_detailed_results_cpu] 处理第{eval_idx+1}个评测日期: {eval_date}")
+            self.logger.debug(f"🔧 [_build_detailed_results_cpu] 处理第{eval_idx+1}个评测日期: {eval_date}")
             
             if eval_idx < avg_correlations_cpu.shape[0]:
                 eval_correlations = avg_correlations_cpu[eval_idx]
                 eval_high_corr_mask = high_corr_masks_cpu[eval_idx]
                 
-                self.logger.info(f"🔧   - eval_correlations.shape: {eval_correlations.shape}")
-                self.logger.info(f"🔧   - eval_high_corr_mask.shape: {eval_high_corr_mask.shape}")
-                self.logger.info(f"🔧   - 高相关性期间数量: {eval_high_corr_mask.sum()}")
+                self.logger.debug(f"🔧   - eval_correlations.shape: {eval_correlations.shape}")
+                self.logger.debug(f"🔧   - eval_high_corr_mask.shape: {eval_high_corr_mask.shape}")
+                self.logger.debug(f"🔧   - 高相关性期间数量: {eval_high_corr_mask.sum()}")
                 
                 # 找到高相关性期间
                 high_corr_periods = []
                 high_corr_indices = np.where(eval_high_corr_mask)[0]
                 
-                self.logger.info(f"🔧   - 高相关性索引: {high_corr_indices.tolist()}")
+                self.logger.debug(f"🔧   - 高相关性索引: {high_corr_indices.tolist()}")
                 
                 for hist_idx in high_corr_indices:
                     if hist_idx < len(period_info_list):
                         period_data = period_info_list[hist_idx]
                         correlation = eval_correlations[hist_idx]
                         
-                        self.logger.info(f"🔧     - 历史期间{hist_idx}: {period_data['start_date']} ~ {period_data['end_date']}, 相关性: {correlation:.4f}")
+                        self.logger.debug(f"🔧     - 历史期间{hist_idx}: {period_data['start_date']} ~ {period_data['end_date']}, 相关性: {correlation:.4f}")
                         
                         high_corr_periods.append({
                             'start_date': period_data['start_date'],
@@ -1718,13 +1718,13 @@ class GPUBatchPearsonAnalyzer:
                     else:
                         self.logger.warning(f"🔧     - 历史期间索引{hist_idx}超出范围，跳过")
                 
-                self.logger.info(f"🔧   - 构建的高相关性期间数量: {len(high_corr_periods)}")
+                self.logger.debug(f"🔧   - 构建的高相关性期间数量: {len(high_corr_periods)}")
                 
                 # 计算该评测日期的预测统计
                 try:
                     if hasattr(self, 'data') and self.data is not None:
                         stats = self.calculate_future_performance_stats(self.data, high_corr_periods)
-                        self.logger.info(f"🔧   - 预测统计计算成功: {len(stats) if stats else 0}个统计项")
+                        self.logger.debug(f"🔧   - 预测统计计算成功: {len(stats) if stats else 0}个统计项")
                     else:
                         stats = {}
                         self.logger.warning(f"🔧   - 无法计算预测统计: self.data不存在或为空")
@@ -1740,11 +1740,11 @@ class GPUBatchPearsonAnalyzer:
                 }
                 
                 detailed_results.append(result_item)
-                self.logger.info(f"🔧   - 评测日期{eval_date}结果构建完成，包含{len(high_corr_periods)}个高相关性期间")
+                self.logger.debug(f"🔧   - 评测日期{eval_date}结果构建完成，包含{len(high_corr_periods)}个高相关性期间")
             else:
                 self.logger.warning(f"🔧   - 评测索引{eval_idx}超出数据范围，跳过")
         
-        self.logger.info(f"🔧 [_build_detailed_results_cpu] 详细结果构建完成，总计{len(detailed_results)}个评测日期结果")
+        self.logger.debug(f"🔧 [_build_detailed_results_cpu] 详细结果构建完成，总计{len(detailed_results)}个评测日期结果")
         return detailed_results
     
     def _print_detailed_evaluation_data(self, correlations_np, avg_correlations_filtered, 
@@ -2513,11 +2513,11 @@ class GPUBatchPearsonAnalyzer:
             self.gpu_memory_stats['current_reserved'] = current_reserved
             
             # 记录日志
-            self.logger.info(f"🔍 GPU显存监控 [{stage_name}]:")
-            self.logger.info(f"   当前已分配: {current_allocated:.2f}GB")
-            self.logger.info(f"   当前已保留: {current_reserved:.2f}GB")
-            self.logger.info(f"   峰值已分配: {self.gpu_memory_stats['peak_allocated']:.2f}GB")
-            self.logger.info(f"   峰值已保留: {self.gpu_memory_stats['peak_reserved']:.2f}GB")
+            self.logger.debug(f"🔍 GPU显存监控 [{stage_name}]:")
+            self.logger.debug(f"   当前已分配: {current_allocated:.2f}GB")
+            self.logger.debug(f"   当前已保留: {current_reserved:.2f}GB")
+            self.logger.debug(f"   峰值已分配: {self.gpu_memory_stats['peak_allocated']:.2f}GB")
+            self.logger.debug(f"   峰值已保留: {self.gpu_memory_stats['peak_reserved']:.2f}GB")
             
             # 检查显存使用率
             total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
@@ -2868,46 +2868,46 @@ class GPUBatchPearsonAnalyzer:
                 self.end_timer('gpu_step1_data_preparation')
                 
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算完成")
-                self.logger.info(f"🚀 批次 {batch_idx + 1} GPU计算 - 完成")
+                self.logger.debug(f"🚀 批次 {batch_idx + 1} GPU计算 - 完成")
                 
                 # 合并批次结果
                 if batch_correlations:
-                    self.logger.info(f"🔄 [批次合并] 开始合并第{batch_idx + 1}批结果")
+                    self.logger.debug(f"🔄 [批次合并] 开始合并第{batch_idx + 1}批结果")
                     
                     # 处理detailed_results的合并（多股票模式下是字典，需要特殊处理）
                     batch_detailed = batch_correlations['batch_results']['detailed_results']
                     merged_detailed = merged_results['batch_results']['detailed_results']
                     
-                    self.logger.info(f"🔄 [批次合并] 批次detailed_results类型: {type(batch_detailed)}")
-                    self.logger.info(f"🔄 [批次合并] 合并目标detailed_results类型: {type(merged_detailed)}")
+                    self.logger.debug(f"🔄 [批次合并] 批次detailed_results类型: {type(batch_detailed)}")
+                    self.logger.debug(f"🔄 [批次合并] 合并目标detailed_results类型: {type(merged_detailed)}")
                     
                     if isinstance(batch_detailed, dict):
-                        self.logger.info(f"🔄 [批次合并] 批次detailed_results包含股票: {list(batch_detailed.keys())}")
+                        self.logger.debug(f"🔄 [批次合并] 批次detailed_results包含股票: {list(batch_detailed.keys())}")
                         for stock_code, stock_data_list in batch_detailed.items():
-                            self.logger.info(f"🔄 [批次合并]   - 股票{stock_code}: {len(stock_data_list)}个结果")
+                            self.logger.debug(f"🔄 [批次合并]   - 股票{stock_code}: {len(stock_data_list)}个结果")
                     elif isinstance(batch_detailed, list):
-                        self.logger.info(f"🔄 [批次合并] 批次detailed_results列表长度: {len(batch_detailed)}")
+                        self.logger.debug(f"🔄 [批次合并] 批次detailed_results列表长度: {len(batch_detailed)}")
                     
                     if isinstance(batch_detailed, dict) and isinstance(merged_detailed, dict):
                         # 多股票模式：detailed_results是字典，按股票代码合并
-                        self.logger.info(f"🔄 [批次合并] 多股票模式字典合并")
+                        self.logger.debug(f"🔄 [批次合并] 多股票模式字典合并")
                         for stock_code, stock_data_list in batch_detailed.items():
                             # 如果股票代码已存在，扩展其结果列表；否则创建新的键
                             if stock_code not in merged_detailed:
                                 merged_detailed[stock_code] = []
-                                self.logger.info(f"🔄 [批次合并]   - 为股票{stock_code}创建新键")
+                                self.logger.debug(f"🔄 [批次合并]   - 为股票{stock_code}创建新键")
                             
                             before_len = len(merged_detailed[stock_code])
                             merged_detailed[stock_code].extend(stock_data_list)
                             after_len = len(merged_detailed[stock_code])
-                            self.logger.info(f"🔄 [批次合并]   - 股票{stock_code}结果扩展: {before_len} -> {after_len} (+{len(stock_data_list)})")
+                            self.logger.debug(f"🔄 [批次合并]   - 股票{stock_code}结果扩展: {before_len} -> {after_len} (+{len(stock_data_list)})")
                     elif isinstance(batch_detailed, list) and isinstance(merged_detailed, list):
                         # 单股票模式：detailed_results是列表，直接扩展
-                        self.logger.info(f"🔄 [批次合并] 单股票模式列表合并")
+                        self.logger.debug(f"🔄 [批次合并] 单股票模式列表合并")
                         before_len = len(merged_detailed)
                         merged_detailed.extend(batch_detailed)
                         after_len = len(merged_detailed)
-                        self.logger.info(f"🔄 [批次合并] 列表扩展: {before_len} -> {after_len} (+{len(batch_detailed)})")
+                        self.logger.debug(f"🔄 [批次合并] 列表扩展: {before_len} -> {after_len} (+{len(batch_detailed)})")
                     else:
                         self.logger.error(f"🔄 [批次合并] 类型不匹配: batch_detailed={type(batch_detailed)}, merged_detailed={type(merged_detailed)}")
                     
@@ -2917,19 +2917,19 @@ class GPUBatchPearsonAnalyzer:
                         total_results = sum(len(stock_results) for stock_results in detailed_results.values())
                         self.logger.debug(f"🔍 批次 {batch_idx + 1} 合并后detailed_results包含 {len(detailed_results)} 个股票，总计 {total_results} 个结果")
                         for stock_code, stock_results in detailed_results.items():
-                            self.logger.info(f"🔍   - {stock_code}: {len(stock_results)}个结果")
+                            self.logger.debug(f"🔍   - {stock_code}: {len(stock_results)}个结果")
                     else:
                         self.logger.debug(f"🔍 批次 {batch_idx + 1} 合并后detailed_results长度: {len(detailed_results)}")
                     
                     # 累加统计数据
                     batch_summary = batch_correlations['batch_results']['summary']
-                    self.logger.info(f"🔄 [批次合并] 累加统计数据 - 批次高相关性期间: {batch_summary['total_high_correlations']}")
+                    self.logger.debug(f"🔄 [批次合并] 累加统计数据 - 批次高相关性期间: {batch_summary['total_high_correlations']}")
                     merged_results['batch_results']['summary']['total_high_correlations'] += batch_summary['total_high_correlations']
                     merged_results['batch_results']['summary']['max_high_correlations_per_day'] = max(
                         merged_results['batch_results']['summary']['max_high_correlations_per_day'],
                         batch_summary['max_high_correlations_per_day']
                     )
-                    self.logger.info(f"🔄 [批次合并] 累加后总高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
+                    self.logger.debug(f"🔄 [批次合并] 累加后总高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
                 else:
                     self.logger.warning(f"🔄 [批次合并] 第{batch_idx + 1}批没有返回结果")
                 
@@ -2938,7 +2938,7 @@ class GPUBatchPearsonAnalyzer:
                     torch.cuda.empty_cache()
                     gc.collect()
                 
-                self.logger.info(f"✅ 批次 {batch_idx + 1} 处理完成，已处理 {current_batch_units} 个计算单元")
+                self.logger.debug(f"✅ 批次 {batch_idx + 1} 处理完成，已处理 {current_batch_units} 个计算单元")
             
             self.logger.info(f"🔄 分批处理完成！")
         else:
@@ -3215,150 +3215,150 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info("=" * 80)
     
     def save_batch_results_to_csv(self, result):
-        """保存批量结果到CSV文件 - 基于评测单元列表确保数据完全对应"""
-        self.logger.info("💾 开始保存批量结果到CSV文件...")
+        """保存批量结果到CSV文件 - 逐日详细记录（支持多股票模式）"""
+        self.logger.debug("💾 开始保存批量结果到CSV文件...")
         
         # 记录输入参数的详细信息
-        self.logger.info(f"💾 输入参数类型: {type(result)}")
-        self.logger.info(f"💾 输入参数键: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+        self.logger.debug(f"💾 输入参数类型: {type(result)}")
+        self.logger.debug(f"💾 输入参数键: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
         
         # 详细打印关键传入参数
-        self.logger.info("💾 ========== 关键传入参数详情 ==========")
+        self.logger.debug("💾 ========== 关键传入参数详情 ==========")
         
         # 1. evaluation_dates - 评测日期列表
         evaluation_dates = result.get('evaluation_dates', [])
-        self.logger.info(f"💾 evaluation_dates (评测日期列表):")
-        self.logger.info(f"💾   - 类型: {type(evaluation_dates)}")
-        self.logger.info(f"💾   - 长度: {len(evaluation_dates) if evaluation_dates else 0}")
+        self.logger.debug(f"💾 evaluation_dates (评测日期列表):")
+        self.logger.debug(f"💾   - 类型: {type(evaluation_dates)}")
+        self.logger.debug(f"💾   - 长度: {len(evaluation_dates) if evaluation_dates else 0}")
         if evaluation_dates:
-            self.logger.info(f"💾   - 内容: {evaluation_dates}")
+            self.logger.debug(f"💾   - 内容: {evaluation_dates}")
         else:
-            self.logger.info(f"💾   - 内容: 空列表")
+            self.logger.debug(f"💾   - 内容: 空列表")
         
         # 2. batch_results - 批量分析结果
         batch_results = result.get('batch_results', {})
-        self.logger.info(f"💾 batch_results (批量分析结果):")
-        self.logger.info(f"💾   - 类型: {type(batch_results)}")
+        self.logger.debug(f"💾 batch_results (批量分析结果):")
+        self.logger.debug(f"💾   - 类型: {type(batch_results)}")
         if isinstance(batch_results, dict):
-            self.logger.info(f"💾   - 键列表: {list(batch_results.keys())}")
+            self.logger.debug(f"💾   - 键列表: {list(batch_results.keys())}")
             
             # 打印每个主要键的详细信息
             for key in batch_results.keys():
                 value = batch_results[key]
-                self.logger.info(f"💾   - {key}: {type(value)}")
+                self.logger.debug(f"💾   - {key}: {type(value)}")
                 
                 if key == 'summary' and isinstance(value, dict):
-                    self.logger.info(f"💾     summary内容: {value}")
+                    self.logger.debug(f"💾     summary内容: {value}")
                 elif key == 'evaluation_days':
-                    self.logger.info(f"💾     evaluation_days值: {value}")
+                    self.logger.debug(f"💾     evaluation_days值: {value}")
                 elif key == 'num_historical_periods':
-                    self.logger.info(f"💾     num_historical_periods值: {value}")
+                    self.logger.debug(f"💾     num_historical_periods值: {value}")
                 elif key == 'high_correlation_counts' and hasattr(value, '__len__'):
-                    self.logger.info(f"💾     high_correlation_counts长度: {len(value)}")
+                    self.logger.debug(f"💾     high_correlation_counts长度: {len(value)}")
                     if hasattr(value, 'shape'):
-                        self.logger.info(f"💾     high_correlation_counts形状: {value.shape}")
+                        self.logger.debug(f"💾     high_correlation_counts形状: {value.shape}")
                 elif key == 'avg_correlations' and hasattr(value, '__len__'):
-                    self.logger.info(f"💾     avg_correlations长度: {len(value)}")
+                    self.logger.debug(f"💾     avg_correlations长度: {len(value)}")
                     if hasattr(value, 'shape'):
-                        self.logger.info(f"💾     avg_correlations形状: {value.shape}")
+                        self.logger.debug(f"💾     avg_correlations形状: {value.shape}")
                 elif key == 'period_info' and isinstance(value, list):
-                    self.logger.info(f"💾     period_info列表长度: {len(value)}")
+                    self.logger.debug(f"💾     period_info列表长度: {len(value)}")
                     if len(value) > 0:
-                        self.logger.info(f"💾     period_info第一个元素: {value[0]}")
+                        self.logger.debug(f"💾     period_info第一个元素: {value[0]}")
             
             # 打印detailed_results的详细信息
             detailed_results = batch_results.get('detailed_results', {})
-            self.logger.info(f"💾   - detailed_results类型: {type(detailed_results)}")
-            self.logger.info(f"💾   - detailed_results长度: {len(detailed_results) if hasattr(detailed_results, '__len__') else 'N/A'}")
+            self.logger.debug(f"💾   - detailed_results类型: {type(detailed_results)}")
+            self.logger.debug(f"💾   - detailed_results长度: {len(detailed_results) if hasattr(detailed_results, '__len__') else 'N/A'}")
             if isinstance(detailed_results, dict):
-                self.logger.info(f"💾   - detailed_results包含股票: {list(detailed_results.keys())}")
+                self.logger.debug(f"💾   - detailed_results包含股票: {list(detailed_results.keys())}")
                 for stock_code, stock_data in detailed_results.items():
-                    self.logger.info(f"💾   - 股票{stock_code}数据类型: {type(stock_data)}, 长度: {len(stock_data) if hasattr(stock_data, '__len__') else 'N/A'}")
+                    self.logger.debug(f"💾   - 股票{stock_code}数据类型: {type(stock_data)}, 长度: {len(stock_data) if hasattr(stock_data, '__len__') else 'N/A'}")
                     
                     # 打印每个股票的详细数据结构
                     if isinstance(stock_data, list) and len(stock_data) > 0:
-                        self.logger.info(f"💾     股票{stock_code}第一个元素类型: {type(stock_data[0])}")
+                        self.logger.debug(f"💾     股票{stock_code}第一个元素类型: {type(stock_data[0])}")
                         if isinstance(stock_data[0], dict):
-                            self.logger.info(f"💾     股票{stock_code}第一个元素键: {list(stock_data[0].keys())}")
+                            self.logger.debug(f"💾     股票{stock_code}第一个元素键: {list(stock_data[0].keys())}")
                             # 打印第一个元素的详细内容
                             first_item = stock_data[0]
                             for item_key, item_value in first_item.items():
                                 if isinstance(item_value, (int, float, str, bool)):
-                                    self.logger.info(f"💾       {item_key}: {item_value}")
+                                    self.logger.debug(f"💾       {item_key}: {item_value}")
                                 else:
-                                    self.logger.info(f"💾       {item_key}: {type(item_value)} (长度: {len(item_value) if hasattr(item_value, '__len__') else 'N/A'})")
+                                    self.logger.debug(f"💾       {item_key}: {type(item_value)} (长度: {len(item_value) if hasattr(item_value, '__len__') else 'N/A'})")
             elif isinstance(detailed_results, list):
-                self.logger.info(f"💾   - detailed_results列表长度: {len(detailed_results)}")
+                self.logger.debug(f"💾   - detailed_results列表长度: {len(detailed_results)}")
         else:
-            self.logger.info(f"💾   - 内容: {batch_results}")
+            self.logger.debug(f"💾   - 内容: {batch_results}")
         
         # 3. is_multi_stock - 是否为多股票模式的标志
         is_multi_stock = result.get('is_multi_stock', False)
-        self.logger.info(f"💾 is_multi_stock (多股票模式标志):")
-        self.logger.info(f"💾   - 类型: {type(is_multi_stock)}")
-        self.logger.info(f"💾   - 值: {is_multi_stock}")
+        self.logger.debug(f"💾 is_multi_stock (多股票模式标志):")
+        self.logger.debug(f"💾   - 类型: {type(is_multi_stock)}")
+        self.logger.debug(f"💾   - 值: {is_multi_stock}")
         
         # 4. 其他重要参数
-        self.logger.info(f"💾 其他重要参数:")
+        self.logger.debug(f"💾 其他重要参数:")
         other_params = ['stock_codes', 'backtest_date', 'evaluation_days', 'window_size', 'threshold', 'performance_stats']
         for param in other_params:
             if param in result:
                 value = result[param]
-                self.logger.info(f"💾   - {param}: {type(value)} = {value}")
+                self.logger.debug(f"💾   - {param}: {type(value)} = {value}")
                 
                 # 对performance_stats进行详细展示
                 if param == 'performance_stats' and isinstance(value, dict):
                     for perf_key, perf_value in value.items():
-                        self.logger.info(f"💾     {perf_key}: {perf_value}")
+                        self.logger.debug(f"💾     {perf_key}: {perf_value}")
         
-        self.logger.info("💾 ========================================")
+        self.logger.debug("💾 ========================================")
         
         try:
             
             # 记录关键参数信息
-            self.logger.info(f"💾 评测模式: {'多股票模式' if is_multi_stock else '单股票模式'}")
+            self.logger.debug(f"💾 评测模式: {'多股票模式' if is_multi_stock else '单股票模式'}")
             
             # 记录目标CSV文件信息
-            self.logger.info(f"💾 目标CSV文件: {self.csv_results_file}")
-            self.logger.info(f"💾 CSV文件是否存在: {os.path.exists(self.csv_results_file)}")
+            self.logger.debug(f"💾 目标CSV文件: {self.csv_results_file}")
+            self.logger.debug(f"💾 CSV文件是否存在: {os.path.exists(self.csv_results_file)}")
             
             # 读取现有CSV文件
-            self.logger.info("💾 开始读取现有CSV文件...")
+            self.logger.debug("💾 开始读取现有CSV文件...")
             if os.path.exists(self.csv_results_file):
                 try:
                     df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig', dtype={'代码': str})
-                    self.logger.info(f"💾 成功读取现有CSV文件，现有记录数: {len(df)}")
+                    self.logger.debug(f"💾 成功读取现有CSV文件，现有记录数: {len(df)}")
                     if len(df) > 0:
-                        self.logger.info(f"💾 现有CSV列名: {list(df.columns)}")
+                        self.logger.debug(f"💾 现有CSV列名: {list(df.columns)}")
                         # 显示现有数据的基本统计
                         unique_stocks = df['代码'].nunique() if '代码' in df.columns else 0
                         unique_dates = df['评测日期'].nunique() if '评测日期' in df.columns else 0
-                        self.logger.info(f"💾 现有数据统计: {unique_stocks} 个股票, {unique_dates} 个评测日期")
+                        self.logger.debug(f"💾 现有数据统计: {unique_stocks} 个股票, {unique_dates} 个评测日期")
                 except Exception as e:
                     self.logger.error(f"💾 读取现有CSV文件时出错: {str(e)}")
                     df = pd.DataFrame()
-                    self.logger.info("💾 创建空DataFrame作为备用")
+                    self.logger.debug("💾 创建空DataFrame作为备用")
             else:
                 df = pd.DataFrame()
-                self.logger.info("💾 CSV文件不存在，创建空DataFrame")
+                self.logger.debug("💾 CSV文件不存在，创建空DataFrame")
             
             # 构建评测单元列表 - 使用和批次处理时相同的逻辑
             evaluation_units = []
-            self.logger.info("💾 开始构建评测单元列表...")
+            self.logger.debug("💾 开始构建评测单元列表...")
             
             # 获取评测日期列表
             evaluation_dates = result.get('evaluation_dates', [])
-            self.logger.info(f"💾 评测日期数量: {len(evaluation_dates)}")
+            self.logger.debug(f"💾 评测日期数量: {len(evaluation_dates)}")
             
             if is_multi_stock:
                 # 多股票模式：使用和批次处理时相同的逻辑
                 detailed_results = batch_results['detailed_results']
-                self.logger.info(f"💾 多股票模式 - 详细结果包含股票: {list(detailed_results.keys()) if isinstance(detailed_results, dict) else 'N/A'}")
+                self.logger.debug(f"💾 多股票模式 - 详细结果包含股票: {list(detailed_results.keys()) if isinstance(detailed_results, dict) else 'N/A'}")
                 
                 if isinstance(detailed_results, dict):
                     # 按照股票代码和评测日期的组合来构建计算单元
                     for stock_code, stock_daily_results in detailed_results.items():
-                        self.logger.info(f"💾 处理股票 {stock_code}，日结果数量: {len(stock_daily_results) if isinstance(stock_daily_results, list) else 'N/A'}")
+                        self.logger.debug(f"💾 处理股票 {stock_code}，日结果数量: {len(stock_daily_results) if isinstance(stock_daily_results, list) else 'N/A'}")
                         
                         if isinstance(stock_daily_results, list):
                             for daily_result in stock_daily_results:
@@ -3404,14 +3404,14 @@ class GPUBatchPearsonAnalyzer:
                     self.logger.error(f"💾 单股票模式下detailed_results不是列表格式: {type(detailed_results_list)}")
             
             # 记录当前批次的计算单元列表
-            self.logger.info(f"💾 当前批次计算单元列表 (共 {len(evaluation_units)} 个):")
+            self.logger.debug(f"💾 当前批次计算单元列表 (共 {len(evaluation_units)} 个):")
             if evaluation_units:
                 for i, unit in enumerate(evaluation_units):
-                    self.logger.info(f"   单元 {i+1}: {unit['stock_code']} - {unit['evaluation_date'].strftime('%Y-%m-%d')}")
+                    self.logger.debug(f"   单元 {i+1}: {unit['stock_code']} - {unit['evaluation_date'].strftime('%Y-%m-%d')}")
             
             # 基于评测单元列表生成CSV数据行
             new_rows = []
-            self.logger.info("💾 开始基于评测单元生成CSV数据行...")
+            self.logger.debug("💾 开始基于评测单元生成CSV数据行...")
             
             for unit_idx, unit in enumerate(evaluation_units):
                 stock_code = unit['stock_code']
@@ -3442,77 +3442,77 @@ class GPUBatchPearsonAnalyzer:
                 
                 # 记录每行数据的详细内容（仅在debug模式下或前几行）
                 if self.debug or unit_idx < 3:
-                    self.logger.info(f"💾 新增数据行 {unit_idx+1}: {row_data}")
+                    self.logger.debug(f"💾 新增数据行 {unit_idx+1}: {row_data}")
             
             # 记录数据准备完成的统计信息
-            self.logger.info(f"💾 CSV数据准备完成，共生成 {len(new_rows)} 行新数据")
+            self.logger.debug(f"💾 CSV数据准备完成，共生成 {len(new_rows)} 行新数据")
             
             # 添加所有新行
             if new_rows:
-                self.logger.info("💾 开始合并新数据到现有CSV数据...")
-                self.logger.info(f"💾 合并前现有数据行数: {len(df)}")
-                self.logger.info(f"💾 待合并新数据行数: {len(new_rows)}")
+                self.logger.debug("💾 开始合并新数据到现有CSV数据...")
+                self.logger.debug(f"💾 合并前现有数据行数: {len(df)}")
+                self.logger.debug(f"💾 待合并新数据行数: {len(new_rows)}")
                 
                 new_df = pd.DataFrame(new_rows)
-                self.logger.info(f"💾 新DataFrame创建成功，列名: {list(new_df.columns)}")
+                self.logger.debug(f"💾 新DataFrame创建成功，列名: {list(new_df.columns)}")
                 
                 # 合并数据
                 original_row_count = len(df)
                 df = pd.concat([df, new_df], ignore_index=True)
-                self.logger.info(f"💾 数据合并完成，合并后总行数: {len(df)} (增加了 {len(df) - original_row_count} 行)")
+                self.logger.debug(f"💾 数据合并完成，合并后总行数: {len(df)} (增加了 {len(df) - original_row_count} 行)")
                 
                 # 确保代码列为字符串类型
                 df['代码'] = df['代码'].astype(str)
-                self.logger.info("💾 代码列类型转换为字符串完成")
+                self.logger.debug("💾 代码列类型转换为字符串完成")
                 
                 # 按评测日期降序排列（最新日期在前）
-                self.logger.info("💾 开始按评测日期排序...")
+                self.logger.debug("💾 开始按评测日期排序...")
                 df['评测日期_排序'] = pd.to_datetime(df['评测日期'])
                 df = df.sort_values('评测日期_排序', ascending=False)
                 df = df.drop('评测日期_排序', axis=1)  # 删除临时排序列
                 df = df.reset_index(drop=True)  # 重置索引
-                self.logger.info("💾 数据排序完成（按评测日期降序）")
+                self.logger.debug("💾 数据排序完成（按评测日期降序）")
                 
                 # 保存CSV文件
-                self.logger.info("💾 开始保存CSV文件...")
+                self.logger.debug("💾 开始保存CSV文件...")
                 df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
                 
                 # 保存后验证
-                self.logger.info("✅ CSV文件保存完成，开始验证...")
+                self.logger.debug("✅ CSV文件保存完成，开始验证...")
                 try:
                     # 验证文件是否存在
                     if os.path.exists(self.csv_results_file):
                         # 获取文件大小
                         file_size = os.path.getsize(self.csv_results_file)
                         file_size_mb = file_size / (1024 * 1024)
-                        self.logger.info(f"✅ CSV文件验证 - 文件大小: {file_size} 字节 ({file_size_mb:.2f} MB)")
+                        self.logger.debug(f"✅ CSV文件验证 - 文件大小: {file_size} 字节 ({file_size_mb:.2f} MB)")
                         
                         # 重新读取文件验证行数
                         verification_df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig', dtype={'代码': str})
                         actual_rows = len(verification_df)
-                        self.logger.info(f"✅ CSV文件验证 - 实际行数: {actual_rows}")
-                        self.logger.info(f"✅ CSV文件验证 - 列数: {len(verification_df.columns)}")
+                        self.logger.debug(f"✅ CSV文件验证 - 实际行数: {actual_rows}")
+                        self.logger.debug(f"✅ CSV文件验证 - 列数: {len(verification_df.columns)}")
                         
                         # 验证数据统计
                         if actual_rows > 0:
                             unique_stocks = verification_df['代码'].nunique() if '代码' in verification_df.columns else 0
                             unique_dates = verification_df['评测日期'].nunique() if '评测日期' in verification_df.columns else 0
-                            self.logger.info(f"✅ CSV文件验证 - 包含 {unique_stocks} 个股票, {unique_dates} 个评测日期")
+                            self.logger.debug(f"✅ CSV文件验证 - 包含 {unique_stocks} 个股票, {unique_dates} 个评测日期")
                             
                             # 显示最新的几条记录（前3行）
                             if self.debug and actual_rows > 0:
-                                self.logger.info("✅ CSV文件验证 - 最新3条记录:")
+                                self.logger.debug("✅ CSV文件验证 - 最新3条记录:")
                                 for i, row in verification_df.head(3).iterrows():
-                                    self.logger.info(f"✅   行{i+1}: {dict(row)}")
+                                    self.logger.debug(f"✅   行{i+1}: {dict(row)}")
                         
-                        self.logger.info(f"✅ 批量结果已成功保存到CSV文件: {self.csv_results_file}")
-                        self.logger.info(f"✅ 本次新增 {len(new_rows)} 条逐日评测记录，文件总计 {actual_rows} 条记录")
+                        self.logger.debug(f"✅ 批量结果已成功保存到CSV文件: {self.csv_results_file}")
+                        self.logger.debug(f"✅ 本次新增 {len(new_rows)} 条逐日评测记录，文件总计 {actual_rows} 条记录")
                     else:
                         self.logger.error("❌ CSV文件保存后验证失败：文件不存在")
                 except Exception as verify_error:
                     self.logger.error(f"❌ CSV文件保存后验证时出错: {str(verify_error)}")
-                    self.logger.info(f"✅ 批量结果已保存到CSV文件: {self.csv_results_file}")
-                    self.logger.info(f"✅ 共保存 {len(new_rows)} 条逐日评测记录")
+                    self.logger.debug(f"✅ 批量结果已成功保存到CSV文件: {self.csv_results_file}")
+                self.logger.debug(f"✅ 共保存 {len(new_rows)} 条逐日评测记录")
             else:
                 self.logger.warning("⚠️ 没有有效的评测结果需要保存")
             

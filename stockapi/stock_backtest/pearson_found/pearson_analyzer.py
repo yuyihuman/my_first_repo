@@ -214,8 +214,8 @@ class PearsonAnalyzer:
             df['代码'] = df['代码'].astype(str)
             
             if self.debug:
-                self.logger.info(f"💾 Debug: 准备保存CSV文件，当前DataFrame共 {len(df)} 行数据")
-                self.logger.info(f"💾 Debug: 新增数据: {result_data}")
+                self.logger.debug(f"💾 Debug: 准备保存CSV文件，当前DataFrame共 {len(df)} 行数据")
+            self.logger.debug(f"💾 Debug: 新增数据: {result_data}")
             
             # 保存到CSV文件
             df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
@@ -225,8 +225,8 @@ class PearsonAnalyzer:
                 saved_file_size = os.path.getsize(self.csv_results_file)
                 self.logger.info(f"💾 Debug: CSV文件保存完成，文件大小: {saved_file_size} bytes")
             
-            self.logger.info(f"评测结果已保存到CSV文件: {self.csv_results_file}")
-            self.logger.info(f"保存的结果: {result_data}")
+            self.logger.debug(f"评测结果已保存到CSV文件: {self.csv_results_file}")
+            self.logger.debug(f"保存的结果: {result_data}")
             
         except Exception as e:
             self.logger.error(f"保存评测结果到CSV文件时出错: {str(e)}")
@@ -1080,7 +1080,7 @@ class PearsonAnalyzer:
             writer = csv.writer(f)
             writer.writerows(csv_data)
         
-        self.logger.info(f"统计结果已保存到: {csv_file}")
+        self.logger.debug(f"统计结果已保存到: {csv_file}")
         self.end_timer('stats_saving')
 
     def analyze(self):
