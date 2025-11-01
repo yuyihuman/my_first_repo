@@ -2751,12 +2751,13 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info("🔄 开始分批处理评测日期...")
         
         # 初始化合并结果
-        self.logger.info(f"🔧 [合并结果初始化] 开始初始化merged_results")
-        self.logger.info(f"🔧 [合并结果初始化] is_multi_stock: {self.is_multi_stock}")
-        self.logger.info(f"🔧 [合并结果初始化] evaluation_days: {len(valid_dates)}")
+        self.logger.debug(f"🔧 [合并结果初始化] 开始初始化merged_results")
+        self.logger.debug(f"🔧 [合并结果初始化] is_multi_stock: {self.is_multi_stock}")
+        self.logger.debug(f"🔧 [合并结果初始化] evaluation_days: {len(valid_dates)}")
         
+        # 初始化详细结果字典
         detailed_results_init = {} if self.is_multi_stock else []
-        self.logger.info(f"🔧 [合并结果初始化] detailed_results初始化为: {type(detailed_results_init)} - {detailed_results_init}")
+        self.logger.debug(f"🔧 [合并结果初始化] detailed_results初始化为: {type(detailed_results_init)} - {detailed_results_init}")
         
         merged_results = {
             'evaluation_days': len(valid_dates),
@@ -2771,7 +2772,7 @@ class GPUBatchPearsonAnalyzer:
             }
         }
         
-        self.logger.info(f"🔧 [合并结果初始化] merged_results初始化完成")
+        self.logger.debug(f"🔧 [合并结果初始化] merged_results初始化完成")
         
         # 计算批次数量（考虑多股票模式）
         if self.is_multi_stock:
@@ -2838,34 +2839,37 @@ class GPUBatchPearsonAnalyzer:
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算开始")
                 
                 # 🚀 一次性GPU计算整个批次
+                self.logger.info(f"🚀 执行GPU批次 {batch_idx + 1}/{total_batches}：处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
                 self.logger.debug(f"🚀 批次 {batch_idx + 1} GPU计算 - 开始")
                 self.logger.debug(f"📦 处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
                 
                 # 输出详细的计算单元信息
-                self.logger.info("📋 计算单元详细信息:")
+                self.logger.debug("📋 计算单元详细信息:")
                 for i, (stock_idx, date_idx, date) in enumerate(zip(batch_stock_indices, batch_date_indices, batch_dates_list)):
                     stock_code = self.stock_codes[stock_idx] if self.is_multi_stock else self.stock_code
-                    self.logger.info(f"   单元 {i+1}: 股票代码={stock_code}, 评测日期={date}")
+                    self.logger.debug(f"   单元 {i+1}: 股票代码={stock_code}, 评测日期={date}")
                 
-                # 开始批次级别的GPU计时
+                # 第1步：历史数据准备和筛选
                 self.start_timer('gpu_step1_data_preparation')
-                self.start_timer('gpu_step2_tensor_creation') 
-                self.start_timer('gpu_step3_integrated_correlation_processing')
-                
                 # 构建与评测单元一一对应的股票代码列表
                 batch_evaluation_unit_stock_codes = []
                 for stock_idx in batch_stock_indices:
                     batch_evaluation_unit_stock_codes.append(self.stock_codes[stock_idx])
+                self.end_timer('gpu_step1_data_preparation')
                 
+                # 第2步：创建GPU历史数据张量
+                self.start_timer('gpu_step2_tensor_creation')
+                # 准备GPU张量数据（这里实际上是在前面完成的，但为了计时保持一致）
+                gpu_tensor_data = batch_tensor.unsqueeze(0)
+                self.end_timer('gpu_step2_tensor_creation')
+                
+                # 第3步：集成相关性处理
+                self.start_timer('gpu_step3_integrated_correlation_processing')
                 # 调用不带计时器的GPU计算函数
                 batch_correlations = self._calculate_batch_gpu_correlation_no_timer(
-                    batch_tensor.unsqueeze(0), historical_periods_data, batch_dates_list, stock_codes=batch_evaluation_unit_stock_codes
+                    gpu_tensor_data, historical_periods_data, batch_dates_list, stock_codes=batch_evaluation_unit_stock_codes
                 )
-                
-                # 结束批次级别的GPU计时
                 self.end_timer('gpu_step3_integrated_correlation_processing')
-                self.end_timer('gpu_step2_tensor_creation')
-                self.end_timer('gpu_step1_data_preparation')
                 
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算完成")
                 self.logger.debug(f"🚀 批次 {batch_idx + 1} GPU计算 - 完成")
@@ -2939,8 +2943,6 @@ class GPUBatchPearsonAnalyzer:
                     gc.collect()
                 
                 self.logger.debug(f"✅ 批次 {batch_idx + 1} 处理完成，已处理 {current_batch_units} 个计算单元")
-            
-            self.logger.info(f"🔄 分批处理完成！")
         else:
             # 单股票模式的原有逻辑
             for batch_idx in range(total_batches):
@@ -2975,9 +2977,9 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 开始")
                 
                 # 输出详细的计算单元信息（单股票模式）
-                self.logger.info("📋 计算单元详细信息:")
+                self.logger.debug("📋 计算单元详细信息:")
                 for i, date in enumerate(batch_dates):
-                    self.logger.info(f"   单元 {i+1}: 股票代码={self.stock_code}, 评测日期={date}")
+                    self.logger.debug(f"   单元 {i+1}: 股票代码={self.stock_code}, 评测日期={date}")
                 
                 # 构建与评测单元一一对应的股票代码列表
                 batch_evaluation_unit_stock_codes = [self.stock_code] * len(batch_dates)
@@ -3162,27 +3164,43 @@ class GPUBatchPearsonAnalyzer:
             3: "🚀 第3阶段：GPU计算与结果处理"
         }
         
+        # 重新编号步骤，确保序号连续
+        displayed_steps = {}
         for timer_name, (step_id, step_name) in step_mapping.items():
             if timer_name in stats:
-                stat = stats[timer_name]
-                
-                # 检查是否需要显示新的阶段标题
                 if step_id != '总计':
                     stage_num = int(step_id.split('-')[0])
-                    if stage_num != current_stage:
-                        if current_stage > 0:
-                            self.logger.info("")  # 空行分隔
-                        self.logger.info(stage_names[stage_num])
-                        current_stage = stage_num
+                    if stage_num not in displayed_steps:
+                        displayed_steps[stage_num] = []
+                    displayed_steps[stage_num].append((timer_name, step_name))
+        
+        # 按阶段和步骤顺序显示
+        for stage_num in sorted(displayed_steps.keys()):
+            if current_stage > 0:
+                self.logger.info("")  # 空行分隔
+            self.logger.info(stage_names[stage_num])
+            current_stage = stage_num
+            
+            # 为每个阶段重新编号步骤
+            for i, (timer_name, step_name) in enumerate(displayed_steps[stage_num], 1):
+                stat = stats[timer_name]
+                new_step_id = f"{stage_num}-{i}"
                 
                 # 显示步骤统计
-                if step_id == '总计':
-                    self.logger.info("")
-                    self.logger.info("=" * 40)
-                    self.logger.info(f"📈 {step_id} - {step_name}:")
-                else:
-                    self.logger.info(f"  {step_id} {step_name}:")
-                
+                self.logger.info(f"  {new_step_id} {step_name}:")
+                self.logger.info(f"      总耗时: {stat['total_time']:.3f}秒")
+                self.logger.info(f"      平均耗时: {stat['avg_time']:.3f}秒")
+                self.logger.info(f"      执行次数: {stat['count']}")
+                if 'percentage' in stat:
+                    self.logger.info(f"      占总时间比例: {stat['percentage']:.2f}%")
+        
+        # 显示总计统计
+        for timer_name, (step_id, step_name) in step_mapping.items():
+            if timer_name in stats and step_id == '总计':
+                stat = stats[timer_name]
+                self.logger.info("")
+                self.logger.info("=" * 40)
+                self.logger.info(f"📈 {step_id} - {step_name}:")
                 self.logger.info(f"      总耗时: {stat['total_time']:.3f}秒")
                 self.logger.info(f"      平均耗时: {stat['avg_time']:.3f}秒") 
                 self.logger.info(f"      执行次数: {stat['count']}")
