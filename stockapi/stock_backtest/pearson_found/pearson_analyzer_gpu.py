@@ -3137,6 +3137,7 @@ class GPUBatchPearsonAnalyzer:
         step_mapping = {
             # 第1阶段：多进程历史数据处理（含对比股票数据加载）
             'historical_data_collection': ('1-1', '历史数据收集（含对比股票数据加载）'),
+            'all_data_loading': ('1-2', '所有数据加载'),
             
             # 第2阶段：初始化与数据准备
             'target_stock_loading': ('2-1', '目标股票数据加载'),
@@ -3211,15 +3212,21 @@ class GPUBatchPearsonAnalyzer:
                     percentage = (stat['total_time'] / total_time) * 100
                     self.logger.info(f"      占比: {percentage:.1f}%")
         
-        # 显示其他未映射的计时器
+        # 将其他未映射的计时器放入"其他处理"阶段
         unmapped_timers = set(stats.keys()) - set(step_mapping.keys()) - {'gpu_memory'}
         if unmapped_timers:
-            self.logger.info("")
-            self.logger.info("🔧 其他计时器:")
-            for timer_name in sorted(unmapped_timers):
+            # 添加到最后一个阶段
+            last_stage = max(displayed_steps.keys()) if displayed_steps else 4
+            self.logger.info("")  # 空行分隔
+            self.logger.info(f"{stage_names[last_stage]} - 其他处理")
+            
+            # 显示未映射的计时器
+            for i, timer_name in enumerate(sorted(unmapped_timers), 1):
                 stat = stats[timer_name]
-                self.logger.info(f"  {timer_name}: 总耗时={stat['total_time']:.3f}秒, "
-                               f"平均={stat['avg_time']:.3f}秒, 次数={stat['count']}")
+                self.logger.info(f"  {last_stage}-{i} {timer_name}:")
+                self.logger.info(f"      总耗时: {stat['total_time']:.3f}秒")
+                self.logger.info(f"      平均耗时: {stat['avg_time']:.3f}秒")
+                self.logger.info(f"      执行次数: {stat['count']}")
         
         # GPU显存统计
         if self.device.type == 'cuda':
