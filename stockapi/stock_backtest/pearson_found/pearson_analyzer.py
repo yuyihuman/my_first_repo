@@ -236,8 +236,8 @@ class PearsonAnalyzer:
     def start_timer(self, timer_name):
         """开始计时"""
         self.current_timers[timer_name] = time.time()
-        if self.debug:
-            self.logger.info(f"⏱️ 开始计时: {timer_name}")
+        # 移除debug条件，始终以info级别记录开始计时
+        self.logger.info(f"⏱️ 开始计时: {timer_name}")
     
     def end_timer(self, timer_name):
         """结束计时并记录耗时"""
@@ -245,8 +245,8 @@ class PearsonAnalyzer:
             elapsed_time = time.time() - self.current_timers[timer_name]
             self.performance_timers[timer_name].append(elapsed_time)
             del self.current_timers[timer_name]
-            if self.debug:
-                self.logger.info(f"⏱️ 结束计时: {timer_name} - 耗时: {elapsed_time:.3f}秒")
+            # 移除debug条件，始终以info级别记录耗时
+            self.logger.info(f"⏱️ 结束计时: {timer_name} - 耗时: {elapsed_time:.3f}秒")
             return elapsed_time
         return 0
     

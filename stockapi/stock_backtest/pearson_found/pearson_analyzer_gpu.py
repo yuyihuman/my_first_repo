@@ -334,8 +334,8 @@ class GPUBatchPearsonAnalyzer:
             'start_time': time.time(),
             'parent': parent_timer
         }
-        if self.debug:
-            self.logger.info(f"⏱️ 开始计时: {timer_name}")
+        # 移除debug条件，始终以info级别记录开始计时
+        self.logger.info(f"⏱️ 开始计时: {timer_name}")
     
     def end_timer(self, timer_name):
         """结束计时并记录耗时"""
@@ -354,8 +354,8 @@ class GPUBatchPearsonAnalyzer:
             })
             
             del self.current_timers[timer_name]
-            if self.debug:
-                self.logger.info(f"⏱️ 结束计时: {timer_name} - 耗时: {elapsed_time:.3f}秒")
+            # 移除debug条件，始终以info级别记录耗时
+            self.logger.info(f"⏱️ 结束计时: {timer_name} - 耗时: {elapsed_time:.3f}秒")
             return elapsed_time
         return 0
     
@@ -2800,7 +2800,7 @@ class GPUBatchPearsonAnalyzer:
                 end_unit = min(start_unit + self.evaluation_batch_size, total_computation_units)
                 current_batch_units = end_unit - start_unit
                 
-                self.logger.debug(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {current_batch_units} 个计算单元")
+                self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {current_batch_units} 个计算单元")
                 
                 # 获取当前批次的计算单元
                 batch_units = all_computation_units[start_unit:end_unit]
@@ -2840,8 +2840,8 @@ class GPUBatchPearsonAnalyzer:
                 
                 # 🚀 一次性GPU计算整个批次
                 self.logger.info(f"🚀 执行GPU批次 {batch_idx + 1}/{total_batches}：处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
-                self.logger.debug(f"🚀 批次 {batch_idx + 1} GPU计算 - 开始")
-                self.logger.debug(f"📦 处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
+                self.logger.info(f"🚀 批次 {batch_idx + 1} GPU计算 - 开始")
+                self.logger.info(f"📦 处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
                 
                 # 输出详细的计算单元信息
                 self.logger.debug("📋 计算单元详细信息:")
@@ -2872,7 +2872,7 @@ class GPUBatchPearsonAnalyzer:
                 self.end_timer('gpu_step3_integrated_correlation_processing')
                 
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算完成")
-                self.logger.debug(f"🚀 批次 {batch_idx + 1} GPU计算 - 完成")
+                self.logger.info(f"🚀 批次 {batch_idx + 1} GPU计算 - 完成")
                 
                 # 合并批次结果
                 if batch_correlations:
@@ -3467,36 +3467,30 @@ class GPUBatchPearsonAnalyzer:
             
             # 添加所有新行
             if new_rows:
-                self.logger.debug("💾 开始合并新数据到现有CSV数据...")
-                self.logger.debug(f"💾 合并前现有数据行数: {len(df)}")
-                self.logger.debug(f"💾 待合并新数据行数: {len(new_rows)}")
+                self.logger.debug("💾 开始准备新数据写入...")
+                self.logger.debug(f"💾 待写入新数据行数: {len(new_rows)}")
                 
                 new_df = pd.DataFrame(new_rows)
                 self.logger.debug(f"💾 新DataFrame创建成功，列名: {list(new_df.columns)}")
                 
-                # 合并数据
-                original_row_count = len(df)
-                df = pd.concat([df, new_df], ignore_index=True)
-                self.logger.debug(f"💾 数据合并完成，合并后总行数: {len(df)} (增加了 {len(df) - original_row_count} 行)")
-                
                 # 确保代码列为字符串类型
-                df['代码'] = df['代码'].astype(str)
-                self.logger.debug("💾 代码列类型转换为字符串完成")
+                new_df['代码'] = new_df['代码'].astype(str)
                 
-                # 按评测日期降序排列（最新日期在前）
-                self.logger.debug("💾 开始按评测日期排序...")
-                df['评测日期_排序'] = pd.to_datetime(df['评测日期'])
-                df = df.sort_values('评测日期_排序', ascending=False)
-                df = df.drop('评测日期_排序', axis=1)  # 删除临时排序列
-                df = df.reset_index(drop=True)  # 重置索引
-                self.logger.debug("💾 数据排序完成（按评测日期降序）")
+                # 检查CSV文件是否存在，决定是否需要写入表头
+                file_exists = os.path.exists(self.csv_results_file) and os.path.getsize(self.csv_results_file) > 0
                 
-                # 保存CSV文件
-                self.logger.debug("💾 开始保存CSV文件...")
-                df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
+                # 使用追加模式写入CSV
+                self.logger.debug(f"💾 开始追加写入CSV文件 (文件已存在: {file_exists})...")
+                new_df.to_csv(
+                    self.csv_results_file, 
+                    mode='a' if file_exists else 'w',  # 如果文件存在则追加，否则新建
+                    header=not file_exists,  # 只有在文件不存在时才写入表头
+                    index=False, 
+                    encoding='utf-8-sig'
+                )
                 
                 # 保存后验证
-                self.logger.debug("✅ CSV文件保存完成，开始验证...")
+                self.logger.debug(f"✅ CSV文件追加写入完成，新增 {len(new_rows)} 行数据")
                 try:
                     # 验证文件是否存在
                     if os.path.exists(self.csv_results_file):
