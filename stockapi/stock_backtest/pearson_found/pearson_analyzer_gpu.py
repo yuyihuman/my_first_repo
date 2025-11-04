@@ -28,7 +28,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from scipy.stats import pearsonr
 from data_loader import StockDataLoader
 import matplotlib.pyplot as plt
 import mplfinance as mpf
@@ -1875,16 +1874,20 @@ class GPUBatchPearsonAnalyzer:
                 eval_idx = data['eval_idx']
                 hist_idx = data['hist_idx']
                 
-                # 获取评测数据（转换为numpy数组）
+                # 获取评测数据（统一使用CPU上的torch张量）
                 recent_data = batch_recent_data[eval_idx]  # [window_size, 5]
                 if isinstance(recent_data, torch.Tensor):
-                    recent_data = recent_data.cpu().numpy()
+                    recent_data = recent_data.detach().cpu()
+                else:
+                    recent_data = torch.tensor(recent_data)
                 
                 # 获取历史数据
                 if hist_idx < len(historical_data_list):
                     historical_data = historical_data_list[hist_idx]  # [window_size, 5]
                     if isinstance(historical_data, torch.Tensor):
-                        historical_data = historical_data.cpu().numpy()
+                        historical_data = historical_data.detach().cpu()
+                    else:
+                        historical_data = torch.tensor(historical_data)
                     
                     self.logger.info("  对比数组详情:")
                     self.logger.info(f"    数据窗口大小: {recent_data.shape[0]} 天")
@@ -1896,13 +1899,16 @@ class GPUBatchPearsonAnalyzer:
                         self.logger.info(f"      历史数据前5天: {historical_data[:5, field_idx].tolist()}")
                         self.logger.info(f"      评测数据后5天: {recent_data[-5:, field_idx].tolist()}")
                         self.logger.info(f"      历史数据后5天: {historical_data[-5:, field_idx].tolist()}")
-                        
-                        # 计算统计信息
-                        recent_mean = np.mean(recent_data[:, field_idx])
-                        historical_mean = np.mean(historical_data[:, field_idx])
-                        recent_std = np.std(recent_data[:, field_idx])
-                        historical_std = np.std(historical_data[:, field_idx])
-                        
+
+                        # 计算统计信息（使用torch，保持与非debug一致的计算路径）
+                        recent_field = recent_data[:, field_idx]
+                        historical_field = historical_data[:, field_idx]
+                        recent_mean = recent_field.mean().item()
+                        historical_mean = historical_field.mean().item()
+                        # 使用无偏差修正=False以匹配numpy默认行为
+                        recent_std = recent_field.std(unbiased=False).item()
+                        historical_std = historical_field.std(unbiased=False).item()
+
                         self.logger.info(f"      评测数据统计 - 均值: {recent_mean:.4f}, 标准差: {recent_std:.4f}")
                         self.logger.info(f"      历史数据统计 - 均值: {historical_mean:.4f}, 标准差: {historical_std:.4f}")
             
@@ -1939,13 +1945,14 @@ class GPUBatchPearsonAnalyzer:
             first_eval_high_corr_mask = batch_high_corr_mask[0]  # [num_historical_periods]
             first_eval_data = current_batch[0]  # [window_size, 5]
         
-        # 转换为CPU numpy数组以便处理
-        first_eval_correlations_np = first_eval_correlations.cpu().numpy()
-        first_eval_high_corr_mask_np = first_eval_high_corr_mask.cpu().numpy()
-        first_eval_data_np = first_eval_data.cpu().numpy()
-        
+        # 统一使用torch处理，避免引入不同的数值库
+        first_eval_correlations = first_eval_correlations.detach().cpu()
+        first_eval_high_corr_mask = first_eval_high_corr_mask.detach().cpu()
+        first_eval_data = first_eval_data.detach().cpu()
+
         # 找到所有超过阈值的对比日期
-        high_corr_indices = np.where(first_eval_high_corr_mask_np)[0]
+        high_corr_indices_tensor = torch.nonzero(first_eval_high_corr_mask, as_tuple=False).view(-1)
+        high_corr_indices = high_corr_indices_tensor.tolist()
         
         self.logger.info("🔍" + "=" * 80)
         self.logger.info(f"🔍 DEBUG模式 - 第一个评测日期详细信息")
@@ -1957,31 +1964,36 @@ class GPUBatchPearsonAnalyzer:
         if len(high_corr_indices) > 0:
             self.logger.info("🔍 超过阈值的对比日期和相关系数:")
             
-            # 按相关系数降序排列
-            sorted_indices = high_corr_indices[np.argsort(-first_eval_correlations_np[high_corr_indices])]
+            # 按相关系数降序排列（torch实现）
+            corr_values = first_eval_correlations[high_corr_indices_tensor]
+            sorted_order = torch.argsort(corr_values, descending=True)
+            sorted_indices = [high_corr_indices[i] for i in sorted_order.tolist()]
             
             for rank, hist_idx in enumerate(sorted_indices[:10], 1):  # 只显示前10个
                 period_info = period_info_list[hist_idx]
-                correlation = first_eval_correlations_np[hist_idx]
+                correlation = first_eval_correlations[hist_idx].item()
                 
                 self.logger.info(f"🔍   #{rank} 历史期间 {hist_idx}: {period_info['start_date']} 到 {period_info['end_date']}")
                 self.logger.info(f"🔍       来源股票: {period_info['stock_code']}")
                 self.logger.info(f"🔍       平均相关系数: {correlation:.6f}")
                 
                 # 获取对应的历史数据
-                historical_data_np = historical_tensor[hist_idx].cpu().numpy()  # [window_size, 5]
+                historical_data = historical_tensor[hist_idx].detach().cpu()  # [window_size, 5]
                 
                 # 打印源数据列的详细对比
                 fields = ['open', 'high', 'low', 'close', 'volume']
                 self.logger.info(f"🔍       源数据列对比 (前3天和后3天):")
                 
                 for field_idx, field in enumerate(fields):
-                    eval_field_data = first_eval_data_np[:, field_idx]
-                    hist_field_data = historical_data_np[:, field_idx]
-                    
-                    # 计算相关系数
-                    field_correlation = np.corrcoef(eval_field_data, hist_field_data)[0, 1]
-                    
+                    eval_field_data = first_eval_data[:, field_idx]
+                    hist_field_data = historical_data[:, field_idx]
+
+                    # 使用torch计算字段级相关系数，统一计算路径
+                    x = eval_field_data - eval_field_data.mean()
+                    y = hist_field_data - hist_field_data.mean()
+                    denom = (x.norm() * y.norm()).clamp(min=1e-8)
+                    field_correlation = (x.dot(y) / denom).item()
+
                     self.logger.info(f"🔍         {field} (相关系数: {field_correlation:.6f}):")
                     self.logger.info(f"🔍           评测数据前3天: {eval_field_data[:3].tolist()}")
                     self.logger.info(f"🔍           历史数据前3天: {hist_field_data[:3].tolist()}")
@@ -1999,8 +2011,12 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info("🔍 评测数据统计信息:")
         fields = ['open', 'high', 'low', 'close', 'volume']
         for field_idx, field in enumerate(fields):
-            field_data = first_eval_data_np[:, field_idx]
-            self.logger.info(f"🔍   {field}: 均值={np.mean(field_data):.4f}, 标准差={np.std(field_data):.4f}, 最小值={np.min(field_data):.4f}, 最大值={np.max(field_data):.4f}")
+            field_data = first_eval_data[:, field_idx]
+            mean_v = field_data.mean().item()
+            std_v = field_data.std(unbiased=False).item()
+            min_v = field_data.min().item()
+            max_v = field_data.max().item()
+            self.logger.info(f"🔍   {field}: 均值={mean_v:.4f}, 标准差={std_v:.4f}, 最小值={min_v:.4f}, 最大值={max_v:.4f}")
         
         self.logger.info("🔍" + "=" * 80)
     
