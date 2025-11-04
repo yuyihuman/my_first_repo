@@ -524,8 +524,8 @@ class MultiStockBacktestRunner:
             stock_code (str): 股票代码
             csv_files (list): 要合并的CSV文件名列表
         """
-        import pandas as pd
-        import os
+        
+        
         
         try:
             merged_data = []

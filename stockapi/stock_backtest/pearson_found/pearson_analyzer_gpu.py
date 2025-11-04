@@ -2251,7 +2251,7 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.info(f"📦 每批处理: 最多 {self.evaluation_batch_size} 个评测日期")
                 memory_save_percent = ((len(valid_dates) - self.evaluation_batch_size) / len(valid_dates)) * 100
                 self.logger.info(f"💾 预计GPU内存节省: {memory_save_percent:.1f}%")
-                return self._process_evaluation_batches(valid_dates, batch_recent_data, historical_periods_data)
+                return self._process_evaluation_batches(valid_dates, batch_recent_data, self.historical_periods_data)
             else:
                 self.logger.info("🔄 单批处理模式: 所有评测日期一次性处理")
         
@@ -2270,7 +2270,7 @@ class GPUBatchPearsonAnalyzer:
             # 单股票模式：为每个评测日期重复股票代码
             evaluation_unit_stock_codes = [self.stock_code] * len(valid_dates)
         
-        batch_correlations = self.calculate_batch_gpu_correlation_optimized(batch_recent_data, historical_periods_data, valid_dates, evaluation_unit_stock_codes)
+        batch_correlations = self.calculate_batch_gpu_correlation_optimized(batch_recent_data, self.historical_periods_data, valid_dates, evaluation_unit_stock_codes)
         self.monitor_gpu_memory("GPU计算完成")
         self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 完成")
         

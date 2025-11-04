@@ -9,6 +9,7 @@ import datetime
 import sys
 from collections import defaultdict
 import pandas as pd
+import numpy as np
 from data_loader import StockDataLoader
 
 def analyze_csv_data(file_path, min_correlation_count=10):
@@ -109,8 +110,6 @@ def get_stock_price_data(stock_code, date_str, sell_days):
     优先使用真实日线数据；若数据不可用，则使用模拟数据并保证数值一致性。
     """
     try:
-        import pandas as pd
-        from data_loader import StockDataLoader
         loader = StockDataLoader()
         df = loader.load_stock_data(stock_code, 'daily')
         buy_dt = pd.to_datetime(date_str)
@@ -172,7 +171,6 @@ def get_stock_price_data(stock_code, date_str, sell_days):
             }
 
         # 数据不可用：使用原模拟逻辑，但做一致性修正
-        import numpy as np
         code_seed = int(stock_code[-4:]) if len(stock_code) >= 4 else 1000
         seed = code_seed + sell_days
         np.random.seed(seed)
