@@ -529,6 +529,7 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                     code_index = header.index('代码')
                     date_index = header.index('评测日期')
                     corr_count_index = header.index('相关数量')
+                    comp_count_index = header.index('对比股票数量')
                     metrics_indices = [
                         header.index('下1日高开'),
                         header.index('下1日上涨'),
@@ -545,11 +546,12 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                         stock_code = row[code_index]
                         eval_date = row[date_index]
                         
-                        # 相关数量
+                        # 相关数量与对比股票数量
                         correlation_count = int(row[corr_count_index]) if row[corr_count_index] != 'N/A' else 0
+                        comparison_stock_count = int(row[comp_count_index]) if row[comp_count_index] != 'N/A' else 0
                         
-                        # 跳过相关数量小于等于阈值的记录
-                        if correlation_count <= min_correlation_count:
+                        # 跳过对比股票数量小于等于阈值的记录
+                        if comparison_stock_count <= min_correlation_count:
                             continue
                         
                         results['filtered_records'] += 1
@@ -639,13 +641,13 @@ def print_results(results):
     
     logging.info("\n===== 分析结果 =====")
     logging.info(f"总记录数: {results['total_records']}")
-    logging.info(f"相关数量超过阈值的记录数: {results['filtered_records']}")
+    logging.info(f"对比股票数量超过阈值的记录数: {results['filtered_records']}")
     logging.info(f"有高性能指标的记录数: {results['high_performance_records']}")
     if results['filtered_records'] > 0:
         ratio = results['high_performance_records'] / results['filtered_records'] * 100
-        logging.info(f"高性能记录占比: {ratio:.2f}% (在相关数量超过阈值的记录中)")
+        logging.info(f"高性能记录占比: {ratio:.2f}% (在对比股票数量超过阈值的记录中)")
     else:
-        logging.info("高性能记录占比: N/A (在相关数量超过阈值的记录中)")
+        logging.info("高性能记录占比: N/A (在对比股票数量超过阈值的记录中)")
     
     logging.info("\n----- 按股票代码统计 (前10条) -----")
     # 按高性能记录数量排序

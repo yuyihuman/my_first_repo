@@ -103,7 +103,7 @@ class GPUBatchPearsonAnalyzer:
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
                  batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01',
-                 num_processes=None, evaluation_batch_size=20,
+                 num_processes=None, evaluation_batch_size=15,
                  max_prediction_stats_count=100):
         """
         初始化GPU批量评测Pearson相关性分析器
@@ -127,7 +127,7 @@ class GPUBatchPearsonAnalyzer:
             evaluation_batch_size: 每批次处理的计算单元数量，用于控制GPU内存使用
                               单股票模式: 直接表示评测日期数量
                               多股票模式: 表示总计算单元数 (股票数 × 评测日期数)
-                              例如: 100股票×15评测日期=1500计算单元，batch_size=20时分75批处理 (默认: 20)
+                              例如: 100股票×15评测日期=1500计算单元，batch_size=15时分100批处理 (默认: 15)
         """
         # 支持多个股票代码
         if isinstance(stock_code, str):
@@ -1846,12 +1846,17 @@ class GPUBatchPearsonAnalyzer:
                 except Exception as e:
                     self.logger.debug(f"🔧     - TOP高相关输出失败: {str(e)}")
                 
+                # 限制“历史期间”逐条打印的数量，避免日志过长
+                printed_count_limit = 200
+                printed_count = 0
                 for hist_idx in high_corr_indices_sorted:
                     if hist_idx < len(period_info_list):
                         period_data = period_info_list[hist_idx]
                         correlation = eval_correlations[hist_idx]
                         
-                        self.logger.debug(f"🔧     - 历史期间{hist_idx}: {period_data['start_date']} ~ {period_data['end_date']}, 相关性: {correlation:.4f}")
+                        if self.debug and printed_count < printed_count_limit:
+                            self.logger.debug(f"🔧     - 历史期间{hist_idx}: {period_data['start_date']} ~ {period_data['end_date']}, 相关性: {correlation:.4f}")
+                            printed_count += 1
                         
                         high_corr_periods.append({
                             'start_date': period_data['start_date'],
@@ -1868,10 +1873,32 @@ class GPUBatchPearsonAnalyzer:
                 # 计算该评测日期的预测统计
                 try:
                     if hasattr(self, 'data') and self.data is not None:
-                        # 根据配置仅处理前N个高相关性期间
+                        # 根据配置仅处理前N个高相关性期间，且同一时间段仅选一次
                         limit = self.max_prediction_stats_count if isinstance(self.max_prediction_stats_count, int) and self.max_prediction_stats_count > 0 else len(high_corr_periods)
-                        periods_for_stats = high_corr_periods[:limit]
-                        self.logger.debug(f"🔧   - 预测统计处理数量上限: {limit}, 实际用于计算: {len(periods_for_stats)}")
+                        unique_keys = set()  # 以 (start_date, end_date) 作为“时间段”唯一性
+                        periods_for_stats = []
+                        skipped_duplicates = 0
+                        for p in high_corr_periods:
+                            key = (p.get('start_date'), p.get('end_date'))
+                            if key in unique_keys:
+                                skipped_duplicates += 1
+                                if self.debug:
+                                    try:
+                                        self.logger.debug(
+                                            f"🔧   - 跳过重复时间段: {p.get('start_date')}~{p.get('end_date')} (股票:{p.get('stock_code')}, corr:{float(p.get('avg_correlation', 0)):.6f})"
+                                        )
+                                    except Exception:
+                                        self.logger.debug(
+                                            f"🔧   - 跳过重复时间段: {p.get('start_date')}~{p.get('end_date')} (股票:{p.get('stock_code')}, corr:{p.get('avg_correlation')})"
+                                        )
+                                continue
+                            unique_keys.add(key)
+                            periods_for_stats.append(p)
+                            if len(periods_for_stats) >= limit:
+                                break
+                        self.logger.debug(
+                            f"🔧   - 预测统计处理数量上限: {limit}, 实际用于计算(唯一时间段): {len(periods_for_stats)}, 跳过重复: {skipped_duplicates}, 候选总数: {len(high_corr_periods)}"
+                        )
                         # 🔧 追加：用于统计的期间相关性分布
                         try:
                             if len(periods_for_stats) > 0:
@@ -1894,6 +1921,7 @@ class GPUBatchPearsonAnalyzer:
                     'evaluation_date': eval_date,
                     'high_correlation_periods': high_corr_periods,
                     'daily_high_count': len(high_corr_periods),
+                    'actual_used_unique_periods': len(periods_for_stats),
                     'prediction_stats': stats
                 }
                 
@@ -2187,6 +2215,16 @@ class GPUBatchPearsonAnalyzer:
             
             # 获取期间最后一天的收盘价
             period_close = source_data.iloc[end_idx]['close']
+            # 🔧 Debug：期间上下文（股票、日期、相关系数）
+            if self.debug:
+                try:
+                    self.logger.debug(
+                        f"🔧     - 期间#{i}: 股票:{source_stock_code}, 期间:{start_date}~{end_date}, 相关系数:{float(avg_correlation):.6f}"
+                    )
+                except Exception:
+                    self.logger.debug(
+                        f"🔧     - 期间#{i}: 股票:{source_stock_code}, 期间:{start_date}~{end_date}, 相关系数:{avg_correlation}"
+                    )
             
             # 检查下1个交易日
             if end_idx + 1 < len(source_data):
@@ -2207,15 +2245,15 @@ class GPUBatchPearsonAnalyzer:
                 if self.debug:
                     try:
                         self.logger.debug(
-                            f"🔧     - 次日: 开:{float(next_day_open):.4f}, 收:{float(next_day_close):.4f}, 高开:{bool(next_day_open > period_close)}, 上涨:{bool(next_day_close > period_close)}"
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 次日: 开:{float(next_day_open):.4f}, 收:{float(next_day_close):.4f}, 高开:{bool(next_day_open > period_close)}, 上涨:{bool(next_day_close > period_close)}"
                         )
                     except Exception:
                         self.logger.debug(
-                            f"🔧     - 次日: 开:{next_day_open}, 收:{next_day_close}"
+                            f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 次日: 开:{next_day_open}, 收:{next_day_close}"
                         )
             else:
                 if self.debug:
-                    self.logger.debug("🔧     - 次日数据不足，无法统计")
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 次日数据不足，无法统计")
             
             # 检查下3个交易日
             if end_idx + 3 < len(source_data):
@@ -2227,13 +2265,13 @@ class GPUBatchPearsonAnalyzer:
                 if self.debug:
                     try:
                         self.logger.debug(
-                            f"🔧     - 第3日: 收:{float(day_3_close):.4f}, 上涨:{bool(day_3_close > period_close)}"
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第3日: 收:{float(day_3_close):.4f}, 上涨:{bool(day_3_close > period_close)}"
                         )
                     except Exception:
-                        self.logger.debug(f"🔧     - 第3日: 收:{day_3_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第3日: 收:{day_3_close}")
             else:
                 if self.debug:
-                    self.logger.debug("🔧     - 第3日数据不足，无法统计")
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第3日数据不足，无法统计")
             
             # 检查下5个交易日
             if end_idx + 5 < len(source_data):
@@ -2245,13 +2283,13 @@ class GPUBatchPearsonAnalyzer:
                 if self.debug:
                     try:
                         self.logger.debug(
-                            f"🔧     - 第5日: 收:{float(day_5_close):.4f}, 上涨:{bool(day_5_close > period_close)}"
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第5日: 收:{float(day_5_close):.4f}, 上涨:{bool(day_5_close > period_close)}"
                         )
                     except Exception:
-                        self.logger.debug(f"🔧     - 第5日: 收:{day_5_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第5日: 收:{day_5_close}")
             else:
                 if self.debug:
-                    self.logger.debug("🔧     - 第5日数据不足，无法统计")
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第5日数据不足，无法统计")
             
             # 检查下10个交易日
             if end_idx + 10 < len(source_data):
@@ -2263,13 +2301,13 @@ class GPUBatchPearsonAnalyzer:
                 if self.debug:
                     try:
                         self.logger.debug(
-                            f"🔧     - 第10日: 收:{float(day_10_close):.4f}, 上涨:{bool(day_10_close > period_close)}"
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第10日: 收:{float(day_10_close):.4f}, 上涨:{bool(day_10_close > period_close)}"
                         )
                     except Exception:
-                        self.logger.debug(f"🔧     - 第10日: 收:{day_10_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第10日: 收:{day_10_close}")
             else:
                 if self.debug:
-                    self.logger.debug("🔧     - 第10日数据不足，无法统计")
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第10日数据不足，无法统计")
         
         # 计算比例
         stats['ratios'] = {}
@@ -3701,6 +3739,7 @@ class GPUBatchPearsonAnalyzer:
                     '评测日期': evaluation_date.strftime('%Y-%m-%d'),
                     '对比股票数量': comparison_stock_count,
                     '相关数量': daily_result.get('daily_high_count', 0),
+                    '实际计算数量': daily_result.get('actual_used_unique_periods', 0),
                     '下1日高开': f"{prediction_stats.get('ratios', {}).get('next_day_gap_up', 0):.2%}" if prediction_stats else 'N/A',
                     '下1日上涨': f"{prediction_stats.get('ratios', {}).get('next_1_day_up', 0):.2%}" if prediction_stats else 'N/A',
                     '下3日上涨': f"{prediction_stats.get('ratios', {}).get('next_3_day_up', 0):.2%}" if prediction_stats else 'N/A',
@@ -3861,10 +3900,10 @@ if __name__ == "__main__":
                        help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2020-01-01)')
     parser.add_argument('--num_processes', type=int, default=None,
                        help='多进程数量，None表示自动检测（默认为CPU核心数-1）')
-    parser.add_argument('--evaluation_batch_size', type=int, default=20,
+    parser.add_argument('--evaluation_batch_size', type=int, default=15,
                         help='每批次处理的计算单元数量，用于控制GPU内存使用。'
-                             '单股票模式: 直接表示评测日期数量 (如evaluation_days=100, batch_size=20, 分5批处理)。'
-                             '多股票模式: 表示总计算单元数 (如100股票×15评测日期=1500单元, batch_size=20, 分75批处理) (默认: 20)')
+                             '单股票模式: 直接表示评测日期数量 (如evaluation_days=100, batch_size=15, 分7批处理)。'
+                             '多股票模式: 表示总计算单元数 (如100股票×15评测日期=1500单元, batch_size=15, 分100批处理) (默认: 15)')
 
     args = parser.parse_args()
     
