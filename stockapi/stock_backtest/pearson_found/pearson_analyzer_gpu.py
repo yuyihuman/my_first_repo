@@ -103,7 +103,8 @@ class GPUBatchPearsonAnalyzer:
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
                  batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01',
-                 num_processes=None, evaluation_batch_size=20):
+                 num_processes=None, evaluation_batch_size=20,
+                 max_prediction_stats_count=100):
         """
         初始化GPU批量评测Pearson相关性分析器
         
@@ -158,6 +159,8 @@ class GPUBatchPearsonAnalyzer:
         self.use_gpu = use_gpu
         self.batch_size = batch_size
         self.gpu_memory_limit = gpu_memory_limit
+        # 预测统计最大数量，仅处理相关性最高的前N个
+        self.max_prediction_stats_count = max_prediction_stats_count
         self.data_loader = None
         self.logger = None
         
@@ -195,6 +198,39 @@ class GPUBatchPearsonAnalyzer:
         # 性能计时器
         self.performance_timers = defaultdict(list)
         self.current_timers = {}
+        
+        # 阶段步骤映射（用于在运行时日志与汇总中显示 3-x 等编号）
+        # 与性能总结中的阶段定义保持一致
+        self.step_mapping = {
+            # 第1阶段：多进程历史数据处理
+            'comparison_stock_loading': ('1-1', '对比股票数据加载'),
+            'historical_data_collection': ('1-2', '历史数据处理'),
+            'target_stock_loading': ('1-3', '目标股票数据加载'),
+            'all_data_loading': ('1-4', '所有数据加载总计'),
+
+            # 第2阶段：初始化与数据准备
+            'evaluation_dates_preparation': ('2-1', '评测日期准备'),
+            'batch_data_preparation': ('2-2', '批量数据准备'),
+
+            # 第3阶段：GPU计算与结果处理
+            'gpu_step1_data_preparation': ('3-1', '历史数据准备和筛选'),
+            'gpu_step2_tensor_creation': ('3-2', '创建GPU历史数据张量'),
+            'gpu_step3_correlation_calculation': ('3-3', '批量相关系数计算'),
+            'gpu_step3_integrated_misc': ('3-3a', '一体化过程其他操作（日志/同步/数据传输）'),
+            'gpu_step3_correlation_matrix': ('3-4', '相关矩阵计算'),
+            'gpu_step3_correlation_filtering': ('3-5', '相关性筛选'),
+            'gpu_step3_result_aggregation': ('3-6', '结果聚合'),
+            'gpu_step3_batch_merging': ('3-7', '批次结果合并'),
+            'gpu_step3_global_statistics': ('3-8', '全局统计计算'),
+            'gpu_step3_detailed_results': ('3-9', '详细结果生成'),
+            'gpu_step3_integrated_correlation_processing': ('3-10', 'GPU一体化处理总耗时（含3-3至3-9）'),
+            'gpu_step4_batch_merging': ('3-11', '合并批次结果'),
+            'gpu_step5_result_processing': ('3-12', '处理批量相关性结果'),
+            'integrated_result_processing': ('3-13', '集成结果处理'),
+
+            # 总体统计
+            'total_batch_analysis': ('总计', '完整批量分析')
+        }
         
         # 确保日志目录存在
         os.makedirs(self.log_dir, exist_ok=True)
@@ -333,10 +369,11 @@ class GPUBatchPearsonAnalyzer:
             'start_time': time.time(),
             'parent': parent_timer
         }
-        # 只记录主要步骤的开始，子步骤使用debug级别
-        if timer_name.startswith('gpu_step') and timer_name.count('_') <= 2:
+        # 映射到阶段编号的步骤使用更醒目的info级别输出
+        if hasattr(self, 'step_mapping') and timer_name in self.step_mapping:
             self.logger.info(f"⏱️ 【开始】{self._get_timer_display_name(timer_name)}")
         else:
+            # 其他未映射的子步骤使用debug级别
             self.logger.debug(f"⏱️ 开始计时: {timer_name}")
     
     def end_timer(self, timer_name):
@@ -358,10 +395,10 @@ class GPUBatchPearsonAnalyzer:
             del self.current_timers[timer_name]
             
             # 根据耗时和步骤类型决定日志级别和格式
-            if timer_name.startswith('gpu_step') and timer_name.count('_') <= 2:
-                # 主要步骤使用醒目格式
+            if hasattr(self, 'step_mapping') and timer_name in self.step_mapping:
+                # 映射步骤使用醒目格式并显示阶段编号
                 self.logger.info(f"⏱️ 【完成】{self._get_timer_display_name(timer_name)} - 耗时: {elapsed_time:.3f}秒")
-            elif elapsed_time >= 0.1:  # 只显示耗时超过0.1秒的子步骤
+            elif elapsed_time >= 0.1:  # 只显示耗时超过0.1秒的未映射子步骤
                 self.logger.info(f"⏱️     └─ {timer_name} - 耗时: {elapsed_time:.3f}秒")
             else:
                 self.logger.debug(f"⏱️ 结束计时: {timer_name} - 耗时: {elapsed_time:.3f}秒")
@@ -1334,7 +1371,8 @@ class GPUBatchPearsonAnalyzer:
         
         num_historical_periods = len(historical_periods_data)
         
-        # 历史数据准备（不计时）
+        # 历史数据准备（计时，挂到3-10）
+        self.start_timer('gpu_step1_data_preparation', parent_timer='gpu_step3_integrated_correlation_processing')
         historical_data_list = []
         period_info_list = []
         
@@ -1347,16 +1385,20 @@ class GPUBatchPearsonAnalyzer:
             })
         
         if not historical_data_list:
+            self.end_timer('gpu_step1_data_preparation')
             return {}
+        self.end_timer('gpu_step1_data_preparation')
         
-        # 创建GPU历史数据张量（不计时）
+        # 创建GPU历史数据张量（计时，挂到3-10）
+        self.start_timer('gpu_step2_tensor_creation', parent_timer='gpu_step3_integrated_correlation_processing')
         historical_tensor = torch.tensor(
             np.stack(historical_data_list, axis=0), 
             dtype=torch.float32, 
             device=self.device
         )  # [num_historical_periods, window_size, 5]
+        self.end_timer('gpu_step2_tensor_creation')
         
-        # GPU相关系数计算和结果处理（不计时）
+        # GPU相关系数计算和结果处理（调用带子计时器的一体化实现）
         results = self._compute_and_process_correlations_gpu(
             batch_recent_data, historical_tensor, period_info_list, 
             evaluation_days, evaluation_dates, num_stocks, is_multi_stock, stock_codes
@@ -1397,6 +1439,8 @@ class GPUBatchPearsonAnalyzer:
         
         self.logger.debug(f"GPU一体化处理配置: batch_size={batch_size}, total_batches={total_batches}")
         self.logger.debug(f"多股票处理: {num_stocks} 个股票同时处理")
+        # 覆盖集成过程的其他操作（日志/同步/数据传输）
+        self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
         
         # GPU端存储所有结果 - 支持多股票
         all_avg_correlations = []  # 每个元素: [num_stocks, batch_size, num_historical_periods]
@@ -1406,6 +1450,12 @@ class GPUBatchPearsonAnalyzer:
         # 创建阈值张量（在GPU上）
         threshold_tensor = torch.tensor(self.threshold, device=self.device, dtype=torch.float32)
         self_correlation_threshold = torch.tensor(0.9999, device=self.device, dtype=torch.float32)
+        # 🔧 Debug：记录筛选阈值配置
+        if self.debug:
+            try:
+                self.logger.debug(f"🔧 [筛选配置] 平均相关阈值: {float(self.threshold):.4f}, 自相关过滤阈值: 0.9999")
+            except Exception:
+                self.logger.debug(f"🔧 [筛选配置] 平均相关阈值: {self.threshold}, 自相关过滤阈值: 0.9999")
         
         for batch_idx, i in enumerate(range(0, evaluation_days, batch_size)):
             end_idx = min(i + batch_size, evaluation_days)
@@ -1414,13 +1464,14 @@ class GPUBatchPearsonAnalyzer:
             self.logger.debug(f"GPU处理批次 {batch_idx + 1}/{total_batches}: 评测日期 {i+1}-{end_idx} (形状: {current_batch.shape})")
             
             # 计算当前批次的相关系数 - 支持多股票
-            self.start_timer('gpu_step3_correlation_matrix')
+            self.end_timer('gpu_step3_integrated_misc')
+            self.start_timer('gpu_step3_correlation_matrix', parent_timer='gpu_step3_integrated_correlation_processing')
             batch_correlations = self._compute_correlation_matrix_multi_stock(current_batch, historical_tensor)
             self.end_timer('gpu_step3_correlation_matrix')
             # batch_correlations: [num_stocks, batch_size, num_historical_periods, 5]
             
             # GPU端计算平均相关系数和筛选
-            self.start_timer('gpu_step3_correlation_filtering')
+            self.start_timer('gpu_step3_correlation_filtering', parent_timer='gpu_step3_integrated_correlation_processing')
             batch_avg_correlations = batch_correlations.mean(dim=3)  # [num_stocks, batch_size, num_historical_periods]
             
             # GPU端过滤自相关（相关性 >= 0.9999）
@@ -1434,6 +1485,19 @@ class GPUBatchPearsonAnalyzer:
             # GPU端计算每个评测日期的高相关数量
             batch_high_corr_counts = batch_high_corr_mask.sum(dim=2)  # [num_stocks, batch_size]
             self.end_timer('gpu_step3_correlation_filtering')
+            self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
+            # 🔧 Debug：输出筛选过程与结果统计
+            if self.debug:
+                try:
+                    removed_self = int(self_corr_mask.sum().item())
+                    high_mask_true = int(batch_high_corr_mask.sum().item())
+                    self.logger.debug(f"🔧 [筛选过程] 自相关置零数量: {removed_self}")
+                    self.logger.debug(f"🔧 [筛选过程] 高相关掩码True数量: {high_mask_true}")
+                    counts_np = batch_high_corr_counts.detach().cpu().numpy().ravel()
+                    if counts_np.size > 0:
+                        self.logger.debug(f"🔧 [筛选结果] 每评测单元高相关数量统计: min={counts_np.min()}, max={counts_np.max()}, mean={counts_np.mean():.2f}")
+                except Exception as e:
+                    self.logger.debug(f"🔧 [筛选过程] 统计输出失败: {str(e)}")
             
             # 🔍 Debug模式：为第一个评测日期打印详细信息
             if self.debug and batch_idx == 0 and evaluation_dates and len(evaluation_dates) > 0:
@@ -1443,25 +1507,30 @@ class GPUBatchPearsonAnalyzer:
                 )
             
             # 存储批次结果（仍在GPU上）
-            self.start_timer('gpu_step3_result_aggregation')
+            self.end_timer('gpu_step3_integrated_misc')
+            self.start_timer('gpu_step3_result_aggregation', parent_timer='gpu_step3_integrated_correlation_processing')
             all_avg_correlations.append(batch_avg_correlations_filtered)
             all_high_corr_masks.append(batch_high_corr_mask)
             all_high_corr_counts.append(batch_high_corr_counts)
             self.end_timer('gpu_step3_result_aggregation')
+            self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
             
             # 监控每个批次后的GPU显存
             if batch_idx % max(1, total_batches // 5) == 0:  # 每20%进度监控一次
                 self.monitor_gpu_memory(f"GPU批次{batch_idx + 1}完成")
         
         # 合并所有批次的结果（仍在GPU上）- 支持多股票
-        self.start_timer('gpu_step3_batch_merging')
+        self.end_timer('gpu_step3_integrated_misc')
+        self.start_timer('gpu_step3_batch_merging', parent_timer='gpu_step3_integrated_correlation_processing')
         all_avg_correlations_tensor = torch.cat(all_avg_correlations, dim=1)  # [num_stocks, evaluation_days, num_historical_periods]
         all_high_corr_masks_tensor = torch.cat(all_high_corr_masks, dim=1)    # [num_stocks, evaluation_days, num_historical_periods]
         all_high_corr_counts_tensor = torch.cat(all_high_corr_counts, dim=1)  # [num_stocks, evaluation_days]
         self.end_timer('gpu_step3_batch_merging')
+        self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
         
         # GPU端计算全局统计 - 支持多股票
-        self.start_timer('gpu_step3_global_statistics')
+        self.end_timer('gpu_step3_integrated_misc')
+        self.start_timer('gpu_step3_global_statistics', parent_timer='gpu_step3_integrated_correlation_processing')
         if is_multi_stock:
             # 多股票模式：计算所有股票的总体统计
             total_high_correlations = all_high_corr_masks_tensor.sum()
@@ -1518,9 +1587,11 @@ class GPUBatchPearsonAnalyzer:
                         f"平均每日高相关数: {avg_high_correlations_per_day.item():.2f}")
         
         self.end_timer('gpu_step3_global_statistics')
+        self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
         
         # 开始详细结果构建计时
-        self.start_timer('gpu_step3_detailed_results')
+        self.end_timer('gpu_step3_integrated_misc')
+        self.start_timer('gpu_step3_detailed_results', parent_timer='gpu_step3_integrated_correlation_processing')
         
         # 只在需要详细结果时才传输到CPU - 支持多股票
         self.logger.debug(f"🔍 detailed_results构建条件检查:")
@@ -1647,6 +1718,9 @@ class GPUBatchPearsonAnalyzer:
         
         # 结束详细结果构建计时
         self.end_timer('gpu_step3_detailed_results')
+        self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
+        # 结束集成过程其他操作计时（函数尾部）
+        self.end_timer('gpu_step3_integrated_misc')
         
         # 构建最终结果（大部分数据已在GPU上计算完成）- 支持多股票
         batch_results = {
@@ -1746,10 +1820,33 @@ class GPUBatchPearsonAnalyzer:
                 # 找到高相关性期间
                 high_corr_periods = []
                 high_corr_indices = np.where(eval_high_corr_mask)[0]
+                # 按相关性从大到小排序索引
+                if high_corr_indices.size > 0:
+                    corr_selected = eval_correlations[high_corr_indices]
+                    sort_order = np.argsort(-corr_selected)
+                    high_corr_indices_sorted = high_corr_indices[sort_order]
+                else:
+                    high_corr_indices_sorted = high_corr_indices
+
+                self.logger.debug(f"🔧   - 高相关性索引: {high_corr_indices_sorted.tolist()}")
+                # 🔧 追加：输出高相关期间的前5个按相关系数排序的信息
+                try:
+                    if len(high_corr_indices_sorted) > 0:
+                        vals = eval_correlations[high_corr_indices_sorted]
+                        order = np.argsort(vals)[::-1]
+                        top_n = min(5, len(order))
+                        for rank in range(top_n):
+                            idx = high_corr_indices_sorted[order[rank]]
+                            if idx < len(period_info_list):
+                                pinfo = period_info_list[idx]
+                                corr_v = float(eval_correlations[idx])
+                                self.logger.debug(f"🔧     - TOP{rank+1} 期间索引={idx}, {pinfo['start_date']}~{pinfo['end_date']}, 来源:{pinfo['stock_code']}, 相关性:{corr_v:.6f}")
+                    else:
+                        self.logger.debug("🔧     - 无高相关期间用于TOP列表")
+                except Exception as e:
+                    self.logger.debug(f"🔧     - TOP高相关输出失败: {str(e)}")
                 
-                self.logger.debug(f"🔧   - 高相关性索引: {high_corr_indices.tolist()}")
-                
-                for hist_idx in high_corr_indices:
+                for hist_idx in high_corr_indices_sorted:
                     if hist_idx < len(period_info_list):
                         period_data = period_info_list[hist_idx]
                         correlation = eval_correlations[hist_idx]
@@ -1771,7 +1868,20 @@ class GPUBatchPearsonAnalyzer:
                 # 计算该评测日期的预测统计
                 try:
                     if hasattr(self, 'data') and self.data is not None:
-                        stats = self.calculate_future_performance_stats(self.data, high_corr_periods)
+                        # 根据配置仅处理前N个高相关性期间
+                        limit = self.max_prediction_stats_count if isinstance(self.max_prediction_stats_count, int) and self.max_prediction_stats_count > 0 else len(high_corr_periods)
+                        periods_for_stats = high_corr_periods[:limit]
+                        self.logger.debug(f"🔧   - 预测统计处理数量上限: {limit}, 实际用于计算: {len(periods_for_stats)}")
+                        # 🔧 追加：用于统计的期间相关性分布
+                        try:
+                            if len(periods_for_stats) > 0:
+                                corr_list = [p['avg_correlation'] for p in periods_for_stats]
+                                self.logger.debug(f"🔧   - 选用期间相关性分布: min={min(corr_list):.6f}, max={max(corr_list):.6f}, mean={np.mean(corr_list):.6f}")
+                            else:
+                                self.logger.debug("🔧   - 无选用期间进行预测统计")
+                        except Exception as e:
+                            self.logger.debug(f"🔧   - 选用期间相关性分布输出失败: {str(e)}")
+                        stats = self.calculate_future_performance_stats(self.data, periods_for_stats)
                         self.logger.debug(f"🔧   - 预测统计计算成功: {len(stats) if stats else 0}个统计项")
                     else:
                         stats = {}
@@ -2093,6 +2203,19 @@ class GPUBatchPearsonAnalyzer:
                 # 下1个交易日上涨判断
                 if next_day_close > period_close:
                     stats['next_1_day_up'] += 1
+                # 🔧 Debug：下1日细节
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - 次日: 开:{float(next_day_open):.4f}, 收:{float(next_day_close):.4f}, 高开:{bool(next_day_open > period_close)}, 上涨:{bool(next_day_close > period_close)}"
+                        )
+                    except Exception:
+                        self.logger.debug(
+                            f"🔧     - 次日: 开:{next_day_open}, 收:{next_day_close}"
+                        )
+            else:
+                if self.debug:
+                    self.logger.debug("🔧     - 次日数据不足，无法统计")
             
             # 检查下3个交易日
             if end_idx + 3 < len(source_data):
@@ -2101,6 +2224,16 @@ class GPUBatchPearsonAnalyzer:
                 
                 if day_3_close > period_close:
                     stats['next_3_day_up'] += 1
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - 第3日: 收:{float(day_3_close):.4f}, 上涨:{bool(day_3_close > period_close)}"
+                        )
+                    except Exception:
+                        self.logger.debug(f"🔧     - 第3日: 收:{day_3_close}")
+            else:
+                if self.debug:
+                    self.logger.debug("🔧     - 第3日数据不足，无法统计")
             
             # 检查下5个交易日
             if end_idx + 5 < len(source_data):
@@ -2109,6 +2242,16 @@ class GPUBatchPearsonAnalyzer:
                 
                 if day_5_close > period_close:
                     stats['next_5_day_up'] += 1
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - 第5日: 收:{float(day_5_close):.4f}, 上涨:{bool(day_5_close > period_close)}"
+                        )
+                    except Exception:
+                        self.logger.debug(f"🔧     - 第5日: 收:{day_5_close}")
+            else:
+                if self.debug:
+                    self.logger.debug("🔧     - 第5日数据不足，无法统计")
             
             # 检查下10个交易日
             if end_idx + 10 < len(source_data):
@@ -2117,6 +2260,16 @@ class GPUBatchPearsonAnalyzer:
                 
                 if day_10_close > period_close:
                     stats['next_10_day_up'] += 1
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - 第10日: 收:{float(day_10_close):.4f}, 上涨:{bool(day_10_close > period_close)}"
+                        )
+                    except Exception:
+                        self.logger.debug(f"🔧     - 第10日: 收:{day_10_close}")
+            else:
+                if self.debug:
+                    self.logger.debug("🔧     - 第10日数据不足，无法统计")
         
         # 计算比例
         stats['ratios'] = {}
@@ -2132,6 +2285,18 @@ class GPUBatchPearsonAnalyzer:
         
         if stats['valid_periods']['next_10_day'] > 0:
             stats['ratios']['next_10_day_up'] = stats['next_10_day_up'] / stats['valid_periods']['next_10_day']
+        # 🔧 Debug：预测统计汇总
+        if self.debug:
+            try:
+                self.logger.debug(
+                    "🔧 [预测统计汇总] "
+                    f"样本数={stats['total_periods']}, 次日(valid={stats['valid_periods']['next_day']}, 高开={stats['next_day_gap_up']}, 上涨={stats['next_1_day_up']}, 高开比={stats['ratios'].get('next_day_gap_up', 0):.3f}, 上涨比={stats['ratios'].get('next_1_day_up', 0):.3f}); "
+                    f"3日(valid={stats['valid_periods']['next_3_day']}, 上涨={stats['next_3_day_up']}, 比例={stats['ratios'].get('next_3_day_up', 0):.3f}); "
+                    f"5日(valid={stats['valid_periods']['next_5_day']}, 上涨={stats['next_5_day_up']}, 比例={stats['ratios'].get('next_5_day_up', 0):.3f}); "
+                    f"10日(valid={stats['valid_periods']['next_10_day']}, 上涨={stats['next_10_day_up']}, 比例={stats['ratios'].get('next_10_day_up', 0):.3f})"
+                )
+            except Exception as e:
+                self.logger.debug(f"🔧 [预测统计汇总] 输出失败: {str(e)}")
         
         return stats
     
@@ -3111,16 +3276,18 @@ class GPUBatchPearsonAnalyzer:
         self._log_performance_summary()
         
         # 最终结果日志
-        self.logger.info(f"🏁 [最终结果] 准备返回merged_results")
+        self.logger.debug(f"🏁 [最终结果] 准备返回merged_results")
         detailed_results = merged_results['batch_results']['detailed_results']
         if isinstance(detailed_results, dict):
-            self.logger.info(f"🏁 [最终结果] detailed_results类型: dict，包含股票: {list(detailed_results.keys())}")
+            self.logger.debug(f"🏁 [最终结果] detailed_results类型: dict，包含股票: {list(detailed_results.keys())}")
             total_results = sum(len(results) for results in detailed_results.values())
-            self.logger.info(f"🏁 [最终结果] 总结果数量: {total_results}")
+            total_stocks = len(detailed_results)
+            self.logger.info(f"🏁 [最终结果] 总结: 股票数={total_stocks}，总结果数={total_results}")
             for stock_code, results in detailed_results.items():
-                self.logger.info(f"🏁 [最终结果] 股票 {stock_code}: {len(results)} 个结果")
+                self.logger.debug(f"🏁 [最终结果] 股票 {stock_code}: {len(results)} 个结果")
         else:
-            self.logger.info(f"🏁 [最终结果] detailed_results类型: list，长度: {len(detailed_results)}")
+            self.logger.debug(f"🏁 [最终结果] detailed_results类型: list，长度: {len(detailed_results)}")
+            self.logger.info(f"🏁 [最终结果] 总结: 总结果数={len(detailed_results)}")
         
         return merged_results
     
@@ -3199,36 +3366,8 @@ class GPUBatchPearsonAnalyzer:
         # 获取性能统计
         stats = self._get_performance_stats()
         
-        # 定义步骤映射和显示顺序 - 新的4阶段划分
-        step_mapping = {
-            # 第1阶段：多进程历史数据处理
-            'comparison_stock_loading': ('1-1', '对比股票数据加载'),
-            'historical_data_collection': ('1-2', '历史数据处理'),
-            'target_stock_loading': ('1-3', '目标股票数据加载'),
-            'all_data_loading': ('1-4', '所有数据加载总计'),
-            
-            # 第2阶段：初始化与数据准备
-            'evaluation_dates_preparation': ('2-1', '评测日期准备'),
-            'batch_data_preparation': ('2-2', '批量数据准备'),
-            
-            # 第3阶段：GPU计算与结果处理（合并原4-6阶段）
-            'gpu_step1_data_preparation': ('3-1', '历史数据准备和筛选'),
-            'gpu_step2_tensor_creation': ('3-2', '创建GPU历史数据张量'),
-            'gpu_step3_correlation_calculation': ('3-3', '批量相关系数计算'),
-            'gpu_step3_correlation_matrix': ('3-4', '相关矩阵计算'),
-            'gpu_step3_correlation_filtering': ('3-5', '相关性筛选'),
-            'gpu_step3_result_aggregation': ('3-6', '结果聚合'),
-            'gpu_step3_batch_merging': ('3-7', '批次结果合并'),
-            'gpu_step3_global_statistics': ('3-8', '全局统计计算'),
-            'gpu_step3_detailed_results': ('3-9', '详细结果构建'),
-            'gpu_step3_integrated_correlation_processing': ('3-10', '集成相关性处理总计'),
-            'gpu_step4_batch_merging': ('3-11', '合并批次结果'),
-            'gpu_step5_result_processing': ('3-12', '处理批量相关性结果'),
-            'integrated_result_processing': ('3-13', '集成结果处理'),
-            
-            # 总体统计
-            'total_batch_analysis': ('总计', '完整批量分析')
-        }
+        # 使用统一的阶段映射（与运行时日志一致）
+        step_mapping = getattr(self, 'step_mapping', {})
         
         # 按步骤顺序显示 - 新的4阶段划分
         current_stage = 0
@@ -3238,15 +3377,14 @@ class GPUBatchPearsonAnalyzer:
             3: "🚀 第3阶段：GPU计算与结果处理"
         }
         
-        # 重新编号步骤，确保序号连续
+        # 按照映射的原始编号分阶段展示（不重新编号，保持与运行时一致）
         displayed_steps = {}
         for timer_name, (step_id, step_name) in step_mapping.items():
-            if timer_name in stats:
-                if step_id != '总计':
-                    stage_num = int(step_id.split('-')[0])
-                    if stage_num not in displayed_steps:
-                        displayed_steps[stage_num] = []
-                    displayed_steps[stage_num].append((timer_name, step_name))
+            if timer_name in stats and step_id != '总计':
+                stage_num = int(step_id.split('-')[0])
+                if stage_num not in displayed_steps:
+                    displayed_steps[stage_num] = []
+                displayed_steps[stage_num].append((timer_name, step_id, step_name))
         
         # 按阶段和步骤顺序显示
         for stage_num in sorted(displayed_steps.keys()):
@@ -3255,19 +3393,52 @@ class GPUBatchPearsonAnalyzer:
             self.logger.info(stage_names[stage_num])
             current_stage = stage_num
             
-            # 为每个阶段重新编号步骤
-            for i, (timer_name, step_name) in enumerate(displayed_steps[stage_num], 1):
+            # 使用原始阶段编号显示步骤统计
+            for timer_name, step_id, step_name in displayed_steps[stage_num]:
                 stat = stats[timer_name]
-                new_step_id = f"{stage_num}-{i}"
-                
-                # 显示步骤统计
-                self.logger.info(f"  {new_step_id} {step_name}:")
+                # 显示步骤统计（使用映射中的编号）
+                self.logger.info(f"  {step_id} {step_name}:")
                 self.logger.info(f"      总耗时: {stat['total_time']:.3f}秒")
                 self.logger.info(f"      平均耗时: {stat['avg_time']:.3f}秒")
                 self.logger.info(f"      执行次数: {stat['count']}")
                 if 'percentage' in stat:
                     self.logger.info(f"      占总时间比例: {stat['percentage']:.2f}%")
-        
+            
+            # 对3-10进行子步骤分解与未计时开销统计
+            if stage_num == 3 and 'gpu_step3_integrated_correlation_processing' in stats:
+                parent_time = stats['gpu_step3_integrated_correlation_processing']['total_time']
+                # 汇总所有以3-10为父计时器的子步骤耗时（直接使用原始计时记录，避免父属性被聚合覆盖）
+                child_totals_by_name = {}
+                child_counts_by_name = {}
+                for child_name, records in self.performance_timers.items():
+                    for record in records:
+                        parent = record['parent'] if isinstance(record, dict) else None
+                        if parent == 'gpu_step3_integrated_correlation_processing':
+                            elapsed = record['elapsed_time'] if isinstance(record, dict) else record
+                            child_totals_by_name[child_name] = child_totals_by_name.get(child_name, 0.0) + elapsed
+                            child_counts_by_name[child_name] = child_counts_by_name.get(child_name, 0) + 1
+                child_total = sum(child_totals_by_name.values())
+                child_items = []
+                for child_name, total in child_totals_by_name.items():
+                    disp = self._get_timer_display_name(child_name)
+                    child_items.append((disp, total, child_counts_by_name.get(child_name, 0)))
+                overhead = max(0.0, parent_time - child_total)
+                self.logger.info("      ─ 子步骤合计 (3-10 分解):")
+                sorted_children = sorted(child_items, key=lambda x: -x[1])
+                idx = 1
+                for disp, total, count in sorted_children:
+                    self.logger.info(f"        3-10-{idx} {disp}: 总耗时 {total:.3f}秒，次数 {count}")
+                    idx += 1
+                if overhead > 1e-3:
+                    self.logger.info(f"        3-10-{idx} 未计时开销: {overhead:.3f}秒 (函数调用/同步/数据传输等)")
+                if parent_time > 0:
+                    ratio_children = (child_total/parent_time)*100
+                    ratio_overhead = (overhead/parent_time)*100
+                    if overhead > 1e-3:
+                        self.logger.info(f"        • 子步骤占比: {ratio_children:.1f}% | 未计时开销占比: {ratio_overhead:.1f}%")
+                    else:
+                        self.logger.info(f"        • 子步骤占比: {ratio_children:.1f}%")
+
         # 显示总计统计
         for timer_name, (step_id, step_name) in step_mapping.items():
             if timer_name in stats and step_id == '总计':
@@ -3686,8 +3857,8 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=1000, 
                        help='GPU批处理大小 - 控制单次GPU计算的数据量，影响内存使用和计算效率。'
                             '推荐值：RTX 3060(8GB)=500-1000, RTX 3080(10GB)=1000-2000, RTX 4090(24GB)=2000-5000 (默认: 1000)')
-    parser.add_argument('--earliest_date', type=str, default='2022-01-01', 
-                       help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2022-01-01)')
+    parser.add_argument('--earliest_date', type=str, default='2020-01-01', 
+                       help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2020-01-01)')
     parser.add_argument('--num_processes', type=int, default=None,
                        help='多进程数量，None表示自动检测（默认为CPU核心数-1）')
     parser.add_argument('--evaluation_batch_size', type=int, default=20,

@@ -37,7 +37,7 @@ from collections import defaultdict
 class PearsonAnalyzer:
     def __init__(self, stock_code, log_dir='logs', window_size=15, threshold=0.85, debug=False, 
                  comparison_stocks=None, comparison_mode='default', backtest_date=None, csv_filename='evaluation_results.csv',
-                 earliest_date='2022-01-01'):
+                 earliest_date='2020-01-01'):
         """
         初始化Pearson相关性分析器
         
@@ -51,7 +51,7 @@ class PearsonAnalyzer:
             comparison_mode: 对比模式 ('default', 'top10', 'banks', 'tech', 'new_energy', 'healthcare', 'consumer', 'self_only')
             backtest_date: 回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析
             csv_filename: CSV结果文件名 (默认: evaluation_results.csv)
-            earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2022-01-01)
+            earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
         """
         self.stock_code = stock_code
         
@@ -1507,8 +1507,8 @@ def main():
                        help='指定回测起始日期 (格式: YYYY-MM-DD)，从该日期往前数获取数据段进行分析，默认使用最后一个交易日')
     parser.add_argument('--csv_filename', type=str, default='evaluation_results.csv',
                        help='指定CSV结果文件名 (默认: evaluation_results.csv)')
-    parser.add_argument('--earliest_date', type=str, default='2022-01-01',
-                       help='数据过滤的最早日期 (格式: YYYY-MM-DD, 默认: 2022-01-01)')
+    parser.add_argument('--earliest_date', type=str, default='2020-01-01',
+                       help='数据过滤的最早日期 (格式: YYYY-MM-DD, 默认: 2020-01-01)')
     
     args = parser.parse_args()
     
