@@ -10,60 +10,59 @@ import sys
 from collections import defaultdict
 import pandas as pd
 from data_loader import StockDataLoader
+import unicodedata
 
 def analyze_csv_data(file_path, min_correlation_count=10):
-    """分析CSV数据，找出高性能指标"""
+    """分析CSV数据，找出高性能指标（适配新CSV表头，使用实际计算数量）"""
     results = {'total': 0, 'correlated': 0, 'high_performance': 0, 'by_stock': {}, 'details': []}
-    
+
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
-            next(reader)  # 跳过标题行
-            
+            header = next(reader)  # 读取标题行
+
+            # 按表头定位列索引
+            code_index = header.index('代码')
+            date_index = header.index('评测日期')
+            actual_index = header.index('实际计算数量')
+            metric_labels = ['下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨']
+            metrics_indices = [header.index(lbl) for lbl in metric_labels]
+
+            def parse_pct(val):
+                if not val or val == 'N/A':
+                    return 0.0
+                try:
+                    return float(val.strip('%'))
+                except Exception:
+                    return 0.0
+
             for row in reader:
                 results['total'] += 1
-                
-                # 解析行数据
-                stock_code = row[0]
-                date = row[1]
-                correlation_count = int(row[2])
-                
-                # 性能指标
-                day1_up = float(row[3]) if row[3] else 0
-                day3_up = float(row[4]) if row[4] else 0
-                day5_up = float(row[5]) if row[5] else 0
-                day10_up = float(row[6]) if row[6] else 0
-                day1_high_open = float(row[7]) if row[7] else 0
-                
-                # 检查相关数量是否超过阈值
-                if correlation_count >= min_correlation_count:
+
+                stock_code = row[code_index]
+                date = row[date_index]
+                actual_calc_count = int(row[actual_index]) if row[actual_index] not in ('', 'N/A') else 0
+                metric_values = [parse_pct(row[i]) for i in metrics_indices]
+
+                # 以实际计算数量作为阈值判断
+                if actual_calc_count >= min_correlation_count:
                     results['correlated'] += 1
-                    
-                    # 初始化股票代码统计
+
                     if stock_code not in results['by_stock']:
                         results['by_stock'][stock_code] = {'correlated': 0, 'high_performance': 0}
                     results['by_stock'][stock_code]['correlated'] += 1
-                    
-                    # 检查高性能指标
-                    performance_metrics = [
-                        ('下1日上涨', day1_up),
-                        ('下3日上涨', day3_up),
-                        ('下5日上涨', day5_up),
-                        ('下10日上涨', day10_up),
-                        ('下1日高开', day1_high_open)
-                    ]
-                    
-                    high_performance_count = sum(1 for _, value in performance_metrics if value >= 80)
-                    
+
+                    performance_metrics = list(zip(metric_labels, metric_values))
+                    high_performance_count = sum(1 for _, v in performance_metrics if v >= 80)
+
                     if high_performance_count > 0:
                         results['high_performance'] += 1
                         results['by_stock'][stock_code]['high_performance'] += 1
-                        
-                        # 找出最高百分比的指标
-                        max_percentage = 0
+
+                        # 找出最高百分比及对应天数
+                        max_percentage = 0.0
                         max_percentage_metric = ''
                         max_percentage_days = 0
-                        
                         for metric_name, value in performance_metrics:
                             if value > max_percentage:
                                 max_percentage = value
@@ -76,28 +75,26 @@ def analyze_csv_data(file_path, min_correlation_count=10):
                                     max_percentage_days = 5
                                 elif '10日' in metric_name:
                                     max_percentage_days = 10
-                        
-                        # 生成价格与最大涨跌幅（尽量基于真实K线数据）
+
                         price_data = get_stock_price_data(stock_code, date, max_percentage_days)
-                        
-                        # 添加详细信息
+
                         results['details'].append({
                             'stock_code': stock_code,
                             'date': date,
-                            'buy_date': date,  # 添加买入日期字段
-                            'correlation_count': correlation_count,
+                            'buy_date': date,
+                            'actual_calc_count': actual_calc_count,
                             'high_performance_count': high_performance_count,
                             'total_metrics': len(performance_metrics),
                             'max_percentage': max_percentage,
                             'max_percentage_metric': max_percentage_metric,
                             'sell_days': max_percentage_days,
-                            'buy_price': price_data['buy_price'],
-                            'sell_price': price_data['sell_price'],
-                            'change_percent': price_data['change_percent'],
+                            'buy_price': price_data['买入价'] if '买入价' in price_data else price_data['buy_price'],
+                            'sell_price': price_data['卖出价'] if '卖出价' in price_data else price_data['sell_price'],
+                            'change_percent': price_data.get('change_percent', 'N/A'),
                             'max_up_percent': price_data.get('max_up_percent', 'N/A'),
                             'max_down_percent': price_data.get('max_down_percent', 'N/A')
                         })
-        
+
         return results
     except Exception as e:
         logging.error(f"分析CSV数据时出错: {e}")
@@ -250,19 +247,60 @@ def setup_logging(log_dir='logs'):
     
     return logger
 
-def save_results_to_file(results, output_file):
+def _display_width(text):
+    """计算文本的显示宽度，CJK宽字符按宽度2，其他按1"""
+    s = str(text)
+    width = 0
+    for ch in s:
+        width += 2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1
+    return width
+
+def _pad(text, width, align='left'):
+    """将文本填充到指定显示宽度"""
+    s = str(text)
+    w = _display_width(s)
+    if w >= width:
+        return s
+    pad_len = width - w
+    if align == 'right':
+        return ' ' * pad_len + s
+    elif align == 'center':
+        left = pad_len // 2
+        right = pad_len - left
+        return (' ' * left) + s + (' ' * right)
+    else:
+        return s + (' ' * pad_len)
+
+def _format_table(headers, rows, aligns=None, sep='  '):
+    """按列对齐生成表格字符串，考虑CJK宽字符显示宽度"""
+    if not rows:
+        return ''
+    col_count = len(headers)
+    aligns = aligns or ['left'] * col_count
+    # 计算每列最大显示宽度
+    widths = [max(_display_width(headers[i]), max(_display_width(r[i]) for r in rows)) for i in range(col_count)]
+    # 构建表头和行
+    lines = []
+    header_line = sep.join(_pad(headers[i], widths[i], aligns[i]) for i in range(col_count))
+    lines.append(header_line)
+    for r in rows:
+        line = sep.join(_pad(r[i], widths[i], aligns[i]) for i in range(col_count))
+        lines.append(line)
+    return '\n'.join(lines) + '\n'
+
+def save_results_to_file(results, output_file, count_threshold=100):
     """将结果保存到文件"""
     try:
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write("===== 分析结果 =====\n")
             f.write(f"总记录数: {results['total_records']}\n")
-            f.write(f"相关数量超过阈值的记录数: {results['filtered_records']}\n")
+            f.write(f"实际计算数量超过阈值的记录数: {results['filtered_records']}\n")
             f.write(f"有高性能指标的记录数: {results['high_performance_records']}\n")
             if results['filtered_records'] > 0:
                 ratio = results['high_performance_records'] / results['filtered_records'] * 100
-                f.write(f"高性能记录占比: {ratio:.2f}% (在相关数量超过阈值的记录中)\n\n")
+                f.write(f"高性能记录占比: {ratio:.2f}% (在实际计算数量超过阈值的记录中)\n\n")
             else:
-                f.write("高性能记录占比: N/A (在相关数量超过阈值的记录中)\n\n")
+                f.write("高性能记录占比: N/A (在实际计算数量超过阈值的记录中)\n\n")
             
             f.write("----- 按股票代码统计 -----\n")
             # 按高性能记录数量排序
@@ -289,7 +327,12 @@ def save_results_to_file(results, output_file):
                     f.write(f"{date}\t{stats['filtered']}\t{stats['high_performance']}\t{ratio:.2f}%\n")
             
             f.write("\n----- 高性能记录详情 -----\n")
-            f.write("股票代码\t日期\t\t相关数量\t高性能指标数/总指标数\t最佳指标\t买入日期\t卖出天数\t交易建议\t买入价\t卖出价\t涨跌幅\t最大涨幅\t最大跌幅\n")
+            details_rows = []
+            details_headers = [
+                "股票代码", "日期", "实际计算数量", "高性能指标数/总指标数", "最佳指标",
+                "买入日期", "卖出天数", "交易建议", "买入价", "卖出价", "涨跌幅", "最大涨幅", "最大跌幅"
+            ]
+            details_aligns = ['left','left','right','right','left','left','left','left','right','right','right','right','right']
             
             # 统计涨跌情况
             up_count = 0
@@ -317,7 +360,7 @@ def save_results_to_file(results, output_file):
                 'other': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
             }
             
-            for detail in sorted(results['details'], key=lambda x: x['correlation_count'], reverse=True):
+            for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True):
                 metrics_str = ', '.join(detail['metrics'])
                 
                 # 处理1日持股的开盘/收盘卖出显示
@@ -337,7 +380,21 @@ def save_results_to_file(results, output_file):
                 if sell_time_info:
                     sell_desc += f"{sell_time_info}"
                 
-                f.write(f"{detail['stock_code']}\t{detail['date']}\t{detail['correlation_count']}\t{detail['high_performance_count']}/{detail['valid_metrics_count']}\t{detail['max_percentage_metric']}\t{detail['buy_date']}\t{detail['sell_days']}日后\t{sell_desc}\t{detail['buy_price']}\t{detail['sell_price']}\t{detail['change_percent']}\t{detail.get('max_up_percent', 'N/A')}\t{detail.get('max_down_percent', 'N/A')}\n")
+                details_rows.append([
+                    detail['stock_code'],
+                    detail['date'],
+                    str(detail.get('actual_calc_count', detail.get('correlation_count', 0))),
+                    f"{detail['high_performance_count']}/{detail['valid_metrics_count']}",
+                    detail['max_percentage_metric'],
+                    detail['buy_date'],
+                    f"{detail['sell_days']}日后",
+                    sell_desc,
+                    str(detail['buy_price']),
+                    str(detail['sell_price']),
+                    detail['change_percent'],
+                    str(detail.get('max_up_percent', 'N/A')),
+                    str(detail.get('max_down_percent', 'N/A'))
+                ])
                 
                 # 统计涨跌情况
                 sell_days = int(detail['sell_days'])  # 确保sell_days是整数
@@ -354,30 +411,30 @@ def save_results_to_file(results, output_file):
                     if change_value > 0:
                         up_count += 1
                         days_stats[days_key]['up'] += 1
-                        # 相关数量大于100的统计
-                        if detail['correlation_count'] > 100:
+                        # 实际计算数量大于等于阈值的统计
+                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
                             high_corr_stats[days_key]['up'] += 1
                             high_corr_stats[days_key]['total'] += 1
                     elif change_value < 0:
                         down_count += 1
                         days_stats[days_key]['down'] += 1
-                        # 相关数量大于100的统计
-                        if detail['correlation_count'] > 100:
+                        # 实际计算数量大于等于阈值的统计
+                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
                             high_corr_stats[days_key]['down'] += 1
                             high_corr_stats[days_key]['total'] += 1
                     else:
                         flat_count += 1
                         days_stats[days_key]['flat'] += 1
-                        # 相关数量大于100的统计
-                        if detail['correlation_count'] > 100:
+                        # 实际计算数量大于等于阈值的统计
+                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
                             high_corr_stats[days_key]['flat'] += 1
                             high_corr_stats[days_key]['total'] += 1
                     days_stats[days_key]['total'] += 1
                 else:
                     na_count += 1
                     days_stats[days_key]['na'] += 1
-                    # 相关数量大于100的统计
-                    if detail['correlation_count'] > 100:
+                    # 实际计算数量大于等于阈值的统计
+                    if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
                         high_corr_stats[days_key]['na'] += 1
             
             # 添加涨跌统计
@@ -393,6 +450,9 @@ def save_results_to_file(results, output_file):
                 f.write(f"持平记录数: {flat_count} (0.00%)\n")
             f.write(f"无法计算记录数: {na_count}\n")
             
+            # 输出高性能记录详情表格（对齐）
+            f.write(_format_table(details_headers, details_rows, details_aligns))
+
             # 添加按持股天数的涨跌统计
             f.write("\n----- 按持股天数的涨跌统计 -----\n")
             
@@ -423,8 +483,8 @@ def save_results_to_file(results, output_file):
                     f.write(f"  下跌记录数: {stats['down']} ({down_percent:.2f}%)\n")
                     f.write(f"  持平记录数: {stats['flat']} ({flat_percent:.2f}%)\n")
             
-            # 添加相关数量大于100的统计
-            f.write("\n----- 相关数量大于100的统计 -----\n")
+            # 添加实际计算数量大于等于阈值的统计
+            f.write(f"\n----- 实际计算数量大于等于{count_threshold}的统计 -----\n")
             
             # 按固定顺序显示相关数量大于100的统计结果
             for days in ['1_high_open', '1_close', 3, 5, 10, 'other']:
@@ -447,7 +507,7 @@ def save_results_to_file(results, output_file):
                     down_percent = stats['down'] / total_valid_days * 100
                     flat_percent = stats['flat'] / total_valid_days * 100
                     
-                    f.write(f"\n{days_label}统计(相关数量>100):\n")
+                    f.write(f"\n{days_label}统计(实际计算数量>={count_threshold}):\n")
                     f.write(f"  总记录数: {total_valid_days}\n")
                     f.write(f"  上涨记录数: {stats['up']} ({up_percent:.2f}%)\n")
                     f.write(f"  下跌记录数: {stats['down']} ({down_percent:.2f}%)\n")
@@ -455,12 +515,13 @@ def save_results_to_file(results, output_file):
                     if stats['na'] > 0:
                         f.write(f"  无法计算记录数: {stats['na']}\n")
 
-                    # 追加对应分类的明细列表（相关数量>100）
+                    # 追加对应分类的明细列表（实际计算数量>=100），并对齐输出
                     f.write("  详细记录:\n")
-                    # 明细行格式与上方一致
-                    # 过滤规则：相关数量>100 且 分类匹配
-                    for detail in sorted(results['details'], key=lambda x: x['correlation_count'], reverse=True):
-                        if detail['correlation_count'] <= 100:
+                    sub_rows = []
+                    sub_headers = details_headers
+                    sub_aligns = details_aligns
+                    for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True):
+                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) < count_threshold:
                             continue
                         # 计算分类键
                         sell_days = int(detail['sell_days'])
@@ -478,8 +539,22 @@ def save_results_to_file(results, output_file):
                         sell_desc = f"买入{detail['stock_code']}，{detail['sell_days']}日后"
                         if sell_time_info:
                             sell_desc += f"{sell_time_info}"
-                        # 写出明细
-                        f.write(f"    {detail['stock_code']}\t{detail['date']}\t{detail['correlation_count']}\t{detail['high_performance_count']}/{detail.get('valid_metrics_count', detail.get('total_metrics', 0))}\t{detail['max_percentage_metric']}\t{detail.get('buy_date', detail['date'])}\t{detail['sell_days']}日后\t{sell_desc}\t{detail['buy_price']}\t{detail['sell_price']}\t{detail['change_percent']}\t{detail.get('max_up_percent', 'N/A')}\t{detail.get('max_down_percent', 'N/A')}\n")
+                        sub_rows.append([
+                            detail['stock_code'],
+                            detail['date'],
+                            str(detail.get('actual_calc_count', detail.get('correlation_count', 0))),
+                            f"{detail['high_performance_count']}/{detail.get('valid_metrics_count', detail.get('total_metrics', 0))}",
+                            detail['max_percentage_metric'],
+                            detail.get('buy_date', detail['date']),
+                            f"{detail['sell_days']}日后",
+                            sell_desc,
+                            str(detail['buy_price']),
+                            str(detail['sell_price']),
+                            detail['change_percent'],
+                            str(detail.get('max_up_percent', 'N/A')),
+                            str(detail.get('max_down_percent', 'N/A'))
+                        ])
+                    f.write(_format_table(sub_headers, sub_rows, sub_aligns))
         
         logging.info(f"结果已保存到文件: {output_file}")
         return True
@@ -528,7 +603,7 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                     # 列名映射
                     code_index = header.index('代码')
                     date_index = header.index('评测日期')
-                    corr_count_index = header.index('相关数量')
+                    actual_count_index = header.index('实际计算数量')
                     comp_count_index = header.index('对比股票数量')
                     metrics_indices = [
                         header.index('下1日高开'),
@@ -546,12 +621,12 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                         stock_code = row[code_index]
                         eval_date = row[date_index]
                         
-                        # 相关数量与对比股票数量
-                        correlation_count = int(row[corr_count_index]) if row[corr_count_index] != 'N/A' else 0
+                        # 实际计算数量与对比股票数量
+                        actual_calc_count = int(row[actual_count_index]) if row[actual_count_index] != 'N/A' else 0
                         comparison_stock_count = int(row[comp_count_index]) if row[comp_count_index] != 'N/A' else 0
                         
-                        # 跳过对比股票数量小于等于阈值的记录
-                        if comparison_stock_count <= min_correlation_count:
+                        # 使用实际计算数量进行阈值过滤：保留 >= 阈值
+                        if actual_calc_count < min_correlation_count:
                             continue
                         
                         results['filtered_records'] += 1
@@ -604,7 +679,7 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                             results['details'].append({
                                 'stock_code': stock_code,
                                 'date': eval_date,
-                                'correlation_count': correlation_count,
+                                'actual_calc_count': actual_calc_count,
                                 'metrics': performance_metrics,
                                 'high_performance_count': high_performance_count,
                                 'valid_metrics_count': valid_metrics_count,
@@ -641,13 +716,13 @@ def print_results(results):
     
     logging.info("\n===== 分析结果 =====")
     logging.info(f"总记录数: {results['total_records']}")
-    logging.info(f"对比股票数量超过阈值的记录数: {results['filtered_records']}")
+    logging.info(f"实际计算数量超过阈值的记录数: {results['filtered_records']}")
     logging.info(f"有高性能指标的记录数: {results['high_performance_records']}")
     if results['filtered_records'] > 0:
         ratio = results['high_performance_records'] / results['filtered_records'] * 100
-        logging.info(f"高性能记录占比: {ratio:.2f}% (在对比股票数量超过阈值的记录中)")
+        logging.info(f"高性能记录占比: {ratio:.2f}% (在实际计算数量超过阈值的记录中)")
     else:
-        logging.info("高性能记录占比: N/A (在对比股票数量超过阈值的记录中)")
+        logging.info("高性能记录占比: N/A (在实际计算数量超过阈值的记录中)")
     
     logging.info("\n----- 按股票代码统计 (前10条) -----")
     # 按高性能记录数量排序
@@ -674,9 +749,9 @@ def print_results(results):
             logging.info(f"{date}\t{stats['filtered']}\t{stats['high_performance']}\t{ratio:.2f}%")
     
     logging.info("\n----- 高性能记录详情 (前10条) -----")
-    logging.info("股票代码\t日期\t\t相关数量\t高性能指标数/总指标数\t最佳指标\t买入日期\t卖出天数\t交易建议\t买入价\t卖出价\t涨跌幅\t最大涨幅\t最大跌幅")
-    for detail in sorted(results['details'], key=lambda x: x['correlation_count'], reverse=True)[:10]:
-        logging.info(f"{detail['stock_code']}\t{detail['date']}\t{detail['correlation_count']}\t{detail['high_performance_count']}/{detail.get('valid_metrics_count', detail.get('total_metrics', 0))}\t{detail['max_percentage_metric']}\t{detail.get('buy_date', detail['date'])}\t{detail['sell_days']}日后\t买入{detail['stock_code']}，{detail['sell_days']}日后卖出\t{detail['buy_price']}\t{detail['sell_price']}\t{detail['change_percent']}\t{detail.get('max_up_percent', 'N/A')}\t{detail.get('max_down_percent', 'N/A')}")
+    logging.info("股票代码\t日期\t\t实际计算数量\t高性能指标数/总指标数\t最佳指标\t买入日期\t卖出天数\t交易建议\t买入价\t卖出价\t涨跌幅\t最大涨幅\t最大跌幅")
+    for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True)[:10]:
+        logging.info(f"{detail['stock_code']}\t{detail['date']}\t{detail.get('actual_calc_count', detail.get('correlation_count', 0))}\t{detail['high_performance_count']}/{detail.get('valid_metrics_count', detail.get('total_metrics', 0))}\t{detail['max_percentage_metric']}\t{detail.get('buy_date', detail['date'])}\t{detail['sell_days']}日后\t买入{detail['stock_code']}，{detail['sell_days']}日后卖出\t{detail['buy_price']}\t{detail['sell_price']}\t{detail['change_percent']}\t{detail.get('max_up_percent', 'N/A')}\t{detail.get('max_down_percent', 'N/A')}")
 
 def main():
     parser = argparse.ArgumentParser(description='分析股票相关性CSV文件')
@@ -687,6 +762,8 @@ def main():
                         help='最小相关数量阈值 (默认: 10)')
     parser.add_argument('--high-percentage', type=float, default=80.0,
                         help='高百分比阈值 (默认: 80.0)')
+    parser.add_argument('--detail-threshold', type=int, default=95,
+                        help='“实际计算数量≥N统计”使用的独立阈值 (默认: 95)')
     parser.add_argument('--output', type=str, default='',
                         help='结果输出文件路径 (默认: results_YYYYMMDD_HHMMSS.txt)')
     
@@ -721,12 +798,13 @@ def main():
     print(f"[{datetime.datetime.now()}] 分析文件: {args.file}")
     print(f"[{datetime.datetime.now()}] 最小相关数量阈值: {args.min_count}")
     print(f"[{datetime.datetime.now()}] 高百分比阈值: {args.high_percentage}%")
+    print(f"[{datetime.datetime.now()}] 明细统计阈值: {args.detail_threshold}")
     print(f"[{datetime.datetime.now()}] 结果输出文件: {args.output}")
     
     results = analyze_csv(args.file, args.min_count, args.high_percentage)
     if results:
         print_results(results)
-        save_results_to_file(results, args.output)
+        save_results_to_file(results, args.output, count_threshold=args.detail_threshold)
         message = f"[{datetime.datetime.now()}] 分析完成，结果已保存到: {args.output}"
         print(message)
         # 追加写入日志文件

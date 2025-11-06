@@ -309,7 +309,7 @@ class GPUBatchPearsonAnalyzer:
             self.logger.info("📋 CSV文件不存在，开始创建新文件...")
             
             # 使用与单日脚本相同的表头格式
-            header = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', 
+            header = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
                      '下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨']
             
             self.logger.info(f"📋 CSV表头字段: {header}")
@@ -334,7 +334,7 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.error(f"❌ CSV文件创建时出错: {str(e)}")
                 raise
         else:
-            # 文件已存在，检查文件状态
+            # 文件已存在，检查文件状态，并在缺列时自愈
             try:
                 file_size = os.path.getsize(self.csv_results_file)
                 existing_df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig', dtype={'代码': str})
@@ -346,6 +346,21 @@ class GPUBatchPearsonAnalyzer:
                 
                 if row_count > 0:
                     self.logger.info(f"📋 现有数据列名: {list(existing_df.columns)}")
+                    # 如缺少'实际计算数量'列，则补齐并重排列顺序
+                    if '实际计算数量' not in existing_df.columns:
+                        self.logger.warning("🔧 检测到CSV缺少列 '实际计算数量'，将自动补齐并重排表头")
+                        # 补齐缺失列，默认填充为0
+                        existing_df['实际计算数量'] = 0
+                        # 目标列顺序与新表头一致
+                        desired_columns = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
+                                           '下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨']
+                        # 仅重排存在的列，其余保持在末尾
+                        reordered = [col for col in desired_columns if col in existing_df.columns]
+                        remaining = [col for col in existing_df.columns if col not in reordered]
+                        existing_df = existing_df[reordered + remaining]
+                        # 覆写原文件
+                        existing_df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
+                        self.logger.info("✅ 已为现有CSV补齐缺失列并更新表头")
                     # 显示最近的几条记录作为参考
                     if row_count <= 3:
                         self.logger.info(f"📋 现有数据预览: \n{existing_df.to_string()}")
@@ -353,7 +368,7 @@ class GPUBatchPearsonAnalyzer:
                         self.logger.info(f"📋 最新3条记录预览: \n{existing_df.head(3).to_string()}")
                         
             except Exception as e:
-                self.logger.warning(f"⚠️ 读取现有CSV文件时出错: {str(e)}")
+                self.logger.warning(f"⚠️ 读取或更新现有CSV文件时出错: {str(e)}")
                 
         self.logger.info("📋 CSV文件设置完成")
     
