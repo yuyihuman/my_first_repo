@@ -1802,6 +1802,8 @@
             
             // 定义适合PMI数据范围的重要时间节点（通常从2005年开始）
             const timePoints = ['2008.12', '2012.1', '2015.3', '2019.1', '2021.11', '2024.9'];
+            // 仅保留在当前标签集合中实际存在的时间点，避免X轴出现额外类别
+            const validTimePoints = timePoints.filter(p => labels.includes(p));
             
             // 计算相邻时间点间的月数
             function calculateMonthsBetween(date1, date2) {
@@ -1814,7 +1816,7 @@
             const annotations = {};
             
             // 添加垂直线
-            timePoints.forEach((point, index) => {
+            validTimePoints.forEach((point, index) => {
                 annotations[`line${index}`] = {
                     type: 'line',
                     xMin: point,
@@ -1826,7 +1828,7 @@
             });
             
             // 添加年月标注
-            timePoints.forEach((point, index) => {
+            validTimePoints.forEach((point, index) => {
                 annotations[`dateLabel${index}`] = {
                     type: 'label',
                     xValue: point,
@@ -1846,10 +1848,12 @@
             });
             
             // 添加间隔月数标注
-            for (let i = 0; i < timePoints.length - 1; i++) {
-                const monthsBetween = calculateMonthsBetween(timePoints[i], timePoints[i + 1]);
-                const midPoint = (labels.indexOf(timePoints[i]) + labels.indexOf(timePoints[i + 1])) / 2;
-                const midDate = labels[Math.round(midPoint)];
+            for (let i = 0; i < validTimePoints.length - 1; i++) {
+                const monthsBetween = calculateMonthsBetween(validTimePoints[i], validTimePoints[i + 1]);
+                const idxA = labels.indexOf(validTimePoints[i]);
+                const idxB = labels.indexOf(validTimePoints[i + 1]);
+                const midIndex = Math.floor((idxA + idxB) / 2);
+                const midDate = labels[midIndex] || validTimePoints[i];
                 
                 annotations[`monthLabel${i}`] = {
                     type: 'label',
