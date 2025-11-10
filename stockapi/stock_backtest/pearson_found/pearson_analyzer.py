@@ -439,11 +439,29 @@ class PearsonAnalyzer:
             os.makedirs(chart_dir, exist_ok=True)
             
             # 准备数据 - 确保列名符合mplfinance要求
-            recent_df = recent_data[['open', 'high', 'low', 'close', 'volume']].copy()
-            recent_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-            
-            historical_df = historical_data[['open', 'high', 'low', 'close', 'volume']].copy()
-            historical_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            # 兼容3字段数据：如果没有high/low，使用open/close推导
+            if all(col in recent_data.columns for col in ['open', 'high', 'low', 'close', 'volume']):
+                recent_df = recent_data[['open', 'high', 'low', 'close', 'volume']].copy()
+                recent_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            else:
+                # 仅有 open/close/volume 的情况
+                recent_df = recent_data[['open', 'close', 'volume']].copy()
+                recent_df.columns = ['Open', 'Close', 'Volume']
+                # 用 open/close 推导 High/Low
+                recent_df['High'] = np.maximum(recent_data['open'], recent_data['close'])
+                recent_df['Low'] = np.minimum(recent_data['open'], recent_data['close'])
+                # 调整列顺序为OHLCV
+                recent_df = recent_df[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+            if all(col in historical_data.columns for col in ['open', 'high', 'low', 'close', 'volume']):
+                historical_df = historical_data[['open', 'high', 'low', 'close', 'volume']].copy()
+                historical_df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            else:
+                historical_df = historical_data[['open', 'close', 'volume']].copy()
+                historical_df.columns = ['Open', 'Close', 'Volume']
+                historical_df['High'] = np.maximum(historical_data['open'], historical_data['close'])
+                historical_df['Low'] = np.minimum(historical_data['open'], historical_data['close'])
+                historical_df = historical_df[['Open', 'High', 'Low', 'Close', 'Volume']]
             
             # 设置图表样式
             mc = mpf.make_marketcolors(up='red', down='green', edge='inherit',
@@ -516,7 +534,7 @@ class PearsonAnalyzer:
         Returns:
             tuple: (平均相关系数, 各字段相关系数字典)
         """
-        fields = ['open', 'high', 'low', 'close', 'volume']
+        fields = ['open', 'close', 'volume']
         correlations = {}
         
         try:
@@ -572,7 +590,7 @@ class PearsonAnalyzer:
         Returns:
             tuple: (平均相关系数, 各字段相关系数字典)
         """
-        fields = ['open', 'high', 'low', 'close', 'volume']
+        fields = ['open', 'close', 'volume']
         correlations = {}
         
         for field in fields:
@@ -844,7 +862,7 @@ class PearsonAnalyzer:
                 
                 # 计算与最近数据的相关性
                 if len(period_data) == self.window_size and len(recent_data) == self.window_size:
-                    fields = ['open', 'high', 'low', 'close', 'volume']
+                    fields = ['open', 'close', 'volume']
                     correlations = {}
                     correlation_values = []
                     
@@ -914,7 +932,7 @@ class PearsonAnalyzer:
         self.logger.info(f"    数据窗口大小: {len(recent_data)} vs {len(historical_data)}")
         
         # 打印各字段的比较详情
-        for field in ['open', 'high', 'low', 'close', 'volume']:
+        for field in ['open', 'close', 'volume']:
             if field in recent_data.columns and field in historical_data.columns:
                 recent_values = recent_data[field].values
                 historical_values = historical_data[field].values
@@ -1017,7 +1035,7 @@ class PearsonAnalyzer:
         
         # 打印评测数据的统计信息
         self.logger.info("🔍 评测数据统计信息:")
-        fields = ['open', 'high', 'low', 'close', 'volume']
+        fields = ['open', 'close', 'volume']
         for field in fields:
             if field in recent_data.columns:
                 field_data = recent_data[field].values

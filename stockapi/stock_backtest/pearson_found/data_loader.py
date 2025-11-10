@@ -155,8 +155,8 @@ class StockDataLoader:
         if 'datetime' in df.columns:
             df['datetime'] = pd.to_datetime(df['datetime'])
         
-        # 确保数值列为float类型
-        numeric_columns = ['open', 'high', 'low', 'close', 'volume']
+        # 确保数值列为float类型（兼容3字段版本）
+        numeric_columns = ['open', 'close', 'volume']
         for col in numeric_columns:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -167,9 +167,11 @@ class StockDataLoader:
             # 将datetime列设置为索引，这样就能显示实际日期
             df = df.set_index('datetime')
         
-        # 删除包含NaN的关键字段行
-        df = df.dropna(subset=['open', 'high', 'low', 'close'])
-        
+        # 删除包含NaN的关键字段行（仅对存在的关键列进行）
+        required_cols = [col for col in ['open', 'close'] if col in df.columns]
+        if required_cols:
+            df = df.dropna(subset=required_cols)
+
         return df
     
     def _filter_by_date(self, df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:

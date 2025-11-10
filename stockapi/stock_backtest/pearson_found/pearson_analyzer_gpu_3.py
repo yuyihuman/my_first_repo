@@ -617,14 +617,15 @@ class GPUBatchPearsonAnalyzer:
             evaluation_dates: 评测日期列表
             
         Returns:
-            torch.Tensor: 形状为 [num_stocks, evaluation_days, window_size, 5] 的评测数据张量（多股票）
-                         或 [evaluation_days, window_size, 5] 的评测数据张量（单股票）
+            torch.Tensor: 形状为 [num_stocks, evaluation_days, window_size, 3] 的评测数据张量（多股票）
+                         或 [evaluation_days, window_size, 3] 的评测数据张量（单股票）
             list: 有效评测日期列表
             list: 股票代码列表（多股票模式）
         """
         self.start_timer('batch_data_preparation')
         
-        fields = ['open', 'high', 'low', 'close', 'volume']
+        # 仅保留三个有效字段以降低计算与显存压力
+        fields = ['open', 'close', 'volume']
         
         if self.is_multi_stock:
             # 多股票模式：为每个股票构建数据
@@ -646,8 +647,8 @@ class GPUBatchPearsonAnalyzer:
                     recent_data = stock_data[stock_data.index <= eval_date].tail(self.window_size)
                     
                     if len(recent_data) == self.window_size:
-                        # 提取字段数据
-                        data_values = recent_data[fields].values  # [window_size, 5]
+                        # 提取字段数据（3列）
+                        data_values = recent_data[fields].values  # [window_size, 3]
                         batch_data_list.append(data_values)
                         valid_dates.append(eval_date)
                     else:
@@ -655,7 +656,7 @@ class GPUBatchPearsonAnalyzer:
                             self.logger.warning(f"股票 {stock_code} 评测日期 {eval_date} 的数据不足，跳过")
                 
                 if batch_data_list:
-                    # 转换为数组 [evaluation_days, window_size, 5]
+                    # 转换为数组 [evaluation_days, window_size, 3]
                     stock_batch_data = np.stack(batch_data_list, axis=0)
                     multi_stock_batch_data.append(stock_batch_data)
                     valid_stock_codes.append(stock_code)
@@ -679,7 +680,7 @@ class GPUBatchPearsonAnalyzer:
                 # 这里简化处理，假设日期顺序一致
                 final_multi_stock_data.append(stock_data[:len(common_valid_dates)])
             
-            # 转换为张量 [num_stocks, evaluation_days, window_size, 5]
+            # 转换为张量 [num_stocks, evaluation_days, window_size, 3]
             batch_data = np.stack(final_multi_stock_data, axis=0)
             batch_tensor = torch.tensor(batch_data, dtype=torch.float32, device=self.device)
             
@@ -700,8 +701,8 @@ class GPUBatchPearsonAnalyzer:
                 recent_data = self.data[self.data.index <= eval_date].tail(self.window_size)
                 
                 if len(recent_data) == self.window_size:
-                    # 提取字段数据
-                    data_values = recent_data[fields].values  # [window_size, 5]
+                    # 提取字段数据（3列）
+                    data_values = recent_data[fields].values  # [window_size, 3]
                     batch_data_list.append(data_values)
                     valid_dates.append(eval_date)
                 else:
@@ -713,7 +714,7 @@ class GPUBatchPearsonAnalyzer:
                 self.end_timer('batch_data_preparation')
                 return None, [], []
             
-            # 转换为张量 [evaluation_days, window_size, 5]
+            # 转换为张量 [evaluation_days, window_size, 3]
             batch_data = np.stack(batch_data_list, axis=0)
             batch_tensor = torch.tensor(batch_data, dtype=torch.float32, device=self.device)
             
@@ -728,7 +729,7 @@ class GPUBatchPearsonAnalyzer:
         批量GPU相关性计算
         
         Args:
-            batch_recent_data: 批量评测数据 [evaluation_days, window_size, 5]
+            batch_recent_data: 批量评测数据 [evaluation_days, window_size, 3]
             historical_periods_data: 历史期间数据列表
             evaluation_dates: 评测日期列表
             stock_codes: 实际有效的股票代码列表（多股票模式下使用）
@@ -781,13 +782,15 @@ class GPUBatchPearsonAnalyzer:
         # 子步骤2/5: 创建GPU历史数据张量
         self.start_timer('gpu_step2_tensor_creation')
         self.logger.info(f"  📊 [子步骤2/5] 创建GPU历史数据张量 - 开始")
-        self.logger.info(f"张量形状将为: [{len(historical_data_list)}, {window_size}, 5]")
+        # 根据实际字段列数动态输出形状信息
+        expected_fields = historical_data_list[0].shape[1] if historical_data_list else 'n/a'
+        self.logger.info(f"张量形状将为: [{len(historical_data_list)}, {window_size}, {expected_fields}]")
         
         historical_tensor = torch.tensor(
             np.stack(historical_data_list, axis=0), 
             dtype=torch.float32, 
             device=self.device
-        )  # [num_historical_periods, window_size, 5]
+        )  # [num_historical_periods, window_size, 3]
         
         self.logger.info(f"GPU历史数据张量创建完成: {historical_tensor.shape}, 设备: {historical_tensor.device}")
         self.end_timer('gpu_step2_tensor_creation')
@@ -802,9 +805,9 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"输入张量形状: batch_recent_data={batch_recent_data.shape}, historical_tensor={historical_tensor.shape}")
         
         if self.is_multi_stock:
-            self.logger.info(f"目标输出形状: [{num_stocks}, {evaluation_days}, {historical_tensor.shape[0]}, 5]")
+            self.logger.info(f"目标输出形状: [{num_stocks}, {evaluation_days}, {historical_tensor.shape[0]}, {historical_tensor.shape[-1]}]")
         else:
-            self.logger.info(f"目标输出形状: [{evaluation_days}, {historical_tensor.shape[0]}, 5]")
+            self.logger.info(f"目标输出形状: [{evaluation_days}, {historical_tensor.shape[0]}, {historical_tensor.shape[-1]}]")
         
         batch_correlations = []
         
@@ -818,22 +821,22 @@ class GPUBatchPearsonAnalyzer:
             end_idx = min(i + batch_size, evaluation_days)
             
             if self.is_multi_stock:
-                # 多股票模式: [num_stocks, batch_size, window_size, 5]
+            # 多股票模式: [num_stocks, batch_size, window_size, 3]
                 current_batch = batch_recent_data[:, i:end_idx]
                 self.logger.info(f"处理批次 {batch_idx + 1}/{total_batches}: 评测日期 {i+1}-{end_idx} (形状: {current_batch.shape})")
                 
                 # 为每个股票计算相关系数
                 stock_batch_correlations = []
                 for stock_idx in range(num_stocks):
-                    stock_batch = current_batch[stock_idx]  # [batch_size, window_size, 5]
+                    stock_batch = current_batch[stock_idx]  # [batch_size, window_size, 3]
                     stock_corr = self._compute_correlation_matrix(stock_batch, historical_tensor)
                     stock_batch_correlations.append(stock_corr)
                 
-                # 合并所有股票的结果: [num_stocks, batch_size, num_historical_periods, 5]
+                # 合并所有股票的结果: [num_stocks, batch_size, num_historical_periods, 3]
                 multi_stock_batch_corr = torch.stack(stock_batch_correlations, dim=0)
                 batch_correlations.append(multi_stock_batch_corr)
             else:
-                # 单股票模式: [batch_size, window_size, 5]
+                # 单股票模式: [batch_size, window_size, 3]
                 current_batch = batch_recent_data[i:end_idx]
                 self.logger.info(f"处理批次 {batch_idx + 1}/{total_batches}: 评测日期 {i+1}-{end_idx} (形状: {current_batch.shape})")
                 
@@ -854,13 +857,13 @@ class GPUBatchPearsonAnalyzer:
         
         if self.is_multi_stock:
             # 多股票模式: 合并所有批次的结果
-            # batch_correlations中每个元素形状: [num_stocks, batch_size, num_historical_periods, 5]
+            # batch_correlations中每个元素形状: [num_stocks, batch_size, num_historical_periods, 3]
             # 需要在第二个维度（evaluation_days维度）上合并
-            all_correlations = torch.cat(batch_correlations, dim=1)  # [num_stocks, evaluation_days, num_historical_periods, 5]
+            all_correlations = torch.cat(batch_correlations, dim=1)  # [num_stocks, evaluation_days, num_historical_periods, 3]
             self.logger.info(f"多股票批次结果合并完成: 最终形状={all_correlations.shape}")
         else:
             # 单股票模式: 合并所有批次的结果
-            all_correlations = torch.cat(batch_correlations, dim=0)  # [evaluation_days, num_historical_periods, 5]
+            all_correlations = torch.cat(batch_correlations, dim=0)  # [evaluation_days, num_historical_periods, 3]
             self.logger.info(f"单股票批次结果合并完成: 最终形状={all_correlations.shape}")
         
         self.end_timer('gpu_step4_batch_merging')
@@ -899,11 +902,11 @@ class GPUBatchPearsonAnalyzer:
         计算相关系数矩阵
         
         Args:
-            recent_batch: [batch_size, window_size, 5]
-            historical_tensor: [num_historical_periods, window_size, 5]
+            recent_batch: [batch_size, window_size, 3]
+            historical_tensor: [num_historical_periods, window_size, 3]
             
         Returns:
-            torch.Tensor: [batch_size, num_historical_periods, 5]
+            torch.Tensor: [batch_size, num_historical_periods, 3]
         """
         batch_size, window_size, num_fields = recent_batch.shape
         num_historical_periods = historical_tensor.shape[0]
@@ -915,14 +918,14 @@ class GPUBatchPearsonAnalyzer:
         # 扩展维度进行广播计算
         if self.debug:
             self.logger.debug(f"    [GPU计算] 步骤1: 扩展维度进行广播")
-        recent_expanded = recent_batch.unsqueeze(1)  # [batch_size, 1, window_size, 5]
-        historical_expanded = historical_tensor.unsqueeze(0)  # [1, num_historical_periods, window_size, 5]
+        recent_expanded = recent_batch.unsqueeze(1)  # [batch_size, 1, window_size, 3]
+        historical_expanded = historical_tensor.unsqueeze(0)  # [1, num_historical_periods, window_size, 3]
         
         # 计算均值
         if self.debug:
             self.logger.debug(f"    [GPU计算] 步骤2: 计算均值")
-        recent_mean = recent_expanded.mean(dim=2, keepdim=True)  # [batch_size, 1, 1, 5]
-        historical_mean = historical_expanded.mean(dim=2, keepdim=True)  # [1, num_historical_periods, 1, 5]
+        recent_mean = recent_expanded.mean(dim=2, keepdim=True)  # [batch_size, 1, 1, 3]
+        historical_mean = historical_expanded.mean(dim=2, keepdim=True)  # [1, num_historical_periods, 1, 3]
         
         # 中心化
         if self.debug:
@@ -933,13 +936,13 @@ class GPUBatchPearsonAnalyzer:
         # 计算协方差
         if self.debug:
             self.logger.debug(f"    [GPU计算] 步骤4: 计算协方差")
-        covariance = (recent_centered * historical_centered).sum(dim=2)  # [batch_size, num_historical_periods, 5]
+        covariance = (recent_centered * historical_centered).sum(dim=2)  # [batch_size, num_historical_periods, 3]
         
         # 计算标准差
         if self.debug:
             self.logger.debug(f"    [GPU计算] 步骤5: 计算标准差")
-        recent_std = torch.sqrt((recent_centered ** 2).sum(dim=2))  # [batch_size, 1, 5]
-        historical_std = torch.sqrt((historical_centered ** 2).sum(dim=2))  # [1, num_historical_periods, 5]
+        recent_std = torch.sqrt((recent_centered ** 2).sum(dim=2))  # [batch_size, 1, 3]
+        historical_std = torch.sqrt((historical_centered ** 2).sum(dim=2))  # [1, num_historical_periods, 3]
         
         # 计算相关系数
         if self.debug:
@@ -956,11 +959,11 @@ class GPUBatchPearsonAnalyzer:
         计算多股票相关系数矩阵
         
         Args:
-            recent_batch: [num_stocks, batch_size, window_size, 5]
-            historical_tensor: [num_historical_periods, window_size, 5]
+            recent_batch: [num_stocks, batch_size, window_size, 3]
+            historical_tensor: [num_historical_periods, window_size, 3]
             
         Returns:
-            torch.Tensor: [num_stocks, batch_size, num_historical_periods, 5]
+            torch.Tensor: [num_stocks, batch_size, num_historical_periods, 3]
         """
         num_stocks, batch_size, window_size, num_fields = recent_batch.shape
         num_historical_periods = historical_tensor.shape[0]
@@ -972,14 +975,14 @@ class GPUBatchPearsonAnalyzer:
         # 扩展维度进行广播计算
         if self.debug:
             self.logger.debug(f"    [GPU多股票计算] 步骤1: 扩展维度进行广播")
-        recent_expanded = recent_batch.unsqueeze(2)  # [num_stocks, batch_size, 1, window_size, 5]
-        historical_expanded = historical_tensor.unsqueeze(0).unsqueeze(0)  # [1, 1, num_historical_periods, window_size, 5]
+        recent_expanded = recent_batch.unsqueeze(2)  # [num_stocks, batch_size, 1, window_size, 3]
+        historical_expanded = historical_tensor.unsqueeze(0).unsqueeze(0)  # [1, 1, num_historical_periods, window_size, 3]
         
         # 计算均值
         if self.debug:
             self.logger.debug(f"    [GPU多股票计算] 步骤2: 计算均值")
-        recent_mean = recent_expanded.mean(dim=3, keepdim=True)  # [num_stocks, batch_size, 1, 1, 5]
-        historical_mean = historical_expanded.mean(dim=3, keepdim=True)  # [1, 1, num_historical_periods, 1, 5]
+        recent_mean = recent_expanded.mean(dim=3, keepdim=True)  # [num_stocks, batch_size, 1, 1, 3]
+        historical_mean = historical_expanded.mean(dim=3, keepdim=True)  # [1, 1, num_historical_periods, 1, 3]
         
         # 中心化
         if self.debug:
@@ -990,13 +993,13 @@ class GPUBatchPearsonAnalyzer:
         # 计算协方差
         if self.debug:
             self.logger.debug(f"    [GPU多股票计算] 步骤4: 计算协方差")
-        covariance = (recent_centered * historical_centered).sum(dim=3)  # [num_stocks, batch_size, num_historical_periods, 5]
+        covariance = (recent_centered * historical_centered).sum(dim=3)  # [num_stocks, batch_size, num_historical_periods, 3]
         
         # 计算标准差
         if self.debug:
             self.logger.debug(f"    [GPU多股票计算] 步骤5: 计算标准差")
-        recent_std = torch.sqrt((recent_centered ** 2).sum(dim=3))  # [num_stocks, batch_size, 1, 5]
-        historical_std = torch.sqrt((historical_centered ** 2).sum(dim=3))  # [1, 1, num_historical_periods, 5]
+        recent_std = torch.sqrt((recent_centered ** 2).sum(dim=3))  # [num_stocks, batch_size, 1, 3]
+        historical_std = torch.sqrt((historical_centered ** 2).sum(dim=3))  # [1, 1, num_historical_periods, 3]
         
         # 计算相关系数
         if self.debug:
@@ -1014,7 +1017,7 @@ class GPUBatchPearsonAnalyzer:
         处理单个股票的相关性结果
         
         Args:
-            stock_correlations: 单个股票的相关性数据 [evaluation_days, num_historical_periods, 5]
+            stock_correlations: 单个股票的相关性数据 [evaluation_days, num_historical_periods, 3]
             avg_correlations_filtered: 过滤后的平均相关系数 [evaluation_days, num_historical_periods]
             high_corr_mask: 高相关性掩码
             period_info_list: 历史期间信息列表
@@ -1073,8 +1076,8 @@ class GPUBatchPearsonAnalyzer:
         处理批量相关性计算结果（整合了阶段5的详细结果处理和保存功能），支持多股票
         
         Args:
-            correlations_tensor: [evaluation_days, num_historical_periods, 5] (单股票)
-                                或 [num_stocks, evaluation_days, num_historical_periods, 5] (多股票)
+            correlations_tensor: [evaluation_days, num_historical_periods, 3] (单股票)
+                                或 [num_stocks, evaluation_days, num_historical_periods, 3] (多股票)
             period_info_list: 历史期间信息列表
             evaluation_days: 评测日期数量
             evaluation_dates: 评测日期列表
@@ -1087,7 +1090,8 @@ class GPUBatchPearsonAnalyzer:
         self.start_timer('integrated_result_processing')
         
         correlations_np = correlations_tensor.cpu().numpy()
-        fields = ['open', 'high', 'low', 'close', 'volume']
+        # 统一仅保留三个字段
+        fields = ['open', 'close', 'volume']
         
         # 确保target_stock_codes有值
         if target_stock_codes is None:
@@ -1095,7 +1099,7 @@ class GPUBatchPearsonAnalyzer:
         
         # 支持多股票和单股票模式
         if self.is_multi_stock:
-            # 多股票模式: correlations_np形状为 [num_stocks, evaluation_days, num_historical_periods, 5]
+            # 多股票模式: correlations_np形状为 [num_stocks, evaluation_days, num_historical_periods, 3]
             num_stocks = correlations_np.shape[0]
             self.logger.info(f"处理多股票相关性结果: {num_stocks}只股票, {evaluation_days}个评测日期")
             
@@ -1106,12 +1110,11 @@ class GPUBatchPearsonAnalyzer:
             for stock_idx, stock_code in enumerate(target_stock_codes):
                 self.logger.info(f"处理股票 {stock_code} ({stock_idx + 1}/{num_stocks})")
                 
-                # 提取当前股票的相关性数据 [evaluation_days, num_historical_periods, 5]
+                # 提取当前股票的相关性数据 [evaluation_days, num_historical_periods, 3]
                 stock_correlations = correlations_np[stock_idx]
                 
-                # 计算平均相关系数 [evaluation_days, num_historical_periods]
-                # 只使用开盘价(0)、收盘价(3)和成交量(4)三个字段
-                avg_correlations = stock_correlations[:, :, [0, 3, 4]].mean(axis=2)
+                # 计算平均相关系数 [evaluation_days, num_historical_periods]（最后一维为3，直接取均值）
+                avg_correlations = stock_correlations.mean(axis=2)
                 
                 # 过滤掉相关性为1.0的结果（自相关）
                 self_correlation_threshold = 0.9999
@@ -1149,9 +1152,8 @@ class GPUBatchPearsonAnalyzer:
             
         else:
             # 单股票模式: 保持原有逻辑
-            # 计算平均相关系数 [evaluation_days, num_historical_periods]
-            # 只使用开盘价(0)、收盘价(3)和成交量(4)三个字段
-            avg_correlations = correlations_np[:, :, [0, 3, 4]].mean(axis=2)
+            # 计算平均相关系数 [evaluation_days, num_historical_periods]（最后一维为3，直接取均值）
+            avg_correlations = correlations_np.mean(axis=2)
             
             # 过滤掉相关性为1.0的结果（自相关）
             # 设置容差，避免浮点数精度问题
@@ -1255,8 +1257,8 @@ class GPUBatchPearsonAnalyzer:
         
         Args:
             batch_recent_data: 批量评测数据 
-                - 单股票模式: [evaluation_days, window_size, 5]
-                - 多股票模式: [num_stocks, evaluation_days, window_size, 5]
+                - 单股票模式: [evaluation_days, window_size, 3]
+                - 多股票模式: [num_stocks, evaluation_days, window_size, 3]
             historical_periods_data: 历史期间数据列表
             evaluation_dates: 评测日期列表
             stock_codes: 实际有效的股票代码列表（多股票模式下使用）
@@ -1271,18 +1273,18 @@ class GPUBatchPearsonAnalyzer:
         # 使用传参判断模式，不依赖矩阵形状
         is_multi_stock = self.is_multi_stock
         if is_multi_stock:
-            # 多股票模式: [num_stocks, evaluation_days, window_size, 5]
+            # 多股票模式: [num_stocks, evaluation_days, window_size, 3]
             num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
             self.logger.info(f"多股票模式: {num_stocks} 个股票")
         else:
-            # 单股票模式: 可能是 [evaluation_days, window_size, 5] 或已转换的 [1, evaluation_days, window_size, 5]
+            # 单股票模式: 可能是 [evaluation_days, window_size, 3] 或已转换的 [1, evaluation_days, window_size, 3]
             if len(batch_recent_data.shape) == 3:
                 evaluation_days, window_size, num_fields = batch_recent_data.shape
                 # 为了统一处理，将单股票数据扩展一个维度
-                batch_recent_data = batch_recent_data.unsqueeze(0)  # [1, evaluation_days, window_size, 5]
+                batch_recent_data = batch_recent_data.unsqueeze(0)  # [1, evaluation_days, window_size, 3]
                 self.logger.info(f"单股票模式，已转换为统一格式")
             else:
-                # 已经是4维格式 [1, evaluation_days, window_size, 5]
+                # 已经是4维格式 [1, evaluation_days, window_size, 3]
                 num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
                 self.logger.info(f"单股票模式（已为统一格式）")
             num_stocks = 1
@@ -1320,13 +1322,14 @@ class GPUBatchPearsonAnalyzer:
         # 子步骤2/3: 创建GPU历史数据张量
         self.start_timer('gpu_step2_tensor_creation')
         self.logger.info(f"  📊 [子步骤2/3] 创建GPU历史数据张量 - 开始")
-        self.logger.info(f"张量形状将为: [{len(historical_data_list)}, {window_size}, 5]")
+        expected_fields = historical_data_list[0].shape[1] if historical_data_list else 'n/a'
+        self.logger.info(f"张量形状将为: [{len(historical_data_list)}, {window_size}, {expected_fields}]")
         
         historical_tensor = torch.tensor(
             np.stack(historical_data_list, axis=0), 
             dtype=torch.float32, 
             device=self.device
-        )  # [num_historical_periods, window_size, 5]
+        )  # [num_historical_periods, window_size, 3]
         
         self.logger.info(f"GPU历史数据张量创建完成: {historical_tensor.shape}, 设备: {historical_tensor.device}")
         self.end_timer('gpu_step2_tensor_creation')
@@ -1371,16 +1374,16 @@ class GPUBatchPearsonAnalyzer:
         # 使用传参判断模式，不依赖矩阵形状
         is_multi_stock = self.is_multi_stock
         if is_multi_stock:
-            # 多股票模式: [num_stocks, evaluation_days, window_size, 5]
+            # 多股票模式: [num_stocks, evaluation_days, window_size, 3]
             num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
         else:
-            # 单股票模式: 可能是 [evaluation_days, window_size, 5] 或已转换的 [1, evaluation_days, window_size, 5]
+            # 单股票模式: 可能是 [evaluation_days, window_size, 3] 或已转换的 [1, evaluation_days, window_size, 3]
             if len(batch_recent_data.shape) == 3:
                 evaluation_days, window_size, num_fields = batch_recent_data.shape
                 # 为了统一处理，将单股票数据扩展一个维度
-                batch_recent_data = batch_recent_data.unsqueeze(0)  # [1, evaluation_days, window_size, 5]
+                batch_recent_data = batch_recent_data.unsqueeze(0)  # [1, evaluation_days, window_size, 3]
             else:
-                # 已经是4维格式 [1, evaluation_days, window_size, 5]
+                # 已经是4维格式 [1, evaluation_days, window_size, 3]
                 num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
             num_stocks = 1
         
@@ -1410,7 +1413,7 @@ class GPUBatchPearsonAnalyzer:
             np.stack(historical_data_list, axis=0), 
             dtype=torch.float32, 
             device=self.device
-        )  # [num_historical_periods, window_size, 5]
+        )  # [num_historical_periods, window_size, 3]
         self.end_timer('gpu_step2_tensor_creation')
         
         # GPU相关系数计算和结果处理（调用带子计时器的一体化实现）
@@ -1428,8 +1431,8 @@ class GPUBatchPearsonAnalyzer:
         GPU端一体化相关系数计算和结果处理 - 支持多股票
         
         Args:
-            batch_recent_data: [num_stocks, evaluation_days, window_size, 5]
-            historical_tensor: [num_historical_periods, window_size, 5]
+            batch_recent_data: [num_stocks, evaluation_days, window_size, 3]
+            historical_tensor: [num_historical_periods, window_size, 3]
             period_info_list: 历史期间信息列表
             evaluation_days: 评测日期数量
             evaluation_dates: 评测日期列表
@@ -1474,7 +1477,7 @@ class GPUBatchPearsonAnalyzer:
         
         for batch_idx, i in enumerate(range(0, evaluation_days, batch_size)):
             end_idx = min(i + batch_size, evaluation_days)
-            current_batch = batch_recent_data[:, i:end_idx]  # [num_stocks, batch_size, window_size, 5]
+            current_batch = batch_recent_data[:, i:end_idx]  # [num_stocks, batch_size, window_size, 3]
             
             self.logger.debug(f"GPU处理批次 {batch_idx + 1}/{total_batches}: 评测日期 {i+1}-{end_idx} (形状: {current_batch.shape})")
             
@@ -1483,10 +1486,11 @@ class GPUBatchPearsonAnalyzer:
             self.start_timer('gpu_step3_correlation_matrix', parent_timer='gpu_step3_integrated_correlation_processing')
             batch_correlations = self._compute_correlation_matrix_multi_stock(current_batch, historical_tensor)
             self.end_timer('gpu_step3_correlation_matrix')
-            # batch_correlations: [num_stocks, batch_size, num_historical_periods, 5]
+            # batch_correlations: [num_stocks, batch_size, num_historical_periods, 3]
             
-            # GPU端计算平均相关系数和筛选
+            # GPU端计算平均相关系数和筛选（3字段版本：open/close/volume）
             self.start_timer('gpu_step3_correlation_filtering', parent_timer='gpu_step3_integrated_correlation_processing')
+            # 直接在字段维度求均值（最后一维为3）
             batch_avg_correlations = batch_correlations.mean(dim=3)  # [num_stocks, batch_size, num_historical_periods]
             
             # GPU端过滤自相关（相关性 >= 0.9999）
@@ -1514,11 +1518,13 @@ class GPUBatchPearsonAnalyzer:
                 except Exception as e:
                     self.logger.debug(f"🔧 [筛选过程] 统计输出失败: {str(e)}")
             
-            # 🔍 Debug模式：为第一个评测日期打印详细信息
-            if self.debug and batch_idx == 0 and evaluation_dates and len(evaluation_dates) > 0:
+            # 🔍 Debug模式：为每个批次的第一个评测日期打印详细信息
+            if self.debug and evaluation_dates and len(evaluation_dates) > 0:
                 self._log_first_evaluation_debug_info(
-                    batch_avg_correlations_filtered, batch_high_corr_mask, 
-                    period_info_list, evaluation_dates, current_batch, historical_tensor, i, is_multi_stock
+                    batch_avg_correlations_filtered, batch_high_corr_mask,
+                    period_info_list, evaluation_dates, current_batch, historical_tensor,
+                    batch_start_idx=i, is_multi_stock=is_multi_stock,
+                    batch_index=batch_idx, total_batches=total_batches
                 )
             
             # 存储批次结果（仍在GPU上）
@@ -1955,12 +1961,12 @@ class GPUBatchPearsonAnalyzer:
         打印前10条评测数据的详细信息，包括对比数组
         
         Args:
-            correlations_np: 详细相关系数数组 [evaluation_days, num_historical_periods, 5]
+        correlations_np: 详细相关系数数组 [evaluation_days, num_historical_periods, 3]
             avg_correlations_filtered: 过滤后的平均相关系数 [evaluation_days, num_historical_periods]
             period_info_list: 历史期间信息列表
             high_corr_mask: 高相关性掩码
             fields: 字段名称列表
-            batch_recent_data: 批量评测数据 [evaluation_days, window_size, 5]
+            batch_recent_data: 批量评测数据 [evaluation_days, window_size, 3]
             historical_data_list: 历史期间数据列表
             evaluation_dates: 评测日期列表
         """
@@ -2028,7 +2034,7 @@ class GPUBatchPearsonAnalyzer:
                 hist_idx = data['hist_idx']
                 
                 # 获取评测数据（统一使用CPU上的torch张量）
-                recent_data = batch_recent_data[eval_idx]  # [window_size, 5]
+                recent_data = batch_recent_data[eval_idx]  # [window_size, 3]
                 if isinstance(recent_data, torch.Tensor):
                     recent_data = recent_data.detach().cpu()
                 else:
@@ -2036,7 +2042,7 @@ class GPUBatchPearsonAnalyzer:
                 
                 # 获取历史数据
                 if hist_idx < len(historical_data_list):
-                    historical_data = historical_data_list[hist_idx]  # [window_size, 5]
+                    historical_data = historical_data_list[hist_idx]  # [window_size, 3]
                     if isinstance(historical_data, torch.Tensor):
                         historical_data = historical_data.detach().cpu()
                     else:
@@ -2069,8 +2075,9 @@ class GPUBatchPearsonAnalyzer:
         
         self.logger.info("=" * 80)
     
-    def _log_first_evaluation_debug_info(self, batch_avg_correlations_filtered, batch_high_corr_mask, 
-                                        period_info_list, evaluation_dates, current_batch, historical_tensor, batch_start_idx, is_multi_stock):
+    def _log_first_evaluation_debug_info(self, batch_avg_correlations_filtered, batch_high_corr_mask,
+                                        period_info_list, evaluation_dates, current_batch, historical_tensor,
+                                        batch_start_idx, is_multi_stock, batch_index=0, total_batches=1):
         """
         为第一个评测日期打印详细的debug信息
         
@@ -2079,8 +2086,8 @@ class GPUBatchPearsonAnalyzer:
             batch_high_corr_mask: 高相关性掩码 [num_stocks, batch_size, num_historical_periods] 或 [batch_size, num_historical_periods]
             period_info_list: 历史期间信息列表
             evaluation_dates: 评测日期列表
-            current_batch: 当前批次的评测数据 [num_stocks, batch_size, window_size, 5] 或 [batch_size, window_size, 5]
-            historical_tensor: 历史数据张量 [num_historical_periods, window_size, 5]
+            current_batch: 当前批次的评测数据 [num_stocks, batch_size, window_size, 3] 或 [batch_size, window_size, 3]
+            historical_tensor: 历史数据张量 [num_historical_periods, window_size, 3]
             batch_start_idx: 当前批次的起始索引
             is_multi_stock: 是否为多股票模式
         """
@@ -2091,12 +2098,12 @@ class GPUBatchPearsonAnalyzer:
             # 多股票模式：取第一个股票的第一个评测日期
             first_eval_correlations = batch_avg_correlations_filtered[0, 0]  # [num_historical_periods]
             first_eval_high_corr_mask = batch_high_corr_mask[0, 0]  # [num_historical_periods]
-            first_eval_data = current_batch[0, 0]  # [window_size, 5]
+            first_eval_data = current_batch[0, 0]  # [window_size, 3]
         else:
             # 单股票模式
             first_eval_correlations = batch_avg_correlations_filtered[0]  # [num_historical_periods]
             first_eval_high_corr_mask = batch_high_corr_mask[0]  # [num_historical_periods]
-            first_eval_data = current_batch[0]  # [window_size, 5]
+            first_eval_data = current_batch[0]  # [window_size, 3]
         
         # 统一使用torch处理，避免引入不同的数值库
         first_eval_correlations = first_eval_correlations.detach().cpu()
@@ -2108,12 +2115,134 @@ class GPUBatchPearsonAnalyzer:
         high_corr_indices = high_corr_indices_tensor.tolist()
         
         self.logger.info("🔍" + "=" * 80)
-        self.logger.info(f"🔍 DEBUG模式 - 第一个评测日期详细信息")
+        self.logger.info(f"🔍 DEBUG模式 - 批次 {batch_index + 1}/{total_batches} 第一个评测日期详细信息")
         self.logger.info("🔍" + "=" * 80)
         self.logger.info(f"🔍 评测日期: {first_eval_date.strftime('%Y-%m-%d')}")
         self.logger.info(f"🔍 评测数据窗口: {first_eval_date - pd.Timedelta(days=self.window_size-1)} 到 {first_eval_date}")
         self.logger.info(f"🔍 超过阈值的对比期间数量: {len(high_corr_indices)}")
-        
+
+        # 无条件打印：首评测单位的完整窗口原始输入数据（不受阈值影响）
+        try:
+            self.logger.info("🔍 首评测单位完整窗口数据（不受阈值影响）:")
+            eval_fields = ['open', 'close', 'volume']
+            for f_idx, f_name in enumerate(eval_fields):
+                self.logger.info(f"🔍   {f_name}: {first_eval_data[:, f_idx].tolist()}")
+        except Exception:
+            pass
+
+        # 最终结果汇总（针对该评测单元）
+        try:
+            nonzero_mask = first_eval_correlations > 0
+            max_corr = first_eval_correlations.max().item()
+            mean_corr = first_eval_correlations[nonzero_mask].mean().item() if nonzero_mask.any() else 0.0
+            self.logger.info(f"🔍 最终结果汇总: 最高相关={max_corr:.6f}, 非零均值={mean_corr:.6f}")
+        except Exception:
+            pass
+
+        # 无条件打印：按最小索引选择的首个历史期间（不受阈值影响）
+        try:
+            top_idx_all = 0
+            period_info_top = period_info_list[top_idx_all]
+            correlation_top = first_eval_correlations[top_idx_all].item()
+            historical_data_top = historical_tensor[top_idx_all].detach().cpu()  # [window_size, 3]
+
+            self.logger.info("🔍 不受阈值影响的首个历史期间（按最小索引）:")
+            self.logger.info(f"🔍   历史期间 {top_idx_all}: {period_info_top['start_date']} 到 {period_info_top['end_date']}")
+            self.logger.info(f"🔍   来源股票: {period_info_top['stock_code']}")
+            self.logger.info(f"🔍   平均相关系数: {correlation_top:.6f}")
+
+            fields = ['open', 'close', 'volume']
+            self.logger.info(f"🔍   源数据列对比 (前3天和后3天):")
+            for field_idx, field in enumerate(fields):
+                eval_field_data = first_eval_data[:, field_idx]
+                hist_field_data = historical_data_top[:, field_idx]
+
+                x = eval_field_data - eval_field_data.mean()
+                y = hist_field_data - hist_field_data.mean()
+                denom = (x.norm() * y.norm()).clamp(min=1e-8)
+                field_correlation = (x.dot(y) / denom).item()
+
+                self.logger.info(f"🔍     {field} (相关系数: {field_correlation:.6f}):")
+                self.logger.info(f"🔍       评测数据前3天: {eval_field_data[:3].tolist()}")
+                self.logger.info(f"🔍       历史数据前3天: {hist_field_data[:3].tolist()}")
+                self.logger.info(f"🔍       评测数据后3天: {eval_field_data[-3:].tolist()}")
+                self.logger.info(f"🔍       历史数据后3天: {hist_field_data[-3:].tolist()}")
+
+            # 打印完整窗口数据以便复现
+            self.logger.info("🔍   完整窗口数据 (首个期间):")
+            for field_idx, field in enumerate(fields):
+                self.logger.info(f"🔍     {field} - 评测完整窗口: {first_eval_data[:, field_idx].tolist()}")
+                self.logger.info(f"🔍     {field} - 历史完整窗口: {historical_data_top[:, field_idx].tolist()}")
+        except Exception:
+            pass
+
+        # 无条件打印：各字段（open/close/volume）相关性最大对应的历史期间（输出细节与“首个期间”一致）
+        try:
+            field_indices = {'open': 0, 'close': 1, 'volume': 2}
+            for field_name, field_idx in field_indices.items():
+                eval_field = first_eval_data[:, field_idx]
+                # 取出所有历史期间该字段的数据 [num_historical_periods, window_size]
+                hist_fields = historical_tensor[:, :, field_idx].detach().cpu()
+
+                # 计算字段级相关（与日志中展示的计算方式一致）
+                eval_center = eval_field - eval_field.mean()
+                hist_center = hist_fields - hist_fields.mean(dim=1, keepdim=True)
+                numer = torch.matmul(hist_center, eval_center)
+                denom = (hist_center.norm(dim=1) * eval_center.norm()).clamp(min=1e-8)
+                corr_vec = numer / denom
+
+                eps = 1e-6
+                valid_indices = torch.nonzero(corr_vec < 1.0 - eps, as_tuple=False).view(-1)
+                if valid_indices.numel() > 0:
+                    local_argmax = torch.argmax(corr_vec[valid_indices]).item()
+                    best_idx = int(valid_indices[local_argmax].item())
+                    best_corr = float(corr_vec[best_idx].item())
+                else:
+                    # 若所有值均为1或非常接近1，则选择总体最大，但打印时进行轻微下调避免显示为1
+                    best_idx = int(torch.argmax(corr_vec).item())
+                    best_corr = float(min(corr_vec[best_idx].item(), 1.0 - eps))
+
+                best_info = period_info_list[best_idx]
+                hist_best_field = hist_fields[best_idx]
+
+                self.logger.info(f"🔍 字段 {field_name} 最大相关期间（按字段相关最大）:")
+                self.logger.info(f"🔍   历史期间 {best_idx}: {best_info['start_date']} 到 {best_info['end_date']}")
+                self.logger.info(f"🔍   来源股票: {best_info['stock_code']}")
+                self.logger.info(f"🔍   字段相关系数: {best_corr:.6f}")
+                try:
+                    avg_corr_period = float(first_eval_correlations[best_idx].item())
+                    self.logger.info(f"🔍   该期间平均相关系数(全字段): {avg_corr_period:.6f}")
+                except Exception:
+                    pass
+
+                # 与“首个期间”保持一致：对所有字段进行对比与完整窗口打印
+                fields_all = ['open', 'close', 'volume']
+                hist_all_fields = historical_tensor[best_idx].detach().cpu()  # [window_size, 3]
+
+                self.logger.info(f"🔍   源数据列对比 (前3天和后3天):")
+                for f_idx, f_name in enumerate(fields_all):
+                    eval_field_data = first_eval_data[:, f_idx]
+                    hist_field_data = hist_all_fields[:, f_idx]
+
+                    x = eval_field_data - eval_field_data.mean()
+                    y = hist_field_data - hist_field_data.mean()
+                    denom_xy = (x.norm() * y.norm()).clamp(min=1e-8)
+                    field_corr = (x.dot(y) / denom_xy).item()
+
+                    self.logger.info(f"🔍     {f_name} (相关系数: {field_corr:.6f}):")
+                    self.logger.info(f"🔍       评测数据前3天: {eval_field_data[:3].tolist()}")
+                    self.logger.info(f"🔍       历史数据前3天: {hist_field_data[:3].tolist()}")
+                    self.logger.info(f"🔍       评测数据后3天: {eval_field_data[-3:].tolist()}")
+                    self.logger.info(f"🔍       历史数据后3天: {hist_field_data[-3:].tolist()}")
+
+                # 打印完整窗口数据以便复现（所有字段）
+                self.logger.info("🔍   完整窗口数据 (该期间):")
+                for f_idx, f_name in enumerate(fields_all):
+                    self.logger.info(f"🔍     {f_name} - 评测完整窗口: {first_eval_data[:, f_idx].tolist()}")
+                    self.logger.info(f"🔍     {f_name} - 历史完整窗口: {hist_all_fields[:, f_idx].tolist()}")
+        except Exception:
+            pass
+
         if len(high_corr_indices) > 0:
             self.logger.info("🔍 超过阈值的对比日期和相关系数:")
             
@@ -2131,10 +2260,10 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.info(f"🔍       平均相关系数: {correlation:.6f}")
                 
                 # 获取对应的历史数据
-                historical_data = historical_tensor[hist_idx].detach().cpu()  # [window_size, 5]
+                historical_data = historical_tensor[hist_idx].detach().cpu()  # [window_size, 3]
                 
-                # 打印源数据列的详细对比
-                fields = ['open', 'high', 'low', 'close', 'volume']
+                # 打印源数据列的详细对比（仅3列）
+                fields = ['open', 'close', 'volume']
                 self.logger.info(f"🔍       源数据列对比 (前3天和后3天):")
                 
                 for field_idx, field in enumerate(fields):
@@ -2152,6 +2281,15 @@ class GPUBatchPearsonAnalyzer:
                     self.logger.info(f"🔍           历史数据前3天: {hist_field_data[:3].tolist()}")
                     self.logger.info(f"🔍           评测数据后3天: {eval_field_data[-3:].tolist()}")
                     self.logger.info(f"🔍           历史数据后3天: {hist_field_data[-3:].tolist()}")
+
+                # 额外：对排名第一的期间打印完整窗口数据，避免日志过载仅限Top1
+                if rank == 1:
+                    self.logger.info("🔍       完整窗口数据 (Top1 期间):")
+                    for field_idx, field in enumerate(fields):
+                        eval_field_data = first_eval_data[:, field_idx]
+                        hist_field_data = historical_data[:, field_idx]
+                        self.logger.info(f"🔍         {field} - 评测完整窗口: {eval_field_data.tolist()}")
+                        self.logger.info(f"🔍         {field} - 历史完整窗口: {hist_field_data.tolist()}")
                 
                 self.logger.info("🔍" + "-" * 60)
             
@@ -2162,7 +2300,8 @@ class GPUBatchPearsonAnalyzer:
         
         # 打印评测数据的统计信息
         self.logger.info("🔍 评测数据统计信息:")
-        fields = ['open', 'high', 'low', 'close', 'volume']
+        # 与计算保持一致，仅保留三个字段
+        fields = ['open', 'close', 'volume']
         for field_idx, field in enumerate(fields):
             field_data = first_eval_data[:, field_idx]
             mean_v = field_data.mean().item()
@@ -2450,10 +2589,13 @@ class GPUBatchPearsonAnalyzer:
         
         # 💾 基于实际历史期间数据量进行GPU内存预估
         self.logger.info("💾 基于实际数据量进行GPU内存预估...")
+        # 根据实际评测数据的字段数进行估算（3字段：open/close/volume）
+        actual_num_fields = int(batch_recent_data.shape[-1])
         estimation_result = self.estimate_memory_requirement(
             evaluation_days=self.evaluation_days,
             num_historical_periods=len(self.historical_periods_data),
-            window_size=self.window_size
+            window_size=self.window_size,
+            num_fields=actual_num_fields
         )
         estimated_memory = estimation_result['total_estimated_gb']
         self.logger.info(f"📊 实际历史期间数据量: {len(self.historical_periods_data):,}")
@@ -2620,8 +2762,8 @@ class GPUBatchPearsonAnalyzer:
         total_invalid_periods = 0
         processed_stocks = 0
         
-        # 定义需要的字段
-        fields = ['open', 'high', 'low', 'close', 'volume']
+        # 定义需要的字段（仅保留3列）
+        fields = ['open', 'close', 'volume']
         
         for stock_code, stock_data in self.loaded_stocks_data.items():
             # 使用所有可用数据，不进行日期截断
@@ -2644,7 +2786,7 @@ class GPUBatchPearsonAnalyzer:
                     start_date = period_data.index[0]
                     end_date = period_data.index[-1]
                     
-                    # 直接提取并预处理数据
+                    # 直接提取并预处理数据（3列）
                     historical_values = period_data[fields].values
                     
                     # 存储预处理后的数据
@@ -2669,8 +2811,8 @@ class GPUBatchPearsonAnalyzer:
         if not self.loaded_stocks_data:
             return []
         
-        # 定义需要的字段
-        fields = ['open', 'high', 'low', 'close', 'volume']
+        # 定义需要的字段（仅保留3列）
+        fields = ['open', 'close', 'volume']
         
         # 准备多进程任务参数
         tasks = []
@@ -2731,8 +2873,8 @@ class GPUBatchPearsonAnalyzer:
             self.logger.warning(f"目标股票 {self.stock_code} 数据为空，无法收集历史数据")
             return historical_data
         
-        # 定义需要的字段
-        fields = ['open', 'high', 'low', 'close', 'volume']
+        # 定义需要的字段（仅保留3列）
+        fields = ['open', 'close', 'volume']
         
         # 使用目标股票的所有可用数据
         available_data = self.data
@@ -2753,7 +2895,7 @@ class GPUBatchPearsonAnalyzer:
                 start_date = period_data.index[0]
                 end_date = period_data.index[-1]
                 
-                # 直接提取并预处理数据
+                # 直接提取并预处理数据（3列）
                 historical_values = period_data[fields].values
                 
                 # 存储预处理后的数据
@@ -2812,7 +2954,7 @@ class GPUBatchPearsonAnalyzer:
         else:
             self.logger.info(f"🔍 CPU模式，跳过GPU显存监控 [{stage_name}]")
     
-    def estimate_memory_requirement(self, evaluation_days, num_historical_periods, window_size, num_fields=5):
+    def estimate_memory_requirement(self, evaluation_days, num_historical_periods, window_size, num_fields=3):
         """
         精确估算GPU显存需求（GB）
         基于实际内存使用模式和PyTorch内存池机制
@@ -2822,7 +2964,7 @@ class GPUBatchPearsonAnalyzer:
             evaluation_days: 评测日期数量
             num_historical_periods: 历史期间数量
             window_size: 窗口大小
-            num_fields: 字段数量（默认5：开高低收量）
+            num_fields: 字段数量（默认3：open/close/volume）
             
         Returns:
             dict: 包含详细内存估算的字典
@@ -2878,9 +3020,9 @@ class GPUBatchPearsonAnalyzer:
         
         # 4. 关键修正：GPU计算过程中的真实内存峰值
         # 在_compute_correlation_matrix中，广播操作会创建巨大的中间张量：
-        # - recent_expanded.unsqueeze(1): [batch_size, 1, window_size, 5]
-        # - historical_expanded.unsqueeze(0): [1, num_historical_periods, window_size, 5]  
-        # - 广播计算时，PyTorch会创建完整的 [batch_size, num_historical_periods, window_size, 5] 张量
+        # - recent_expanded.unsqueeze(1): [batch_size, 1, window_size, 3]
+        # - historical_expanded.unsqueeze(0): [1, num_historical_periods, window_size, 3]  
+        # - 广播计算时，PyTorch会创建完整的 [batch_size, num_historical_periods, window_size, 3] 张量
         
         # 真实的广播内存消耗（这是被严重低估的部分）- 考虑多股票模式
         full_broadcast_tensor_bytes = num_stocks * batch_size * num_historical_periods * window_size * num_fields * bytes_per_float32
@@ -3108,14 +3250,14 @@ class GPUBatchPearsonAnalyzer:
                         batch_date_indices.append(date_idx)
                         batch_dates_list.append(date)
                 
-                # 提取批次数据：[batch_size, window_size, 5]
-                # batch_recent_data: [num_stocks, evaluation_days, window_size, 5]
+                # 提取批次数据：[batch_size, window_size, 3]
+                # batch_recent_data: [num_stocks, evaluation_days, window_size, 3]
                 batch_data_list = []
                 for stock_idx, date_idx in zip(batch_stock_indices, batch_date_indices):
                     batch_data_list.append(batch_recent_data[stock_idx, date_idx, :, :])
                 
                 # 堆叠成批次张量
-                batch_tensor = torch.stack(batch_data_list, dim=0)  # [batch_size, window_size, 5]
+                batch_tensor = torch.stack(batch_data_list, dim=0)  # [batch_size, window_size, 3]
                 
                 # 监控GPU内存
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算开始")
@@ -3243,15 +3385,15 @@ class GPUBatchPearsonAnalyzer:
                 # 提取当前批次的数据 (batch_recent_data 是 PyTorch 张量)
                 # 使用传参判断模式，不依赖矩阵形状
                 if self.is_multi_stock:
-                    # 多股票模式: [num_stocks, evaluation_days, window_size, 5]
+                    # 多股票模式: [num_stocks, evaluation_days, window_size, 3]
                     batch_recent_subset = batch_recent_data[:, start_idx:end_idx]
                 else:
-                    # 单股票模式: 可能是 [1, evaluation_days, window_size, 5] 或 [evaluation_days, window_size, 5]
+                    # 单股票模式: 可能是 [1, evaluation_days, window_size, 3] 或 [evaluation_days, window_size, 3]
                     if len(batch_recent_data.shape) == 4:
-                        # 已转换为统一格式 [1, evaluation_days, window_size, 5]
+                        # 已转换为统一格式 [1, evaluation_days, window_size, 3]
                         batch_recent_subset = batch_recent_data[:, start_idx:end_idx]
                     else:
-                        # 原始单股票格式 [evaluation_days, window_size, 5]
+                        # 原始单股票格式 [evaluation_days, window_size, 3]
                         batch_recent_subset = batch_recent_data[start_idx:end_idx]
                 
                 # 监控GPU内存
