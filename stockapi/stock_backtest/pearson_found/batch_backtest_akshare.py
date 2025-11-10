@@ -8,23 +8,24 @@ from pathlib import Path
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "批量运行 pearson_analyzer_gpu.py：以 30 组×30 天（共 900 天）为窗口，"
+            "批量运行 pearson_analyzer_gpu_3.py：以 30 组×30 天（共 900 天）为窗口，"
             "通过 Akshare 获取交易日，逐日执行提测命令。"
-        )
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
     # 以用户示例为默认值，可在命令行覆盖
     parser.add_argument(
-        "--stock_code", default="industry", help="传递给 pearson_analyzer_gpu.py 的 --stock_code"
+        "--stock_code", default="industry", help="传递给 pearson_analyzer_gpu_3.py 的 --stock_code"
     )
     parser.add_argument(
-        "--comparison_mode", default="all", help="传递给 pearson_analyzer_gpu.py 的 --comparison_mode"
+        "--comparison_mode", default="all", help="传递给 pearson_analyzer_gpu_3.py 的 --comparison_mode"
     )
     parser.add_argument(
-        "--csv_filename", default="test.csv", help="传递给 pearson_analyzer_gpu.py 的 --csv_filename"
+        "--csv_filename", default="test.csv", help="传递给 pearson_analyzer_gpu_3.py 的 --csv_filename"
     )
     parser.add_argument(
-        "--evaluation_days", type=int, default=30, help="传递给 pearson_analyzer_gpu.py 的 --evaluation_days"
+        "--evaluation_days", type=int, default=30, help="传递给 pearson_analyzer_gpu_3.py 的 --evaluation_days"
     )
 
     # 批量控制参数
@@ -36,7 +37,7 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--groups", type=int, default=30, help="分组数量（默认 30 组）"
+        "--groups", type=int, default=20, help="分组数量（默认 20 组）"
     )
     parser.add_argument(
         "--step_trading_days", type=int, default=30, help="每组锚点间相隔的交易日数量（默认 30 个交易日）"
@@ -137,7 +138,7 @@ def run_backtests_for_anchors(
     script_path: Path,
     dry_run: bool,
 ):
-    """按锚点日期（每隔固定交易日）调用 pearson_analyzer_gpu.py。"""
+    """按锚点日期（每隔固定交易日）调用 pearson_analyzer_gpu_3.py。"""
     import time
 
     for d in anchors:
@@ -183,8 +184,8 @@ def main():
     # 基于交易日历构造锚点（每次向前 step_trading_days 个交易日）
     anchors = build_anchor_trading_dates(anchor_date, args.groups, args.step_trading_days)
 
-    # pearson_analyzer_gpu.py 路径（与本脚本同目录）
-    script_path = Path(__file__).parent / "pearson_analyzer_gpu.py"
+    # pearson_analyzer_gpu_3.py 路径（与本脚本同目录）
+    script_path = Path(__file__).parent / "pearson_analyzer_gpu_3.py"
     if not script_path.exists():
         raise SystemExit(f"未找到 {script_path}，请确认脚本位置正确。")
 

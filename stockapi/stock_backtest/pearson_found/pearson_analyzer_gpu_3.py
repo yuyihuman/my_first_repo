@@ -103,7 +103,7 @@ class GPUBatchPearsonAnalyzer:
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
                  batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01',
-                 num_processes=None, evaluation_batch_size=15,
+                 num_processes=None, evaluation_batch_size=30,
                  max_prediction_stats_count=100):
         """
         初始化GPU批量评测Pearson相关性分析器
@@ -3985,7 +3985,7 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
                                          window_size=15, threshold=0.85, comparison_mode='default', 
                                          comparison_stocks=None, debug=False, csv_filename=None, 
                                          use_gpu=True, batch_size=1000, earliest_date='2020-01-01',
-                                         num_processes=None, evaluation_batch_size=20):
+                                         num_processes=None, evaluation_batch_size=30):
     """
     GPU批量评测Pearson相关性分析的便捷函数
     
@@ -4057,10 +4057,10 @@ if __name__ == "__main__":
                        help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2020-01-01)')
     parser.add_argument('--num_processes', type=int, default=None,
                        help='多进程数量，None表示自动检测（默认为CPU核心数-1）')
-    parser.add_argument('--evaluation_batch_size', type=int, default=15,
+    parser.add_argument('--evaluation_batch_size', type=int, default=30,
                         help='每批次处理的计算单元数量，用于控制GPU内存使用。'
                              '单股票模式: 直接表示评测日期数量 (如evaluation_days=100, batch_size=15, 分7批处理)。'
-                             '多股票模式: 表示总计算单元数 (如100股票×15评测日期=1500单元, batch_size=15, 分100批处理) (默认: 15)')
+                             '多股票模式: 表示总计算单元数 (如100股票×15评测日期=1500单元, batch_size=15, 分100批处理) (默认: 30)')
 
     args = parser.parse_args()
     
@@ -4111,8 +4111,8 @@ if __name__ == "__main__":
         print(f"评测了 {result['evaluation_days']} 个日期")
         print(f"总高相关性期间: {result['batch_results']['summary']['total_high_correlations']}")
         print(f"平均每日高相关数量: {result['batch_results']['summary']['avg_high_correlations_per_day']:.2f}")
-        print(f"整体平均相关系数: {result['batch_results']['summary']['overall_avg_correlation']:.4f}")
-        
+        # 移除整体平均相关系数的终端输出
+
         # 如果是多股票，显示每个股票的统计信息
         if len(stock_codes) > 1 and 'stock_summary' in result['batch_results']:
             print("\n各股票统计信息:")
