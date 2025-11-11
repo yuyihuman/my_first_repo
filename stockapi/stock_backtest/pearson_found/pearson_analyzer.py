@@ -1515,8 +1515,8 @@ def main():
     parser.add_argument('--debug', action='store_true', help='开启debug模式（会影响性能）')
     
     # 跨股票对比参数
-    parser.add_argument('--comparison_mode', choices=['top10', 'hs300', 'custom', 'self_only', 'all'],
-                        default='top10', help='对比模式: top10(市值前10), hs300(沪深300), custom(自定义), self_only(仅自身历史), all(全部A股) (默认: top10)')
+    parser.add_argument('--comparison_mode', choices=['top10', 'hs300', 'zz500', 'custom', 'self_only', 'all'],
+                        default='top10', help='对比模式: top10(市值前10), hs300(沪深300), zz500(中证500), custom(自定义), self_only(仅自身历史), all(全部A股) (默认: top10)')
     parser.add_argument('--comparison_stocks', nargs='*', 
                        help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--no_comparison', action='store_true', 
