@@ -1145,10 +1145,8 @@ class GPUBatchPearsonAnalyzer:
                     'max_correlation': avg_correlations_filtered.max()
                 }
             
-            # 汇总多股票结果
+            # 汇总多股票结果（GPU已产出均值与掩码，本处仅统计数量）
             total_high_corr = sum(result['high_corr_count'] for result in all_stock_results.values())
-            overall_avg_corr = np.mean([result['avg_correlation'] for result in all_stock_results.values() if result['avg_correlation'] > 0])
-            overall_max_corr = max([result['max_correlation'] for result in all_stock_results.values()])
             
         else:
             # 单股票模式: 保持原有逻辑
@@ -1179,8 +1177,6 @@ class GPUBatchPearsonAnalyzer:
             )
             
             total_high_corr = high_corr_mask.sum()
-            overall_avg_corr = avg_correlations_filtered[avg_correlations_filtered > 0].mean() if (avg_correlations_filtered > 0).any() else 0.0
-            overall_max_corr = avg_correlations_filtered.max()
         
         # Debug模式下打印前10条评测数据的详细信息
         if self.debug and not self.is_multi_stock:
@@ -2677,7 +2673,7 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"平均每日高相关数量: {final_result['batch_results']['summary']['avg_high_correlations_per_day']:.2f}")
         self.logger.info(f"最大每日高相关数量: {final_result['batch_results']['summary']['max_high_correlations_per_day']}")
         if final_result['batch_results']['summary']['overall_avg_correlation'] > 0:
-            self.logger.info(f"整体平均相关系数: {final_result['batch_results']['summary']['overall_avg_correlation']:.4f}")
+            self.logger.info(f"整体平均相关系数(GPU派生): {final_result['batch_results']['summary']['overall_avg_correlation']:.4f}")
         
         # 查找并打印相关系数最大的条目
         max_correlation = 0
@@ -3458,6 +3454,7 @@ class GPUBatchPearsonAnalyzer:
             
             if all_correlations:
                 merged_results['batch_results']['summary']['overall_avg_correlation'] = np.mean(all_correlations)
+                self.logger.info(f"整体平均相关系数(来源: CPU聚合): {merged_results['batch_results']['summary']['overall_avg_correlation']:.4f}")
         
         self.logger.info("🔄 分批处理完成！")
         if self.is_multi_stock:
@@ -3549,6 +3546,7 @@ class GPUBatchPearsonAnalyzer:
             
             if all_correlations:
                 merged_result['batch_results']['summary']['overall_avg_correlation'] = np.mean(all_correlations)
+                self.logger.info(f"整体平均相关系数(来源: CPU聚合): {merged_result['batch_results']['summary']['overall_avg_correlation']:.4f}")
         
         return merged_result
     
@@ -4117,6 +4115,6 @@ if __name__ == "__main__":
         if len(stock_codes) > 1 and 'stock_summary' in result['batch_results']:
             print("\n各股票统计信息:")
             for stock_code, stats in result['batch_results']['stock_summary'].items():
-                print(f"  {stock_code}: 高相关期间={stats['high_correlations']}, 平均相关性={stats['avg_correlation']:.4f}")
+                print(f"  {stock_code}: 高相关期间={stats['high_correlations']}, 平均相关性(GPU)={stats['avg_correlation']:.4f}")
     else:
         print("所有股票分析失败")
