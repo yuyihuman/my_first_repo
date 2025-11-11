@@ -56,7 +56,7 @@ def get_comparison_stocks(mode='top10'):
     获取对比股票列表
     
     Args:
-        mode: 对比模式 ('top10', 'industry', 'custom', 'self_only', 'all')
+        mode: 对比模式 ('top10', 'hs300', 'custom', 'self_only', 'all')
     
     Returns:
         list: 股票代码列表
@@ -69,9 +69,8 @@ def get_comparison_stocks(mode='top10'):
             '600000', '600036', '600519', '600887', '601169'
         ]
     
-    elif mode == 'industry':
-        # 根据行业分类返回股票（这里需要根据具体行业实现）
-        # 暂时返回银行股作为示例
+    elif mode == 'hs300':
+        # 沪深300成分股（示例列表，后续可替换为实时成分）
         return [
             '000001', '000002', '000063', '000100', '000157',
             '000301', '000338', '000408', '000425', '000538',

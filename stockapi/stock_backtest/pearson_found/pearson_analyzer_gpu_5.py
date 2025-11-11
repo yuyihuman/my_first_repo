@@ -4029,14 +4029,14 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='GPU批量评测Pearson相关性分析')
-    parser.add_argument('--stock_code', required=True, help='股票代码或模式名称。支持: 1)单个股票代码(000001) 2)多个逗号分隔(000001,000002) 3)预定义模式(top10/industry/all)')
+    parser.add_argument('--stock_code', required=True, help='股票代码或模式名称。支持: 1)单个股票代码(000001) 2)多个逗号分隔(000001,000002) 3)预定义模式(top10/hs300/all)')
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
     parser.add_argument('--threshold', type=float, default=0.85, help='相关系数阈值 (默认: 0.85)')
     parser.add_argument('--comparison_mode', type=str, default='top10', 
-                       choices=['top10', 'industry', 'custom', 'self_only', 'all'],
-                       help='对比模式: top10(市值前10), industry(行业股票), custom(自定义), self_only(仅自身历史), all(全部A股) (默认: top10)')
+                       choices=['top10', 'hs300', 'custom', 'self_only', 'all'],
+                       help='对比模式: top10(市值前10), hs300(沪深300), custom(自定义), self_only(仅自身历史), all(全部A股) (默认: top10)')
     parser.add_argument('--comparison_stocks', nargs='*', 
                        help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
@@ -4060,7 +4060,7 @@ if __name__ == "__main__":
     input_value = args.stock_code.strip()
     
     # 检查是否为预定义的模式名称
-    predefined_modes = ['top10', 'industry', 'all']
+    predefined_modes = ['top10', 'hs300', 'all']
     if input_value in predefined_modes:
         # 使用模式获取股票列表
         from stock_config import get_comparison_stocks, get_all_stocks_list

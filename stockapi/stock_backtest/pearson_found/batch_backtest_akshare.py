@@ -16,7 +16,7 @@ def parse_args():
 
     # 以用户示例为默认值，可在命令行覆盖
     parser.add_argument(
-        "--stock_code", default="industry", help="传递给 pearson_analyzer_gpu_3.py 的 --stock_code"
+        "--stock_code", default="hs300", help="传递给 pearson_analyzer_gpu_3.py 的 --stock_code"
     )
     parser.add_argument(
         "--comparison_mode", default="all", help="传递给 pearson_analyzer_gpu_3.py 的 --comparison_mode"
