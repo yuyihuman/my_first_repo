@@ -2600,11 +2600,12 @@ class GPUBatchPearsonAnalyzer:
         
         # 🔄 检查是否需要分批处理
         if self.is_multi_stock:
-            # 多股票模式：按计算单元（股票数 × 评测日期数）分批
-            total_computation_units = len(self.stock_codes) * len(valid_dates)
+            # 多股票模式：按实际有效股票数 × 评测日期数 分批
+            num_valid_stocks = int(batch_recent_data.shape[0])
+            total_computation_units = num_valid_stocks * len(valid_dates)
             total_batches = (total_computation_units + self.evaluation_batch_size - 1) // self.evaluation_batch_size
             
-            self.logger.info(f"📊 总计算单元: {total_computation_units} ({len(self.stock_codes)} 只股票 × {len(valid_dates)} 个评测日期)")
+            self.logger.info(f"📊 总计算单元: {total_computation_units} ({num_valid_stocks} 只有效股票 × {len(valid_dates)} 个评测日期)")
             self.logger.info(f"📦 每批处理最大计算单元数: {self.evaluation_batch_size}")
             
             if total_batches > 1:
@@ -2612,7 +2613,7 @@ class GPUBatchPearsonAnalyzer:
                 computation_units_per_batch = min(self.evaluation_batch_size, total_computation_units)
                 memory_save_percent = ((total_computation_units - computation_units_per_batch) / total_computation_units) * 100
                 self.logger.info(f"💾 预计GPU内存节省: {memory_save_percent:.1f}%")
-                return self._process_evaluation_batches(valid_dates, batch_recent_data, self.historical_periods_data)
+                return self._process_evaluation_batches(valid_dates, batch_recent_data, self.historical_periods_data, stock_codes)
             else:
                 self.logger.info(f"🔄 多股票单批处理模式: {total_computation_units} 个计算单元一次性处理")
         else:
@@ -2633,10 +2634,10 @@ class GPUBatchPearsonAnalyzer:
         
         # 构建与评测单元一一对应的stock_codes列表
         if self.is_multi_stock:
-            # 多股票模式：为每个股票的每个评测日期创建对应的stock_code
+            # 多股票模式：使用有效股票列表，为每个股票的每个评测日期创建对应的stock_code
             evaluation_unit_stock_codes = []
-            for stock_code in self.stock_codes:  # 使用self.stock_codes获取有效的股票代码列表
-                for _ in valid_dates:  # 为每个评测日期添加该股票代码
+            for stock_code in stock_codes:
+                for _ in valid_dates:
                     evaluation_unit_stock_codes.append(stock_code)
         else:
             # 单股票模式：为每个评测日期重复股票代码
@@ -3156,7 +3157,7 @@ class GPUBatchPearsonAnalyzer:
         
         return stats
     
-    def _process_evaluation_batches(self, valid_dates, batch_recent_data, historical_periods_data):
+    def _process_evaluation_batches(self, valid_dates, batch_recent_data, historical_periods_data, stock_codes):
         """
         分批处理评测日期，避免GPU内存溢出
         
@@ -3196,8 +3197,9 @@ class GPUBatchPearsonAnalyzer:
         
         # 计算批次数量（考虑多股票模式）
         if self.is_multi_stock:
-            # 多股票模式：按计算单元（股票数 × 评测日期数）分批
-            total_computation_units = len(self.stock_codes) * len(valid_dates)
+            # 多股票模式：按实际有效股票数 × 评测日期数 分批
+            num_valid_stocks = int(batch_recent_data.shape[0])
+            total_computation_units = num_valid_stocks * len(valid_dates)
             
             # 直接按照计算单元数量分批，确保每批不超过evaluation_batch_size个计算单元
             total_batches = (total_computation_units + self.evaluation_batch_size - 1) // self.evaluation_batch_size
@@ -3210,7 +3212,7 @@ class GPUBatchPearsonAnalyzer:
             # 多股票模式：按计算单元分批处理
             # 创建所有计算单元的列表：[(stock_idx, stock_code, date_idx, date)]
             all_computation_units = []
-            for stock_idx, stock_code in enumerate(self.stock_codes):
+            for stock_idx, stock_code in enumerate(stock_codes):
                 for date_idx, date in enumerate(valid_dates):
                     all_computation_units.append((stock_idx, stock_code, date_idx, date))
             
@@ -3266,7 +3268,7 @@ class GPUBatchPearsonAnalyzer:
                 # 输出详细的计算单元信息
                 self.logger.debug("📋 计算单元详细信息:")
                 for i, (stock_idx, date_idx, date) in enumerate(zip(batch_stock_indices, batch_date_indices, batch_dates_list)):
-                    stock_code = self.stock_codes[stock_idx] if self.is_multi_stock else self.stock_code
+                    stock_code = stock_codes[stock_idx] if self.is_multi_stock else self.stock_code
                     self.logger.debug(f"   单元 {i+1}: 股票代码={stock_code}, 评测日期={date}")
                 
                 # 第1步：历史数据准备和筛选
@@ -3274,7 +3276,7 @@ class GPUBatchPearsonAnalyzer:
                 # 构建与评测单元一一对应的股票代码列表
                 batch_evaluation_unit_stock_codes = []
                 for stock_idx in batch_stock_indices:
-                    batch_evaluation_unit_stock_codes.append(self.stock_codes[stock_idx])
+                    batch_evaluation_unit_stock_codes.append(stock_codes[stock_idx])
                 self.end_timer('gpu_step1_data_preparation')
                 
                 # 第2步：创建GPU历史数据张量

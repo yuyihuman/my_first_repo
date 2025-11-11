@@ -35,13 +35,41 @@ class StockDataLoader:
             data_base_path: 数据根目录路径，如果不指定则使用默认路径
         """
         if data_base_path is None:
-            # 默认数据路径
+            # 默认数据路径与回退策略：
+            # 1) 优先使用环境变量 ALL_STOCKS_DATA_PATH（若存在且有效）
+            # 2) 使用默认路径 stock_backtest/data/all_stocks_data（若存在）
+            # 3) 回退到 stock_base_info/all_stocks_data（若存在）
+            # 4) 若都不存在则仍设为默认路径，并提示用户生成数据或设置环境变量
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            self.data_base_path = os.path.join(
-                os.path.dirname(current_dir), 
-                'data', 
+            # 默认路径：.../stock_backtest/data/all_stocks_data
+            default_path = os.path.join(
+                os.path.dirname(current_dir),
+                'data',
                 'all_stocks_data'
             )
+
+            # 环境变量覆盖
+            env_path = os.environ.get('ALL_STOCKS_DATA_PATH')
+            if env_path and os.path.isdir(env_path):
+                self.data_base_path = env_path
+                logger.info(f"使用环境变量 ALL_STOCKS_DATA_PATH 作为数据路径: {self.data_base_path}")
+            elif os.path.isdir(default_path):
+                self.data_base_path = default_path
+                logger.info(f"使用默认数据路径: {self.data_base_path}")
+            else:
+                # 回退路径：.../stock_base_info/all_stocks_data
+                root_dir = os.path.dirname(os.path.dirname(current_dir))  # 到 stockapi 根目录
+                fallback_path = os.path.join(root_dir, 'stock_base_info', 'all_stocks_data')
+                if os.path.isdir(fallback_path):
+                    self.data_base_path = fallback_path
+                    logger.info(f"默认路径不存在，回退到: {self.data_base_path}")
+                else:
+                    self.data_base_path = default_path
+                    logger.warning(
+                        "数据目录未找到。请生成历史数据到 'stock_backtest/data/all_stocks_data'，"
+                        "或设置环境变量 ALL_STOCKS_DATA_PATH 指向有效目录，"
+                        f"当前设置的路径: {self.data_base_path}"
+                    )
         else:
             self.data_base_path = data_base_path
             
