@@ -555,6 +555,174 @@ def save_results_to_file(results, output_file, count_threshold=100):
                             str(detail.get('max_down_percent', 'N/A'))
                         ])
                     f.write(_format_table(sub_headers, sub_rows, sub_aligns))
+
+            # 按年度的持股天数涨跌统计
+            f.write("\n----- 按年度的持股天数涨跌统计 -----\n")
+            from collections import defaultdict as _dd
+            import re
+            year_days_stats = _dd(lambda: {
+                '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                3: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                5: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                10: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                'other': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+            })
+            for detail in results['details']:
+                # 解析年份
+                year_val = None
+                try:
+                    year_val = pd.to_datetime(str(detail.get('date')), errors='coerce').year
+                except Exception:
+                    year_val = None
+                if year_val is None:
+                    m = re.search(r'(\d{4})', str(detail.get('date')))
+                    year_val = int(m.group(1)) if m else '未知'
+                # 分类键
+                sell_days = int(detail['sell_days'])
+                if sell_days == 1:
+                    base_label = detail['max_percentage_metric'].split('(')[0]
+                    days_key = '1_high_open' if '高开' in base_label else '1_close'
+                else:
+                    days_key = sell_days if sell_days in [3, 5, 10] else 'other'
+                # 统计涨跌
+                if detail['change_percent'] != 'N/A':
+                    change_value = float(str(detail['change_percent']).strip('%'))
+                    if change_value > 0:
+                        year_days_stats[year_val][days_key]['up'] += 1
+                    elif change_value < 0:
+                        year_days_stats[year_val][days_key]['down'] += 1
+                    else:
+                        year_days_stats[year_val][days_key]['flat'] += 1
+                    year_days_stats[year_val][days_key]['total'] += 1
+                else:
+                    year_days_stats[year_val][days_key]['na'] += 1
+            # 输出每年度统计
+            def _year_sort_key(y):
+                return (9999 if isinstance(y, str) else int(y))
+            for year in sorted(year_days_stats.keys(), key=_year_sort_key):
+                f.write(f"\n[年度: {year}]\n")
+                for days in ['1_high_open', '1_close', 3, 5, 10, 'other']:
+                    stats = year_days_stats[year][days]
+                    if days == '1_high_open':
+                        days_label = "1日持股(开盘卖出/下1日高开)"
+                    elif days == '1_close':
+                        days_label = "1日持股(收盘卖出/下1日上涨)"
+                    elif days == 'other':
+                        days_label = "其他天数持股"
+                    else:
+                        days_label = f"{days}日持股"
+                    total_valid_days = stats['up'] + stats['down'] + stats['flat']
+                    f.write(f"{days_label}统计:\n")
+                    f.write(f"  总记录数: {total_valid_days}\n")
+                    if total_valid_days > 0:
+                        up_percent = stats['up'] / total_valid_days * 100
+                        down_percent = stats['down'] / total_valid_days * 100
+                        flat_percent = stats['flat'] / total_valid_days * 100
+                        f.write(f"  上涨记录数: {stats['up']} ({up_percent:.2f}%)\n")
+                        f.write(f"  下跌记录数: {stats['down']} ({down_percent:.2f}%)\n")
+                        f.write(f"  持平记录数: {stats['flat']} ({flat_percent:.2f}%)\n")
+                    else:
+                        f.write(f"  上涨记录数: {stats['up']} (0.00%)\n")
+                        f.write(f"  下跌记录数: {stats['down']} (0.00%)\n")
+                        f.write(f"  持平记录数: {stats['flat']} (0.00%)\n")
+
+            # 按年度且实际计算数量≥阈值的持股天数统计
+            f.write(f"\n----- 按年度且实际计算数量>={count_threshold}的持股天数统计 -----\n")
+            year_high_corr_stats = _dd(lambda: {
+                '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                3: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                5: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                10: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                'other': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+            })
+            for detail in results['details']:
+                # 过滤阈值
+                if detail.get('actual_calc_count', detail.get('correlation_count', 0)) < count_threshold:
+                    continue
+                # 解析年份
+                year_val = None
+                try:
+                    year_val = pd.to_datetime(str(detail.get('date')), errors='coerce').year
+                except Exception:
+                    year_val = None
+                if year_val is None:
+                    m = re.search(r'(\d{4})', str(detail.get('date')))
+                    year_val = int(m.group(1)) if m else '未知'
+                # 分类键
+                sell_days = int(detail['sell_days'])
+                if sell_days == 1:
+                    base_label = detail['max_percentage_metric'].split('(')[0]
+                    days_key = '1_high_open' if '高开' in base_label else '1_close'
+                else:
+                    days_key = sell_days if sell_days in [3, 5, 10] else 'other'
+                # 统计涨跌
+                if detail['change_percent'] != 'N/A':
+                    change_value = float(str(detail['change_percent']).strip('%'))
+                    if change_value > 0:
+                        year_high_corr_stats[year_val][days_key]['up'] += 1
+                    elif change_value < 0:
+                        year_high_corr_stats[year_val][days_key]['down'] += 1
+                    else:
+                        year_high_corr_stats[year_val][days_key]['flat'] += 1
+                    year_high_corr_stats[year_val][days_key]['total'] += 1
+                else:
+                    year_high_corr_stats[year_val][days_key]['na'] += 1
+            # 输出每年度高相关统计
+            for year in sorted(year_high_corr_stats.keys(), key=_year_sort_key):
+                f.write(f"\n[年度: {year}]\n")
+                for days in ['1_high_open', '1_close', 3, 5, 10, 'other']:
+                    stats = year_high_corr_stats[year][days]
+                    if days == '1_high_open':
+                        days_label = "1日持股(开盘卖出/下1日高开)"
+                    elif days == '1_close':
+                        days_label = "1日持股(收盘卖出/下1日上涨)"
+                    elif days == 'other':
+                        days_label = "其他天数持股"
+                    else:
+                        days_label = f"{days}日持股"
+                    total_valid_days = stats['up'] + stats['down'] + stats['flat']
+                    f.write(f"{days_label}统计(实际计算数量>={count_threshold}):\n")
+                    f.write(f"  总记录数: {total_valid_days}\n")
+                    if total_valid_days > 0:
+                        up_percent = stats['up'] / total_valid_days * 100
+                        down_percent = stats['down'] / total_valid_days * 100
+                        flat_percent = stats['flat'] / total_valid_days * 100
+                        f.write(f"  上涨记录数: {stats['up']} ({up_percent:.2f}%)\n")
+                        f.write(f"  下跌记录数: {stats['down']} ({down_percent:.2f}%)\n")
+                        f.write(f"  持平记录数: {stats['flat']} ({flat_percent:.2f}%)\n")
+                    else:
+                        f.write(f"  上涨记录数: {stats['up']} (0.00%)\n")
+                        f.write(f"  下跌记录数: {stats['down']} (0.00%)\n")
+                        f.write(f"  持平记录数: {stats['flat']} (0.00%)\n")
+
+            # 按年度统计总结
+            f.write("\n----- 按年度统计 -----\n")
+            from collections import defaultdict as _dd
+            import re
+            year_stats = _dd(lambda: {'filtered': 0, 'high_performance': 0})
+            for date, stats in results['date_stats'].items():
+                # 尝试解析年份
+                year_val = None
+                try:
+                    year_val = pd.to_datetime(str(date), errors='coerce').year
+                except Exception:
+                    year_val = None
+                if year_val is None:
+                    m = re.search(r'(\d{4})', str(date))
+                    year_val = int(m.group(1)) if m else '未知'
+                year_stats[year_val]['filtered'] += stats.get('filtered', 0)
+                year_stats[year_val]['high_performance'] += stats.get('high_performance', 0)
+            # 输出年度统计，按年份排序（未知放在最后）
+            def _year_sort_key(y):
+                return (9999 if isinstance(y, str) else int(y))
+            f.write("年份\t符合条件记录数\t高性能记录数\t高性能占比\n")
+            for year in sorted(year_stats.keys(), key=_year_sort_key):
+                fil = year_stats[year]['filtered']
+                hp = year_stats[year]['high_performance']
+                ratio = (hp / fil * 100) if fil > 0 else 0.0
+                f.write(f"{year}\t{fil}\t{hp}\t{ratio:.2f}%\n")
         
         logging.info(f"结果已保存到文件: {output_file}")
         return True
@@ -747,6 +915,31 @@ def print_results(results):
         if stats['filtered'] > 0:
             ratio = stats['high_performance'] / stats['filtered'] * 100
             logging.info(f"{date}\t{stats['filtered']}\t{stats['high_performance']}\t{ratio:.2f}%")
+
+    # 按年度统计（完整列表）
+    logging.info("\n----- 按年度统计 -----")
+    from collections import defaultdict as _dd
+    import re
+    year_stats = _dd(lambda: {'filtered': 0, 'high_performance': 0})
+    for date, stats in results['date_stats'].items():
+        year_val = None
+        try:
+            year_val = pd.to_datetime(str(date), errors='coerce').year
+        except Exception:
+            year_val = None
+        if year_val is None:
+            m = re.search(r'(\d{4})', str(date))
+            year_val = int(m.group(1)) if m else '未知'
+        year_stats[year_val]['filtered'] += stats.get('filtered', 0)
+        year_stats[year_val]['high_performance'] += stats.get('high_performance', 0)
+    def _year_sort_key(y):
+        return (9999 if isinstance(y, str) else int(y))
+    logging.info("年份\t符合条件记录数\t高性能记录数\t高性能占比")
+    for year in sorted(year_stats.keys(), key=_year_sort_key):
+        fil = year_stats[year]['filtered']
+        hp = year_stats[year]['high_performance']
+        ratio = (hp / fil * 100) if fil > 0 else 0.0
+        logging.info(f"{year}\t{fil}\t{hp}\t{ratio:.2f}%")
     
     logging.info("\n----- 高性能记录详情 (前10条) -----")
     logging.info("股票代码\t日期\t\t实际计算数量\t高性能指标数/总指标数\t最佳指标\t买入日期\t卖出天数\t交易建议\t买入价\t卖出价\t涨跌幅\t最大涨幅\t最大跌幅")
