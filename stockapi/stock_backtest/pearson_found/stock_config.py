@@ -9,6 +9,7 @@
 import os
 import pandas as pd
 
+
 def get_all_stocks_list():
     """
     获取所有A股股票列表（过滤掉8和9开头的股票）
@@ -50,6 +51,7 @@ def get_all_stocks_list():
     except Exception as e:
         print(f"获取股票列表时发生错误: {e}")
         return []
+
 
 _ZZ500_CODES = [
     '000001','000002','000009','000032','000034','000035','000039','000063','000066','000069','000100','000157',
@@ -97,13 +99,12 @@ _ZZ500_CODES = [
 ]
 
 
-
 def get_comparison_stocks(mode='top10'):
     """
     获取对比股票列表
     
     Args:
-        mode: 对比模式 ('top10', 'hs300', 'zz500', 'custom', 'self_only', 'all')
+        mode: 对比模式 ('top10', 'hs300', 'zz500', 'top1000', 'top1500', 'custom', 'self_only', 'all')
     
     Returns:
         list: 股票代码列表
@@ -155,6 +156,14 @@ def get_comparison_stocks(mode='top10'):
             '601857', '601872', '601877', '601888', '601898',
             '601899', '601919', '601939', '601988', '601998'
         ]
+    
+    elif mode == 'top1000':
+        # 与 all 模式一致的数据来源与过滤，选取前1000个
+        return get_top_n_stocks_from_all(1000)
+    
+    elif mode == 'top1500':
+        # 与 all 模式一致的数据来源与过滤，选取前1500个
+        return get_top_n_stocks_from_all(1500)
 
     elif mode == 'zz500':
         # 中证500成分股（常量列表）
@@ -175,6 +184,7 @@ def get_comparison_stocks(mode='top10'):
     else:
         # 默认返回top10
         return get_comparison_stocks('top10')
+
 
 def get_stock_industry(stock_code):
     """
@@ -198,3 +208,18 @@ def get_stock_industry(stock_code):
     }
     
     return industry_map.get(stock_code, '未知行业')
+
+
+def get_top_n_stocks_from_all(n):
+    """
+    从与 all 模式一致的数据源（stock_base_info/stock_data.csv）读取过滤后的股票列表，返回前 n 个。
+    过滤规则：排除以 8、9 开头，仅保留以 0、3、60 开头。
+    """
+    try:
+        stocks = get_all_stocks_list()
+        if not stocks:
+            return []
+        return stocks[:n]
+    except Exception as e:
+        print(f"读取前{n}个股票时发生错误: {e}")
+        return []
