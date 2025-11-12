@@ -104,7 +104,8 @@ class GPUBatchPearsonAnalyzer:
                  csv_filename='evaluation_results.csv', use_gpu=True, 
                  batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01',
                  num_processes=None, evaluation_batch_size=30,
-                 max_prediction_stats_count=100):
+                 max_prediction_stats_count=100,
+                 up_threshold_pct=0.01):
         """
         初始化GPU批量评测Pearson相关性分析器
         
@@ -163,6 +164,8 @@ class GPUBatchPearsonAnalyzer:
         self.max_prediction_stats_count = max_prediction_stats_count
         self.data_loader = None
         self.logger = None
+        # 上涨判断阈值（默认1%）；设为0可保留原“>0%”行为
+        self.up_threshold_pct = up_threshold_pct
         
         # 多进程设置
         self.num_processes = num_processes if num_processes is not None else max(1, mp.cpu_count() - 1)
@@ -249,6 +252,7 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"GPU设备: {self.device}, 批处理大小: {batch_size}")
         self.logger.info(f"GPU内存限制: {gpu_memory_limit*100:.0f}%")
         self.logger.info(f"对比模式: {comparison_mode}, 对比股票数量: {len(self.comparison_stocks)}")
+        self.logger.info(f"上涨阈值: {self.up_threshold_pct*100:.2f}%")
     
     def _setup_device(self):
         """设置计算设备（GPU或CPU）"""
@@ -2365,6 +2369,8 @@ class GPUBatchPearsonAnalyzer:
             
             # 获取期间最后一天的收盘价
             period_close = source_data.iloc[end_idx]['close']
+            # 以期间收盘价为基准的上涨阈值价格
+            up_threshold_price = period_close * (1 + self.up_threshold_pct)
             # 🔧 Debug：期间上下文（股票、日期、相关系数）
             if self.debug:
                 try:
@@ -2384,18 +2390,18 @@ class GPUBatchPearsonAnalyzer:
                 
                 stats['valid_periods']['next_day'] += 1
                 
-                # 高开判断
-                if next_day_open > period_close:
+                # 高开判断（改为按阈值：开盘价 > 期间收盘价×(1+阈值)）
+                if next_day_open > up_threshold_price:
                     stats['next_day_gap_up'] += 1
                 
-                # 下1个交易日上涨判断
-                if next_day_close > period_close:
+                # 下1个交易日上涨判断（应用阈值）
+                if next_day_close > up_threshold_price:
                     stats['next_1_day_up'] += 1
                 # 🔧 Debug：下1日细节
                 if self.debug:
                     try:
                         self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 次日: 开:{float(next_day_open):.4f}, 收:{float(next_day_close):.4f}, 高开:{bool(next_day_open > period_close)}, 上涨:{bool(next_day_close > period_close)}"
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 次日: 开:{float(next_day_open):.4f}, 收:{float(next_day_close):.4f}, 高开:{bool(next_day_open > up_threshold_price)}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(next_day_close > up_threshold_price)}"
                         )
                     except Exception:
                         self.logger.debug(
@@ -2410,12 +2416,12 @@ class GPUBatchPearsonAnalyzer:
                 day_3_close = source_data.iloc[end_idx + 3]['close']
                 stats['valid_periods']['next_3_day'] += 1
                 
-                if day_3_close > period_close:
+                if day_3_close > up_threshold_price:
                     stats['next_3_day_up'] += 1
                 if self.debug:
                     try:
                         self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第3日: 收:{float(day_3_close):.4f}, 上涨:{bool(day_3_close > period_close)}"
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第3日: 收:{float(day_3_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_3_close > up_threshold_price)}"
                         )
                     except Exception:
                         self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第3日: 收:{day_3_close}")
@@ -2428,12 +2434,12 @@ class GPUBatchPearsonAnalyzer:
                 day_5_close = source_data.iloc[end_idx + 5]['close']
                 stats['valid_periods']['next_5_day'] += 1
                 
-                if day_5_close > period_close:
+                if day_5_close > up_threshold_price:
                     stats['next_5_day_up'] += 1
                 if self.debug:
                     try:
                         self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第5日: 收:{float(day_5_close):.4f}, 上涨:{bool(day_5_close > period_close)}"
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第5日: 收:{float(day_5_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_5_close > up_threshold_price)}"
                         )
                     except Exception:
                         self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第5日: 收:{day_5_close}")
@@ -2446,12 +2452,12 @@ class GPUBatchPearsonAnalyzer:
                 day_10_close = source_data.iloc[end_idx + 10]['close']
                 stats['valid_periods']['next_10_day'] += 1
                 
-                if day_10_close > period_close:
+                if day_10_close > up_threshold_price:
                     stats['next_10_day_up'] += 1
                 if self.debug:
                     try:
                         self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第10日: 收:{float(day_10_close):.4f}, 上涨:{bool(day_10_close > period_close)}"
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第10日: 收:{float(day_10_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_10_close > up_threshold_price)}"
                         )
                     except Exception:
                         self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第10日: 收:{day_10_close}")
