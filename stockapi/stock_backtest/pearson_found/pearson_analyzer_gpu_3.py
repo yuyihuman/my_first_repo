@@ -632,108 +632,90 @@ class GPUBatchPearsonAnalyzer:
         fields = ['open', 'close', 'volume']
         
         if self.is_multi_stock:
-            # 多股票模式：为每个股票构建数据
+            # 多股票模式：保留全部评测日期，使用掩码标记无效窗口
             multi_stock_batch_data = []
             valid_stock_codes = []
-            common_valid_dates = None
-            
+            valid_mask_list = []  # [num_stocks, evaluation_days]
+
             for stock_code in self.stock_codes:
                 if stock_code not in self.multi_stock_data:
                     self.logger.warning(f"股票 {stock_code} 数据未加载，跳过")
                     continue
-                
+
                 stock_data = self.multi_stock_data[stock_code]
-                batch_data_list = []
-                valid_dates = []
-                
+                stock_windows = []
+                stock_mask = []
+
                 for eval_date in evaluation_dates:
-                    # 获取该评测日期的窗口数据（包含评测日期当天）
                     recent_data = stock_data[stock_data.index <= eval_date].tail(self.window_size)
-                    
-                    if len(recent_data) == self.window_size:
-                        # 严格末日对齐：窗口最后一条记录必须等于评测日
-                        if recent_data.index[-1] == eval_date:
-                            # 提取字段数据（3列）
-                            data_values = recent_data[fields].values  # [window_size, 3]
-                            batch_data_list.append(data_values)
-                            valid_dates.append(eval_date)
-                        else:
-                            if self.debug:
-                                self.logger.warning(
-                                    f"股票 {stock_code} 评测日期 {eval_date} 窗口末日 {recent_data.index[-1]} 不等于评测日，跳过"
-                                )
+
+                    if len(recent_data) == self.window_size and recent_data.index[-1] == eval_date:
+                        data_values = recent_data[fields].values  # [window_size, 3]
+                        stock_windows.append(data_values)
+                        stock_mask.append(True)
                     else:
                         if self.debug:
-                            self.logger.warning(f"股票 {stock_code} 评测日期 {eval_date} 的数据不足，跳过")
-                
-                if batch_data_list:
-                    # 转换为数组 [evaluation_days, window_size, 3]
-                    stock_batch_data = np.stack(batch_data_list, axis=0)
+                            if len(recent_data) != self.window_size:
+                                self.logger.warning(f"股票 {stock_code} 评测日期 {eval_date} 的数据不足，填充占位并标记无效")
+                            elif len(recent_data) == self.window_size and recent_data.index[-1] != eval_date:
+                                self.logger.warning(f"股票 {stock_code} 评测日期 {eval_date} 窗口末日 {recent_data.index[-1]} 不等于评测日，填充占位并标记无效")
+                        stock_windows.append(np.zeros((self.window_size, len(fields)), dtype=float))
+                        stock_mask.append(False)
+
+                if stock_windows:
+                    stock_batch_data = np.stack(stock_windows, axis=0)  # [evaluation_days, window_size, 3]
                     multi_stock_batch_data.append(stock_batch_data)
                     valid_stock_codes.append(stock_code)
-                    
-                    # 确保所有股票使用相同的有效日期
-                    if common_valid_dates is None:
-                        common_valid_dates = valid_dates
-                    else:
-                        # 取交集，确保所有股票都有数据的日期
-                        common_valid_dates = [date for date in common_valid_dates if date in valid_dates]
-            
+                    valid_mask_list.append(stock_mask)
+
             if not multi_stock_batch_data:
-                self.logger.error("没有有效的多股票评测数据")
+                self.logger.error("没有有效的多股票评测数据（所有股票均无可用窗口）")
                 self.end_timer('batch_data_preparation')
-                return None, [], []
-            
-            # 重新筛选数据，确保所有股票使用相同的日期
-            final_multi_stock_data = []
-            for i, stock_code in enumerate(valid_stock_codes):
-                stock_data = multi_stock_batch_data[i]
-                # 这里简化处理，假设日期顺序一致
-                final_multi_stock_data.append(stock_data[:len(common_valid_dates)])
-            
-            # 转换为张量 [num_stocks, evaluation_days, window_size, 3]
-            batch_data = np.stack(final_multi_stock_data, axis=0)
+                return None, [], [], None
+
+            batch_data = np.stack(multi_stock_batch_data, axis=0)  # [num_stocks, evaluation_days, window_size, 3]
             batch_tensor = torch.tensor(batch_data, dtype=torch.float32, device=self.device)
-            
+            valid_mask_tensor = torch.tensor(np.array(valid_mask_list, dtype=bool), device=self.device)  # [num_stocks, evaluation_days]
+
             self.logger.info(f"多股票批量评测数据准备完成，形状: {batch_tensor.shape}")
-            self.logger.info(f"有效股票数量: {len(valid_stock_codes)}")
-            self.logger.info(f"有效评测日期数量: {len(common_valid_dates)}")
-            
+            self.logger.info(f"股票数量: {len(valid_stock_codes)}，评测日期数量: {len(evaluation_dates)}")
+
             self.end_timer('batch_data_preparation')
-            return batch_tensor, common_valid_dates, valid_stock_codes
+            return batch_tensor, evaluation_dates, valid_stock_codes, valid_mask_tensor
         
         else:
-            # 单股票模式：保持原有逻辑
-            batch_data_list = []
-            valid_dates = []
-            
+            # 单股票模式：保留全部评测日期，使用掩码标记无效窗口
+            stock_windows = []
+            stock_mask = []
             for eval_date in evaluation_dates:
-                # 获取该评测日期的窗口数据（包含评测日期当天）
                 recent_data = self.data[self.data.index <= eval_date].tail(self.window_size)
-                
-                if len(recent_data) == self.window_size:
-                    # 提取字段数据（3列）
+                if len(recent_data) == self.window_size and recent_data.index[-1] == eval_date:
                     data_values = recent_data[fields].values  # [window_size, 3]
-                    batch_data_list.append(data_values)
-                    valid_dates.append(eval_date)
+                    stock_windows.append(data_values)
+                    stock_mask.append(True)
                 else:
                     if self.debug:
-                        self.logger.warning(f"评测日期 {eval_date} 的数据不足，跳过")
-            
-            if not batch_data_list:
+                        if len(recent_data) != self.window_size:
+                            self.logger.warning(f"评测日期 {eval_date} 的数据不足，填充占位并标记无效")
+                        elif len(recent_data) == self.window_size and recent_data.index[-1] != eval_date:
+                            self.logger.warning(f"评测日期 {eval_date} 窗口末日 {recent_data.index[-1]} 不等于评测日，填充占位并标记无效")
+                    stock_windows.append(np.zeros((self.window_size, len(fields)), dtype=float))
+                    stock_mask.append(False)
+
+            if not stock_windows:
                 self.logger.error("没有有效的评测数据")
                 self.end_timer('batch_data_preparation')
-                return None, [], []
-            
-            # 转换为张量 [evaluation_days, window_size, 3]
-            batch_data = np.stack(batch_data_list, axis=0)
+                return None, [], [], None
+
+            batch_data = np.stack(stock_windows, axis=0)  # [evaluation_days, window_size, 3]
             batch_tensor = torch.tensor(batch_data, dtype=torch.float32, device=self.device)
-            
+            valid_mask_tensor = torch.tensor(np.array(stock_mask, dtype=bool), device=self.device)  # [evaluation_days]
+
             self.logger.info(f"批量评测数据准备完成，形状: {batch_tensor.shape}")
-            self.logger.info(f"有效评测日期数量: {len(valid_dates)}")
-            
+            self.logger.info(f"评测日期数量: {len(evaluation_dates)}")
+
             self.end_timer('batch_data_preparation')
-            return batch_tensor, valid_dates, [self.stock_code]
+            return batch_tensor, evaluation_dates, [self.stock_code], valid_mask_tensor
     
     def calculate_batch_gpu_correlation(self, batch_recent_data, historical_periods_data, evaluation_dates=None, stock_codes=None):
         """
@@ -1258,7 +1240,7 @@ class GPUBatchPearsonAnalyzer:
         self.end_timer('integrated_result_processing')
         return final_result
 
-    def calculate_batch_gpu_correlation_optimized(self, batch_recent_data, historical_periods_data, evaluation_dates=None, stock_codes=None):
+    def calculate_batch_gpu_correlation_optimized(self, batch_recent_data, historical_periods_data, evaluation_dates=None, stock_codes=None, valid_mask=None):
         """
         优化版批量GPU相关性计算 - 支持多目标股票同时处理
         
@@ -1295,6 +1277,26 @@ class GPUBatchPearsonAnalyzer:
                 num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
                 self.logger.info(f"单股票模式（已为统一格式）")
             num_stocks = 1
+
+        # 统一并传递掩码形状到下游
+        if valid_mask is not None:
+            try:
+                if is_multi_stock:
+                    # 期望形状 [num_stocks, evaluation_days]
+                    if len(valid_mask.shape) == 1:
+                        valid_mask = valid_mask.unsqueeze(0)
+                    elif len(valid_mask.shape) == 2:
+                        pass
+                    else:
+                        valid_mask = valid_mask.view(num_stocks, evaluation_days)
+                else:
+                    # 单股票：期望 [1, evaluation_days]
+                    if len(valid_mask.shape) == 1:
+                        valid_mask = valid_mask.unsqueeze(0)
+                valid_mask = valid_mask.to(self.device).bool()
+            except Exception as e:
+                self.logger.warning(f"valid_mask 形状处理失败，忽略掩码: {str(e)}")
+                valid_mask = None
         
         num_historical_periods = len(historical_periods_data)
         
@@ -1353,7 +1355,7 @@ class GPUBatchPearsonAnalyzer:
         # 使用优化的GPU端一体化处理
         results = self._compute_and_process_correlations_gpu(
             batch_recent_data, historical_tensor, period_info_list, 
-            evaluation_days, evaluation_dates, num_stocks, is_multi_stock, stock_codes
+            evaluation_days, evaluation_dates, num_stocks, is_multi_stock, stock_codes, valid_mask
         )
         
         self.end_timer('gpu_step3_integrated_correlation_processing')
@@ -1362,7 +1364,7 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"优化版批量GPU相关性计算全部完成，返回结果包含 {len(results) if results else 0} 个字段")
         return results
 
-    def _calculate_batch_gpu_correlation_no_timer(self, batch_recent_data, historical_periods_data, evaluation_dates=None, stock_codes=None):
+    def _calculate_batch_gpu_correlation_no_timer(self, batch_recent_data, historical_periods_data, evaluation_dates=None, stock_codes=None, valid_mask=None):
         """
         批量GPU相关性计算（不带计时器版本）- 用于多股票分批处理
         
@@ -1393,6 +1395,20 @@ class GPUBatchPearsonAnalyzer:
                 # 已经是4维格式 [1, evaluation_days, window_size, 3]
                 num_stocks, evaluation_days, window_size, num_fields = batch_recent_data.shape
             num_stocks = 1
+
+        # 统一并传递掩码形状到下游
+        if valid_mask is not None:
+            try:
+                if is_multi_stock:
+                    if len(valid_mask.shape) == 1:
+                        valid_mask = valid_mask.unsqueeze(0)
+                else:
+                    if len(valid_mask.shape) == 1:
+                        valid_mask = valid_mask.unsqueeze(0)
+                valid_mask = valid_mask.to(self.device).bool()
+            except Exception as e:
+                self.logger.warning(f"valid_mask 形状处理失败，忽略掩码: {str(e)}")
+                valid_mask = None
         
         num_historical_periods = len(historical_periods_data)
         
@@ -1426,14 +1442,14 @@ class GPUBatchPearsonAnalyzer:
         # GPU相关系数计算和结果处理（调用带子计时器的一体化实现）
         results = self._compute_and_process_correlations_gpu(
             batch_recent_data, historical_tensor, period_info_list, 
-            evaluation_days, evaluation_dates, num_stocks, is_multi_stock, stock_codes
+            evaluation_days, evaluation_dates, num_stocks, is_multi_stock, stock_codes, valid_mask
         )
         
         return results
 
     def _compute_and_process_correlations_gpu(self, batch_recent_data, historical_tensor, 
                                             period_info_list, evaluation_days, evaluation_dates, 
-                                            num_stocks, is_multi_stock, stock_codes=None):
+                                            num_stocks, is_multi_stock, stock_codes=None, valid_mask=None):
         """
         GPU端一体化相关系数计算和结果处理 - 支持多股票
         
@@ -1485,6 +1501,13 @@ class GPUBatchPearsonAnalyzer:
         for batch_idx, i in enumerate(range(0, evaluation_days, batch_size)):
             end_idx = min(i + batch_size, evaluation_days)
             current_batch = batch_recent_data[:, i:end_idx]  # [num_stocks, batch_size, window_size, 3]
+            # 当前批次掩码 [num_stocks, batch_size]
+            current_mask = None
+            if valid_mask is not None:
+                try:
+                    current_mask = valid_mask[:, i:end_idx].to(self.device).bool()
+                except Exception:
+                    current_mask = None
             
             self.logger.debug(f"GPU处理批次 {batch_idx + 1}/{total_batches}: 评测日期 {i+1}-{end_idx} (形状: {current_batch.shape})")
             
@@ -1507,7 +1530,15 @@ class GPUBatchPearsonAnalyzer:
             
             # GPU端计算高相关性掩码
             batch_high_corr_mask = batch_avg_correlations_filtered > threshold_tensor
-            
+
+            # 应用评测掩码：将无效窗口的平均相关与掩码置零
+            if current_mask is not None:
+                # 扩展到历史期间维度
+                mask_3d = current_mask.unsqueeze(2).expand(-1, -1, batch_avg_correlations_filtered.shape[2])
+                invalid_3d = ~mask_3d
+                batch_avg_correlations_filtered[invalid_3d] = 0.0
+                batch_high_corr_mask[invalid_3d] = False
+
             # GPU端计算每个评测日期的高相关数量
             batch_high_corr_counts = batch_high_corr_mask.sum(dim=2)  # [num_stocks, batch_size]
             self.end_timer('gpu_step3_correlation_filtering')
@@ -2592,8 +2623,8 @@ class GPUBatchPearsonAnalyzer:
             self.logger.error("没有有效的评测日期")
             return None
         
-        # 准备批量评测数据
-        batch_recent_data, valid_dates, stock_codes = self.prepare_batch_evaluation_data(evaluation_dates)
+        # 准备批量评测数据（返回评测掩码以实现按日跳过个别股票）
+        batch_recent_data, valid_dates, stock_codes, valid_mask = self.prepare_batch_evaluation_data(evaluation_dates)
         
         if batch_recent_data is None:
             self.logger.error("批量评测数据准备失败")
@@ -2617,6 +2648,22 @@ class GPUBatchPearsonAnalyzer:
         self.logger.debug(f"💾 预估GPU内存使用量: {estimated_memory:.2f} GB (基于实际{len(self.historical_periods_data):,}个历史期间)")
         self.logger.info("=" * 60)
         
+        # 输出参与度（coverage）
+        try:
+            if valid_mask is not None:
+                if self.is_multi_stock:
+                    per_date_counts = valid_mask.sum(dim=0).detach().cpu().numpy().tolist()
+                    if per_date_counts:
+                        mn, mx = int(min(per_date_counts)), int(max(per_date_counts))
+                        avg = float(np.mean(per_date_counts))
+                        self.logger.info(f"📈 按日期参与股票数统计: min={mn}, max={mx}, avg={avg:.1f}")
+                else:
+                    per_date_flags = valid_mask.detach().cpu().numpy().astype(int).tolist()
+                    valid_count = int(sum(per_date_flags))
+                    self.logger.info(f"📈 单股票有效评测窗口数: {valid_count}/{len(per_date_flags)}")
+        except Exception:
+            pass
+
         # 🔄 检查是否需要分批处理
         if self.is_multi_stock:
             # 多股票模式：按实际有效股票数 × 评测日期数 分批
@@ -2632,7 +2679,7 @@ class GPUBatchPearsonAnalyzer:
                 computation_units_per_batch = min(self.evaluation_batch_size, total_computation_units)
                 memory_save_percent = ((total_computation_units - computation_units_per_batch) / total_computation_units) * 100
                 self.logger.info(f"💾 预计GPU内存节省: {memory_save_percent:.1f}%")
-                return self._process_evaluation_batches(valid_dates, batch_recent_data, self.historical_periods_data, stock_codes)
+                return self._process_evaluation_batches(valid_dates, batch_recent_data, self.historical_periods_data, stock_codes, valid_mask)
             else:
                 self.logger.info(f"🔄 多股票单批处理模式: {total_computation_units} 个计算单元一次性处理")
         else:
@@ -2662,7 +2709,7 @@ class GPUBatchPearsonAnalyzer:
             # 单股票模式：为每个评测日期重复股票代码
             evaluation_unit_stock_codes = [self.stock_code] * len(valid_dates)
         
-        batch_correlations = self.calculate_batch_gpu_correlation_optimized(batch_recent_data, self.historical_periods_data, valid_dates, evaluation_unit_stock_codes)
+        batch_correlations = self.calculate_batch_gpu_correlation_optimized(batch_recent_data, self.historical_periods_data, valid_dates, evaluation_unit_stock_codes, valid_mask=valid_mask)
         self.monitor_gpu_memory("GPU计算完成")
         self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 完成")
         
@@ -3188,7 +3235,7 @@ class GPUBatchPearsonAnalyzer:
         
         return stats
     
-    def _process_evaluation_batches(self, valid_dates, batch_recent_data, historical_periods_data, stock_codes):
+    def _process_evaluation_batches(self, valid_dates, batch_recent_data, historical_periods_data, stock_codes, valid_mask=None):
         """
         分批处理评测日期，避免GPU内存溢出
         
@@ -3279,14 +3326,30 @@ class GPUBatchPearsonAnalyzer:
                         batch_date_indices.append(date_idx)
                         batch_dates_list.append(date)
                 
-                # 提取批次数据：[batch_size, window_size, 3]
+                # 提取批次数据：[batch_size, window_size, 3]，并构建批次掩码 [1, batch_size]
                 # batch_recent_data: [num_stocks, evaluation_days, window_size, 3]
                 batch_data_list = []
+                batch_mask_flags = []
                 for stock_idx, date_idx in zip(batch_stock_indices, batch_date_indices):
                     batch_data_list.append(batch_recent_data[stock_idx, date_idx, :, :])
+                    if valid_mask is not None:
+                        try:
+                            flag = bool(valid_mask[stock_idx, date_idx].item())
+                        except Exception:
+                            flag = True
+                        batch_mask_flags.append(flag)
+                    else:
+                        batch_mask_flags.append(True)
                 
                 # 堆叠成批次张量
                 batch_tensor = torch.stack(batch_data_list, dim=0)  # [batch_size, window_size, 3]
+                # 构造批次掩码张量 [1, batch_size]
+                batch_valid_mask = None
+                try:
+                    if batch_mask_flags:
+                        batch_valid_mask = torch.tensor(batch_mask_flags, dtype=torch.bool, device=self.device).unsqueeze(0)
+                except Exception:
+                    batch_valid_mask = None
                 
                 # 监控GPU内存
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算开始")
@@ -3321,7 +3384,7 @@ class GPUBatchPearsonAnalyzer:
                 self.start_timer('gpu_step3_integrated_correlation_processing')
                 # 调用不带计时器的GPU计算函数
                 batch_correlations = self._calculate_batch_gpu_correlation_no_timer(
-                    gpu_tensor_data, historical_periods_data, batch_dates_list, stock_codes=batch_evaluation_unit_stock_codes
+                    gpu_tensor_data, historical_periods_data, batch_dates_list, stock_codes=batch_evaluation_unit_stock_codes, valid_mask=batch_valid_mask
                 )
                 self.end_timer('gpu_step3_integrated_correlation_processing')
                 
@@ -3438,11 +3501,22 @@ class GPUBatchPearsonAnalyzer:
                 for i, date in enumerate(batch_dates):
                     self.logger.debug(f"   单元 {i+1}: 股票代码={self.stock_code}, 评测日期={date}")
                 
-                # 构建与评测单元一一对应的股票代码列表
+                # 构建与评测单元一一对应的股票代码列表，并构造掩码子集
                 batch_evaluation_unit_stock_codes = [self.stock_code] * len(batch_dates)
+                batch_valid_mask = None
+                if valid_mask is not None:
+                    try:
+                        # valid_mask 为 [evaluation_days]，取当前批次子集并扩展为 [1, batch_size]
+                        if len(valid_mask.shape) == 1:
+                            batch_valid_mask = valid_mask[start_idx:end_idx].to(self.device).bool().unsqueeze(0)
+                        else:
+                            # 已是 [1, evaluation_days]
+                            batch_valid_mask = valid_mask[:, start_idx:end_idx].to(self.device).bool()
+                    except Exception:
+                        batch_valid_mask = None
                 
                 batch_correlations = self.calculate_batch_gpu_correlation_optimized(
-                    batch_recent_subset, historical_periods_data, batch_dates, stock_codes=batch_evaluation_unit_stock_codes
+                    batch_recent_subset, historical_periods_data, batch_dates, stock_codes=batch_evaluation_unit_stock_codes, valid_mask=batch_valid_mask
                 )
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} 完成")
                 self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 完成")
@@ -4070,14 +4144,13 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='GPU批量评测Pearson相关性分析')
-    parser.add_argument('--stock_code', required=True, help='股票代码或模式名称。支持: 1)单个股票代码(000001) 2)多个逗号分隔(000001,000002) 3)预定义模式(top10/hs300/zz500/all)')
+    parser.add_argument('--stock_code', required=True, help="股票代码或模式名称。支持: 1)单个股票代码(000001) 2)多个逗号分隔(000001,000002) 3)预定义模式（通用 topXXX/hs300/zz500/all）")
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
     parser.add_argument('--threshold', type=float, default=0.85, help='相关系数阈值 (默认: 0.85)')
-    parser.add_argument('--comparison_mode', type=str, default='top10', 
-                       choices=['top10', 'hs300', 'zz500', 'top1000', 'top1500', 'custom', 'self_only', 'all'],
-                       help='对比模式: top10(市值前10), hs300(沪深300), zz500(中证500), top1000(过滤后前1000), top1500(过滤后前1500), custom(自定义), self_only(仅自身历史), all(全部A股) (默认: top10)')
+    parser.add_argument('--comparison_mode', type=str, default='top10',
+                       help="对比模式: 通用 'topXXX'（如 top156）、hs300、zz500、custom、self_only、all（默认: top10）")
     parser.add_argument('--comparison_stocks', nargs='*', 
                        help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
@@ -4100,8 +4173,8 @@ if __name__ == "__main__":
     # 解析股票代码，支持逗号分隔的多个股票或模式名称
     input_value = args.stock_code.strip()
     
-    # 检查是否为预定义的模式名称
-    predefined_modes = ['top10', 'hs300', 'zz500', 'top1000', 'top1500', 'all']
+    # 检查是否为预定义的模式名称（支持通用 topXXX）
+    predefined_modes = ['hs300', 'zz500', 'all']
     if input_value in predefined_modes:
         # 使用模式获取股票列表
         from stock_config import get_comparison_stocks, get_all_stocks_list
@@ -4110,6 +4183,15 @@ if __name__ == "__main__":
         else:
             stock_codes = get_comparison_stocks(input_value)
         print(f"使用预定义模式 '{input_value}'，获取到 {len(stock_codes)} 个股票")
+    elif input_value.lower().startswith('top'):
+        from stock_config import get_comparison_stocks
+        try:
+            _ = int(input_value[3:])
+            stock_codes = get_comparison_stocks(input_value)
+            print(f"使用模式 '{input_value}'，获取到 {len(stock_codes)} 个股票")
+        except Exception:
+            # 非合法的 top 模式，按普通股票代码处理
+            stock_codes = [code.strip() for code in input_value.split(',')]
     else:
         # 传统的股票代码解析，支持逗号分隔的多个股票
         stock_codes = [code.strip() for code in input_value.split(',')]

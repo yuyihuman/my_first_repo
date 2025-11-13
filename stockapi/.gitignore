@@ -44,3 +44,6 @@ stock_base_info/test_stocks_data/
 stock_base_info/financial_data/
 stock_backtest/data/
 *.csv
+
+# 结果文本文件（避免将分析输出纳入版本控制）
+stock_backtest/pearson_found/*.txt

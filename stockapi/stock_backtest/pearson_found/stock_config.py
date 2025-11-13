@@ -104,20 +104,21 @@ def get_comparison_stocks(mode='top10'):
     获取对比股票列表
     
     Args:
-        mode: 对比模式 ('top10', 'hs300', 'zz500', 'top1000', 'top1500', 'custom', 'self_only', 'all')
+        mode: 对比模式（支持通用 'topXXX'，如 'top156'），以及 'hs300', 'zz500', 'custom', 'self_only', 'all'
     
     Returns:
         list: 股票代码列表
     """
-    
-    if mode == 'top10':
-        # 市值前10的股票代码
-        return [
-            '000001', '000002', '002001', '002230', '002594', 
-            '600000', '600036', '600519', '600887', '601169'
-        ]
-    
-    elif mode == 'hs300':
+    # 通用 topXXX 支持：统一使用 all 模式的数据源，返回前 n 个
+    if isinstance(mode, str) and mode.lower().startswith('top'):
+        try:
+            n = int(mode[3:])
+            return get_top_n_stocks_from_all(n)
+        except Exception:
+            # 解析失败时继续走后续分支
+            pass
+
+    if mode == 'hs300':
         # 沪深300成分股（示例列表，后续可替换为实时成分）
         return [
             '000001', '000002', '000063', '000100', '000157',
@@ -156,15 +157,6 @@ def get_comparison_stocks(mode='top10'):
             '601857', '601872', '601877', '601888', '601898',
             '601899', '601919', '601939', '601988', '601998'
         ]
-    
-    elif mode == 'top1000':
-        # 与 all 模式一致的数据来源与过滤，选取前1000个
-        return get_top_n_stocks_from_all(1000)
-    
-    elif mode == 'top1500':
-        # 与 all 模式一致的数据来源与过滤，选取前1500个
-        return get_top_n_stocks_from_all(1500)
-
     elif mode == 'zz500':
         # 中证500成分股（常量列表）
         return _ZZ500_CODES
@@ -182,8 +174,8 @@ def get_comparison_stocks(mode='top10'):
         return get_all_stocks_list()
     
     else:
-        # 默认返回top10
-        return get_comparison_stocks('top10')
+        # 默认返回top10（统一使用 all 模式数据源）
+        return get_top_n_stocks_from_all(10)
 
 
 def get_stock_industry(stock_code):
@@ -223,3 +215,34 @@ def get_top_n_stocks_from_all(n):
     except Exception as e:
         print(f"读取前{n}个股票时发生错误: {e}")
         return []
+
+
+def get_top_n_stocks_from_csv(n, filename=None):
+    """
+    从对应 CSV 文件中读取前 n 个股票代码。
+    默认文件路径：stock_base_info/top{n}.csv，CSV 需包含列 'code'（或将首列视为代码列）。
+
+    Args:
+        n: 返回前 n 个代码
+        filename: 可选，指定自定义 CSV 文件完整路径
+
+    Returns:
+        list: 股票代码列表（6位字符串），若文件缺失或出错则回退到 all 数据源的前 n 个
+    """
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        stock_base_info_dir = os.path.join(current_dir, '..', '..', 'stock_base_info')
+        csv_file = filename if filename else os.path.join(stock_base_info_dir, f'top{n}.csv')
+
+        if not os.path.exists(csv_file):
+            print(f"警告：找不到股票列表文件 {csv_file}，回退到 all 数据源前{n}个")
+            return get_top_n_stocks_from_all(n)
+
+        df = pd.read_csv(csv_file, encoding='utf-8')
+        # 优先使用 'code' 列，否则使用首列
+        code_col = 'code' if 'code' in df.columns else df.columns[0]
+        codes = df[code_col].astype(str).str.zfill(6).tolist()
+        return codes[:n]
+    except Exception as e:
+        print(f"从CSV读取前{n}个股票时发生错误: {e}，回退到 all 数据源")
+        return get_top_n_stocks_from_all(n)
