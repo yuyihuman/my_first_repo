@@ -59,6 +59,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 坐标配置（统一修改）
+CANDIDATE_AREA_X_START = 0
+CANDIDATE_AREA_Y_START = 1096
+CANDIDATE_AREA_Y_END = 1196
+
+# 全屏分段区域（Y起止），最后一个以None表示到屏幕底部
+FULL_SCREEN_SEGMENTS_BASE = [
+    (1195, 1355),
+    (1355, 1535),
+    (1535, 1685),
+]
+
+# 候选字更多按钮点击坐标
+MORE_CANDIDATES_TAP_X = 987
+MORE_CANDIDATES_TAP_Y = 1151
+
+# 搜索结果OCR识别区域与阈值
+SEARCH_RESULTS_Y_START = 260
+SEARCH_RESULTS_X_THRESHOLD = 500
+
+# 搜索框点击坐标
+SEARCH_BOX_X = 536
+SEARCH_BOX_Y = 188
+
+# OCR失败时的回退点击坐标（第一个结果大致位置）
+FALLBACK_FIRST_RESULT_Y = 320
+
 def adb_command(command):
     """执行ADB命令并返回结果"""
     logger.info(f"执行ADB命令: {command}")
@@ -162,9 +189,7 @@ def input_text(text):
         screenshot_file = f"{timestamp}_candidate_check_{target_char}.png"
         capture_screenshot(screenshot_file)
         img = Image.open(f"screenshots/{screenshot_file}")
-        y_start = 1163  # 固定起始像素
-        y_end = 1316    # 固定结束像素
-        candidate_area = img.crop((0, y_start, width, y_end))
+        candidate_area = img.crop((CANDIDATE_AREA_X_START, CANDIDATE_AREA_Y_START, width, CANDIDATE_AREA_Y_END))
         
         crop_filename = f"{timestamp}_candidate_check_crop_{target_char}.png"
         candidate_area.save(f"screenshots/{crop_filename}")
@@ -283,7 +308,7 @@ def input_text(text):
         # 使用最佳结果
         if best_result:
             tap_x = best_result['x']
-            tap_y = y_start + best_result['y']
+            tap_y = CANDIDATE_AREA_Y_START + best_result['y']
             logger.info(f"=== 最终选择: 方法{best_method} | 置信度{best_confidence} | 点击坐标:({tap_x}, {tap_y}) ===")
             tap_screen(tap_x, tap_y)
             return True
@@ -301,15 +326,10 @@ def input_text(text):
         img = Image.open(screenshot_path)
         width, height = img.size
         
-        # 定义分段区域
-        segments = [
-            (1165, 1290),
-            (1290, 1416),
-            (1416, 1542),  # 将1416-1666分成两个区域
-            (1542, 1666),
-            (1666, 1793),
-            (1793, height)
-        ]
+        # 定义分段区域（根据全局配置和当前屏幕高度生成）
+        segments = []
+        for start, end in FULL_SCREEN_SEGMENTS_BASE:
+            segments.append((start, height if end is None else end))
         
         best_global_result = None
         best_global_confidence = 0
@@ -481,8 +501,8 @@ def input_text(text):
                 logger.warning(f"输入完整拼音后仍未识别到目标汉字'{char}'")
                 
                 # 新增步骤：点击992, 1243位置
-                logger.info(f"点击坐标(992, 1243)以查看更多候选字")
-                tap_screen(992, 1243)
+                logger.info(f"点击坐标({MORE_CANDIDATES_TAP_X}, {MORE_CANDIDATES_TAP_Y})以查看更多候选字")
+                tap_screen(MORE_CANDIDATES_TAP_X, MORE_CANDIDATES_TAP_Y)
                 time.sleep(0.8)  # 等待更多候选字显示
                 
                 # 在1165像素下方的全部区域中识别目标汉字
@@ -611,8 +631,8 @@ def click_first_search_result(search_term):
     img = Image.open(f"screenshots/{screenshot_file}")
     width, height = img.size
     
-    # 只识别纵向大于190像素的区域
-    y_start = 190
+    # 只识别纵向大于配置起始像素的区域
+    y_start = SEARCH_RESULTS_Y_START
     search_area = img.crop((0, y_start, width, height))
     crop_filename = f"{timestamp}_search_area_crop_{search_term}.png"
     search_area.save(f"screenshots/{crop_filename}")
@@ -629,8 +649,8 @@ def click_first_search_result(search_term):
             x = ocr_result['left'][i] + ocr_result['width'][i] // 2
             y = ocr_result['top'][i] + ocr_result['height'][i] // 2
             
-            # 检查横向坐标是否小于500
-            if x < 500:
+            # 检查横向坐标是否小于配置阈值
+            if x < SEARCH_RESULTS_X_THRESHOLD:
                 # 转换为全屏坐标
                 tap_x = x
                 tap_y = y_start + y
@@ -951,11 +971,10 @@ def search_for_location(location_name, max_retries=3):
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         capture_screenshot(f"01_before_search_{location_name}_{timestamp}.png")
         
-        # 2. 直接使用固定坐标
-        search_box_x = 548
-        search_box_y = 139
-        logger.info(f"使用固定搜索框位置: ({search_box_x}, {search_box_y})")
-        
+        # 2. 使用统一配置的搜索框坐标
+        search_box_x = SEARCH_BOX_X
+        search_box_y = SEARCH_BOX_Y
+        logger.info(f"使用搜索框位置: ({search_box_x}, {search_box_y})")
         logger.info(f"点击搜索框位置: ({search_box_x}, {search_box_y})")
         tap_screen(search_box_x, search_box_y)
         
@@ -1000,7 +1019,7 @@ def search_for_location(location_name, max_retries=3):
             logger.warning("无法通过OCR找到搜索结果，尝试点击屏幕上的第一个结果位置")
             # 如果无法通过OCR找到结果，尝试点击屏幕上可能的第一个结果位置
             first_result_x = width // 2
-            first_result_y = 250  # 固定在纵向190+60像素处
+            first_result_y = FALLBACK_FIRST_RESULT_Y
             tap_screen(first_result_x, first_result_y)
         
         # 9. 最终截图
