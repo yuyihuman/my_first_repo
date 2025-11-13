@@ -646,10 +646,17 @@ class GPUBatchPearsonAnalyzer:
                     recent_data = stock_data[stock_data.index <= eval_date].tail(self.window_size)
                     
                     if len(recent_data) == self.window_size:
-                        # 提取字段数据
-                        data_values = recent_data[fields].values  # [window_size, 5]
-                        batch_data_list.append(data_values)
-                        valid_dates.append(eval_date)
+                        # 严格末日对齐：窗口最后一条记录必须等于评测日
+                        if recent_data.index[-1] == eval_date:
+                            # 提取字段数据
+                            data_values = recent_data[fields].values  # [window_size, 5]
+                            batch_data_list.append(data_values)
+                            valid_dates.append(eval_date)
+                        else:
+                            if self.debug:
+                                self.logger.warning(
+                                    f"股票 {stock_code} 评测日期 {eval_date} 窗口末日 {recent_data.index[-1]} 不等于评测日，跳过"
+                                )
                     else:
                         if self.debug:
                             self.logger.warning(f"股票 {stock_code} 评测日期 {eval_date} 的数据不足，跳过")
@@ -4035,8 +4042,8 @@ if __name__ == "__main__":
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
     parser.add_argument('--threshold', type=float, default=0.85, help='相关系数阈值 (默认: 0.85)')
     parser.add_argument('--comparison_mode', type=str, default='top10', 
-                       choices=['top10', 'hs300', 'zz500', 'custom', 'self_only', 'all'],
-                       help='对比模式: top10(市值前10), hs300(沪深300), zz500(中证500), custom(自定义), self_only(仅自身历史), all(全部A股) (默认: top10)')
+                       choices=['top10', 'hs300', 'zz500', 'top1000', 'top1500', 'custom', 'self_only', 'all'],
+                       help='对比模式: top10(市值前10), hs300(沪深300), zz500(中证500), top1000(过滤后前1000), top1500(过滤后前1500), custom(自定义), self_only(仅自身历史), all(全部A股) (默认: top10)')
     parser.add_argument('--comparison_stocks', nargs='*', 
                        help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
@@ -4060,7 +4067,7 @@ if __name__ == "__main__":
     input_value = args.stock_code.strip()
     
     # 检查是否为预定义的模式名称
-    predefined_modes = ['top10', 'hs300', 'zz500', 'all']
+    predefined_modes = ['top10', 'hs300', 'zz500', 'top1000', 'top1500', 'all']
     if input_value in predefined_modes:
         # 使用模式获取股票列表
         from stock_config import get_comparison_stocks, get_all_stocks_list

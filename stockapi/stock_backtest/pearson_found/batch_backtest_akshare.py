@@ -16,10 +16,10 @@ def parse_args():
 
     # 以用户示例为默认值，可在命令行覆盖
     parser.add_argument(
-        "--stock_code", default="zz500", help="传递给 pearson_analyzer_gpu_3.py 的 --stock_code"
+        "--stock_code", default="top1000", help="传递给 pearson_analyzer_gpu_3.py 的 --stock_code"
     )
     parser.add_argument(
-        "--comparison_mode", default="zz500", help="传递给 pearson_analyzer_gpu_3.py 的 --comparison_mode"
+        "--comparison_mode", default="top1000", help="传递给 pearson_analyzer_gpu_3.py 的 --comparison_mode"
     )
     parser.add_argument(
         "--csv_filename", default="test.csv", help="传递给 pearson_analyzer_gpu_3.py 的 --csv_filename"

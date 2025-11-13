@@ -651,10 +651,17 @@ class GPUBatchPearsonAnalyzer:
                     recent_data = stock_data[stock_data.index <= eval_date].tail(self.window_size)
                     
                     if len(recent_data) == self.window_size:
-                        # 提取字段数据（3列）
-                        data_values = recent_data[fields].values  # [window_size, 3]
-                        batch_data_list.append(data_values)
-                        valid_dates.append(eval_date)
+                        # 严格末日对齐：窗口最后一条记录必须等于评测日
+                        if recent_data.index[-1] == eval_date:
+                            # 提取字段数据（3列）
+                            data_values = recent_data[fields].values  # [window_size, 3]
+                            batch_data_list.append(data_values)
+                            valid_dates.append(eval_date)
+                        else:
+                            if self.debug:
+                                self.logger.warning(
+                                    f"股票 {stock_code} 评测日期 {eval_date} 窗口末日 {recent_data.index[-1]} 不等于评测日，跳过"
+                                )
                     else:
                         if self.debug:
                             self.logger.warning(f"股票 {stock_code} 评测日期 {eval_date} 的数据不足，跳过")
@@ -2514,6 +2521,12 @@ class GPUBatchPearsonAnalyzer:
             dict: 批量分析结果
         """
         self.start_timer('total_batch_analysis')
+        # 记录墙钟起始时间，便于在日志中提供首尾时间与总耗时摘要
+        try:
+            self._run_start_wall_ts = time.time()
+            self.logger.info(f"🕒 分析开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        except Exception:
+            pass
         
         # 更新参数
         if backtest_date is not None:
@@ -2664,6 +2677,18 @@ class GPUBatchPearsonAnalyzer:
         final_result = batch_correlations
         
         self.end_timer('total_batch_analysis')
+        # 在日志末尾增加首尾时间与总耗时的墙钟摘要，便于跨日志文件直观对比
+        try:
+            end_dt = datetime.now()
+            elapsed_sec = None
+            if hasattr(self, '_run_start_wall_ts') and self._run_start_wall_ts:
+                elapsed_sec = time.time() - self._run_start_wall_ts
+            self.logger.info(f"🕒 分析结束时间: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+            if elapsed_sec is not None:
+                mins, secs = divmod(int(elapsed_sec), 60)
+                self.logger.info(f"🕒 总耗时(墙钟): {mins}分{secs}秒 ({elapsed_sec:.3f}秒)")
+        except Exception:
+            pass
         
         # 输出性能总结
         self._log_performance_summary()
@@ -3269,6 +3294,7 @@ class GPUBatchPearsonAnalyzer:
                 # 🚀 一次性GPU计算整个批次
                 self.logger.info(f"🚀 执行GPU批次 {batch_idx + 1}/{total_batches}：处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
                 self.logger.info(f"🚀 批次 {batch_idx + 1} GPU计算 - 开始")
+                batch_start_wall = time.time()
                 self.logger.info(f"📦 处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
                 
                 # 输出详细的计算单元信息
@@ -3302,7 +3328,8 @@ class GPUBatchPearsonAnalyzer:
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算完成")
                 # 获取高相关性记录总数
                 total_high_correlations = batch_correlations['batch_results']['summary']['total_high_correlations']
-                self.logger.info(f"🚀 批次 {batch_idx + 1} GPU计算 - 完成，共发现{total_high_correlations}个高相关记录")
+                elapsed_wall = time.time() - batch_start_wall
+                self.logger.info(f"🚀 批次 {batch_idx + 1} GPU计算 - 完成，共发现{total_high_correlations}个高相关记录，总耗时{elapsed_wall:.3f}秒")
                 
                 # 合并批次结果
                 if batch_correlations:
@@ -4049,8 +4076,8 @@ if __name__ == "__main__":
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
     parser.add_argument('--threshold', type=float, default=0.85, help='相关系数阈值 (默认: 0.85)')
     parser.add_argument('--comparison_mode', type=str, default='top10', 
-                       choices=['top10', 'hs300', 'zz500', 'custom', 'self_only', 'all'],
-                       help='对比模式: top10(市值前10), hs300(沪深300), zz500(中证500), custom(自定义), self_only(仅自身历史), all(全部A股) (默认: top10)')
+                       choices=['top10', 'hs300', 'zz500', 'top1000', 'top1500', 'custom', 'self_only', 'all'],
+                       help='对比模式: top10(市值前10), hs300(沪深300), zz500(中证500), top1000(过滤后前1000), top1500(过滤后前1500), custom(自定义), self_only(仅自身历史), all(全部A股) (默认: top10)')
     parser.add_argument('--comparison_stocks', nargs='*', 
                        help='自定义对比股票列表，用空格分隔 (仅在comparison_mode=custom时有效)')
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
@@ -4074,7 +4101,7 @@ if __name__ == "__main__":
     input_value = args.stock_code.strip()
     
     # 检查是否为预定义的模式名称
-    predefined_modes = ['top10', 'hs300', 'zz500', 'all']
+    predefined_modes = ['top10', 'hs300', 'zz500', 'top1000', 'top1500', 'all']
     if input_value in predefined_modes:
         # 使用模式获取股票列表
         from stock_config import get_comparison_stocks, get_all_stocks_list
