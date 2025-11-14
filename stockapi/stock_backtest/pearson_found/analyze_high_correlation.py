@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import csv
+import re
 import argparse
 import os
 import logging
@@ -21,11 +22,17 @@ def analyze_csv_data(file_path, min_correlation_count=10):
             reader = csv.reader(f)
             header = next(reader)  # 读取标题行
 
-            # 按表头定位列索引
+            # 按表头定位列索引（适配扩展后的CSV表头）
             code_index = header.index('代码')
             date_index = header.index('评测日期')
             actual_index = header.index('实际计算数量')
-            metric_labels = ['下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨']
+
+            # 动态识别指标列：包含“下…日上涨”或“下1日高开”的列均纳入
+            metric_labels = []
+            for col in header:
+                if col.startswith('下') and ('上涨' in col or '高开' in col):
+                    metric_labels.append(col)
+            # 保持原有顺序（按CSV表头）
             metrics_indices = [header.index(lbl) for lbl in metric_labels]
 
             def parse_pct(val):
@@ -59,32 +66,44 @@ def analyze_csv_data(file_path, min_correlation_count=10):
                         results['high_performance'] += 1
                         results['by_stock'][stock_code]['high_performance'] += 1
 
-                        # 找出最高百分比及对应天数
-                        max_percentage = 0.0
+                        # 找出最高百分比及对应天数（适配2/4/6/7/8/9日）
+                        max_percentage = -1.0
                         max_percentage_metric = ''
                         max_percentage_days = 0
                         for metric_name, value in performance_metrics:
                             if value > max_percentage:
                                 max_percentage = value
                                 max_percentage_metric = metric_name
-                                if '1日' in metric_name:
+                                # 从指标名中提取“下X日”数字（兼容高开/上涨）
+                                m = re.search(r'下(\d+)日', metric_name)
+                                if m:
+                                    try:
+                                        max_percentage_days = int(m.group(1))
+                                    except Exception:
+                                        max_percentage_days = 1
+                                else:
+                                    # 默认回退到1日
                                     max_percentage_days = 1
-                                elif '3日' in metric_name:
-                                    max_percentage_days = 3
-                                elif '5日' in metric_name:
-                                    max_percentage_days = 5
-                                elif '10日' in metric_name:
-                                    max_percentage_days = 10
 
-                        price_data = get_stock_price_data(stock_code, date, max_percentage_days)
+                        # 根据最佳指标确定卖出方式（仅 sell_days==1 生效）
+                        sell_mode = None
+                        if max_percentage_days == 1:
+                            base_label = max_percentage_metric.split('(')[0]
+                            if '高开' in base_label:
+                                sell_mode = 'open'
+                            elif '上涨' in base_label:
+                                sell_mode = 'close'
+                        price_data = get_stock_price_data(stock_code, date, max_percentage_days, sell_mode=sell_mode)
 
+                        # 汇总详情（包含全部指标文本，便于后续展示）
                         results['details'].append({
                             'stock_code': stock_code,
                             'date': date,
                             'buy_date': date,
                             'actual_calc_count': actual_calc_count,
                             'high_performance_count': high_performance_count,
-                            'total_metrics': len(performance_metrics),
+                            'valid_metrics_count': len(performance_metrics),
+                            'metrics': [f"{name}({value:.2f}%)" for name, value in performance_metrics],
                             'max_percentage': max_percentage,
                             'max_percentage_metric': max_percentage_metric,
                             'sell_days': max_percentage_days,
@@ -100,10 +119,17 @@ def analyze_csv_data(file_path, min_correlation_count=10):
         logging.error(f"分析CSV数据时出错: {e}")
         return results
 
-def get_stock_price_data(stock_code, date_str, sell_days):
+def get_stock_price_data(stock_code, date_str, sell_days, sell_mode=None):
     """
     获取买入/卖出价格与最大涨跌幅。
     优先使用真实日线数据；若数据不可用，则使用模拟数据并保证数值一致性。
+
+    参数说明：
+    - stock_code: 股票代码
+    - date_str: 买入日期字符串
+    - sell_days: 持股天数（整数）
+    - sell_mode: 可选的卖出方式，'open' 表示按开盘价卖出，'close' 表示按收盘价卖出；
+                 当 sell_days == 1 时生效；为 None 时默认按收盘价卖出。
     """
     try:
         import pandas as pd
@@ -112,8 +138,17 @@ def get_stock_price_data(stock_code, date_str, sell_days):
         df = loader.load_stock_data(stock_code, 'daily')
         buy_dt = pd.to_datetime(date_str)
 
-        # 判断1日持股时的卖出方式（开盘/收盘），与现有奇偶规则一致
-        is_open_sell = (sell_days == 1 and int(stock_code[-1]) % 2 == 0)
+        # 判断1日持股时的卖出方式（开盘/收盘）
+        # 优先使用调用方指定的 sell_mode；若未指定则默认按收盘价卖出。
+        if sell_days == 1:
+            if sell_mode == 'open':
+                is_open_sell = True
+            elif sell_mode == 'close':
+                is_open_sell = False
+            else:
+                is_open_sell = False
+        else:
+            is_open_sell = False
 
         if df is not None and not df.empty:
             # 使用真实数据
@@ -357,25 +392,24 @@ def save_results_to_file(results, output_file, count_threshold=100):
             flat_count = 0
             na_count = 0
             
-            # 按持股天数统计
+            # 按持股天数统计（支持2/4/6/7/8/9日）
+            allowed_days = [2, 3, 4, 5, 6, 7, 8, 9, 10]
             days_stats = {
                 '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},  # 1日持股开盘卖出
                 '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},  # 1日持股收盘卖出
-                3: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                5: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                10: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                'other': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
             }
+            for d in allowed_days:
+                days_stats[d] = {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+            days_stats['other'] = {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
             
-            # 相关数量大于100的统计
+            # 相关数量大于阈值的统计
             high_corr_stats = {
                 '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                3: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                5: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                10: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                'other': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
             }
+            for d in allowed_days:
+                high_corr_stats[d] = {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+            high_corr_stats['other'] = {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
             
             for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True):
                 metrics_str = ', '.join(detail['metrics'])
@@ -421,7 +455,7 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     base_label = detail['max_percentage_metric'].split('(')[0]
                     days_key = '1_high_open' if '高开' in base_label else '1_close'
                 else:
-                    days_key = sell_days if sell_days in [3, 5, 10] else 'other'
+                    days_key = sell_days if sell_days in allowed_days else 'other'
                 
                 if detail['change_percent'] != 'N/A':
                     change_value = float(detail['change_percent'].strip('%'))
@@ -478,7 +512,7 @@ def save_results_to_file(results, output_file, count_threshold=100):
             f.write("\n----- 按持股天数的涨跌统计 -----\n")
             
             # 按固定顺序显示统计结果
-            for days in ['1_high_open', '1_close', 3, 5, 10, 'other']:
+            for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'other']:
                 stats = days_stats[days]
                 
                 # 根据不同的持股天数设置标签
@@ -507,8 +541,8 @@ def save_results_to_file(results, output_file, count_threshold=100):
             # 添加实际计算数量大于等于阈值的统计
             f.write(f"\n----- 实际计算数量大于等于{count_threshold}的统计 -----\n")
             
-            # 按固定顺序显示相关数量大于100的统计结果
-            for days in ['1_high_open', '1_close', 3, 5, 10, 'other']:
+            # 按固定顺序显示相关数量大于阈值的统计结果
+            for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'other']:
                 stats = high_corr_stats[days]
                 
                 # 根据不同的持股天数设置标签
@@ -550,7 +584,7 @@ def save_results_to_file(results, output_file, count_threshold=100):
                             base_label = detail['max_percentage_metric'].split('(')[0]
                             days_key = '1_high_open' if '高开' in base_label else '1_close'
                         else:
-                            days_key = sell_days if sell_days in [3, 5, 10] else 'other'
+                            days_key = sell_days if sell_days in allowed_days else 'other'
                         if days_key != days:
                             continue
                         # 展示卖出方式文案
@@ -584,7 +618,7 @@ def save_results_to_file(results, output_file, count_threshold=100):
                             base_label = detail['max_percentage_metric'].split('(')[0]
                             days_key_check = '1_high_open' if '高开' in base_label else '1_close'
                         else:
-                            days_key_check = sell_days if sell_days in [3, 5, 10] else 'other'
+                            days_key_check = sell_days if sell_days in allowed_days else 'other'
                         if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold and days_key_check == days:
                             sub_original_lines.append(','.join(detail.get('original_row', [])) if detail.get('original_row') else detail.get('original_csv_line', ''))
                     f.write(_format_table_with_originals(sub_headers, sub_rows, sub_original_lines, results.get('csv_file_path', ''), sub_aligns))
@@ -596,8 +630,14 @@ def save_results_to_file(results, output_file, count_threshold=100):
             year_days_stats = _dd(lambda: {
                 '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                2: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 3: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                4: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 5: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                6: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                7: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                8: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                9: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 10: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 'other': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
             })
@@ -617,7 +657,7 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     base_label = detail['max_percentage_metric'].split('(')[0]
                     days_key = '1_high_open' if '高开' in base_label else '1_close'
                 else:
-                    days_key = sell_days if sell_days in [3, 5, 10] else 'other'
+                    days_key = sell_days if sell_days in allowed_days else 'other'
                 # 统计涨跌
                 if detail['change_percent'] != 'N/A':
                     change_value = float(str(detail['change_percent']).strip('%'))
@@ -635,7 +675,7 @@ def save_results_to_file(results, output_file, count_threshold=100):
                 return (9999 if isinstance(y, str) else int(y))
             for year in sorted(year_days_stats.keys(), key=_year_sort_key):
                 f.write(f"\n[年度: {year}]\n")
-                for days in ['1_high_open', '1_close', 3, 5, 10, 'other']:
+                for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'other']:
                     stats = year_days_stats[year][days]
                     if days == '1_high_open':
                         days_label = "1日持股(开盘卖出/下1日高开)"
@@ -665,8 +705,14 @@ def save_results_to_file(results, output_file, count_threshold=100):
             year_high_corr_stats = _dd(lambda: {
                 '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                2: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 3: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                4: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 5: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                6: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                7: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                8: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                9: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 10: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
                 'other': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
             })
@@ -689,7 +735,7 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     base_label = detail['max_percentage_metric'].split('(')[0]
                     days_key = '1_high_open' if '高开' in base_label else '1_close'
                 else:
-                    days_key = sell_days if sell_days in [3, 5, 10] else 'other'
+                    days_key = sell_days if sell_days in allowed_days else 'other'
                 # 统计涨跌
                 if detail['change_percent'] != 'N/A':
                     change_value = float(str(detail['change_percent']).strip('%'))
@@ -705,7 +751,7 @@ def save_results_to_file(results, output_file, count_threshold=100):
             # 输出每年度高相关统计
             for year in sorted(year_high_corr_stats.keys(), key=_year_sort_key):
                 f.write(f"\n[年度: {year}]\n")
-                for days in ['1_high_open', '1_close', 3, 5, 10, 'other']:
+                for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'other']:
                     stats = year_high_corr_stats[year][days]
                     if days == '1_high_open':
                         days_label = "1日持股(开盘卖出/下1日高开)"
@@ -807,13 +853,12 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                     date_index = header.index('评测日期')
                     actual_count_index = header.index('实际计算数量')
                     comp_count_index = header.index('对比股票数量')
-                    metrics_indices = [
-                        header.index('下1日高开'),
-                        header.index('下1日上涨'),
-                        header.index('下3日上涨'),
-                        header.index('下5日上涨'),
-                        header.index('下10日上涨')
-                    ]
+                    # 动态识别指标列（支持新增2/4/6/7/8/9日）：包含“下…日上涨”或“下1日高开”
+                    metric_labels = []
+                    for col in header:
+                        if col.startswith('下') and ('上涨' in col or '高开' in col):
+                            metric_labels.append(col)
+                    metrics_indices = [header.index(lbl) for lbl in metric_labels]
                     
                     logging.info(f"开始分析CSV文件: {csv_file_path}")
                     for row in reader:
@@ -837,18 +882,21 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                         results['date_stats'][eval_date]['total'] += 1
                         results['date_stats'][eval_date]['filtered'] += 1
                         
-                        # 统计5个统计值
+                        # 统计全部指标值
                         performance_metrics = [row[i] for i in metrics_indices]
                         
                         # 计算超过高百分比的指标数量
                         high_performance_count = 0
                         valid_metrics_count = 0
-                        
+
                         for metric in performance_metrics:
-                            if metric != 'N/A':
+                            if metric not in ('', 'N/A'):
                                 valid_metrics_count += 1
                                 # 去掉百分号并转换为浮点数
-                                value = float(metric.strip('%'))
+                                try:
+                                    value = float(metric.strip('%'))
+                                except Exception:
+                                    value = 0.0
                                 if value >= high_percentage:
                                     high_performance_count += 1
                         
@@ -859,36 +907,52 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                             results['date_stats'][eval_date]['high_performance'] += 1
                             
                             # 记录详细信息
-                            # 找出百分比最大的指标及其对应的天数
-                            max_percentage = 0
+                            # 找出百分比最大的指标及其对应的天数（从列名解析）
+                            max_percentage = -1.0
                             max_percentage_index = 0
-                            sell_days = [1, 1, 3, 5, 10]  # 对应各指标的天数
-                            
                             for i, metric in enumerate(performance_metrics):
-                                if metric != 'N/A':
-                                    value = float(metric.strip('%'))
+                                if metric not in ('', 'N/A'):
+                                    try:
+                                        value = float(metric.strip('%'))
+                                    except Exception:
+                                        value = 0.0
                                     if value > max_percentage:
                                         max_percentage = value
                                         max_percentage_index = i
-                            
+
                             # 计算买入时间和卖出时间
                             buy_date = eval_date
-                            sell_days_offset = sell_days[max_percentage_index]
+                            # 从指标列名中提取天数
+                            sell_days_offset = 1
+                            try:
+                                m = re.search(r'下(\d+)日', metric_labels[max_percentage_index])
+                                if m:
+                                    sell_days_offset = int(m.group(1))
+                            except Exception:
+                                sell_days_offset = 1
                             
                             # 获取价格数据
-                            price_data = get_stock_price_data(stock_code, buy_date, sell_days_offset)
+                            # 解析 1 日持股的卖出方式并传入价格计算
+                            sell_mode = None
+                            if sell_days_offset == 1:
+                                base_label = metric_labels[max_percentage_index]
+                                if '高开' in base_label:
+                                    sell_mode = 'open'
+                                elif '上涨' in base_label:
+                                    sell_mode = 'close'
+                            price_data = get_stock_price_data(stock_code, buy_date, sell_days_offset, sell_mode=sell_mode)
                             
                             results['details'].append({
                                 'stock_code': stock_code,
                                 'date': eval_date,
                                 'actual_calc_count': actual_calc_count,
-                                'metrics': performance_metrics,
+                                'metrics': [f"{metric_labels[i]}({performance_metrics[i]})" for i in range(len(performance_metrics))],
                                 'high_performance_count': high_performance_count,
                                 'valid_metrics_count': valid_metrics_count,
                                 'buy_date': buy_date,
                                 'sell_days': sell_days_offset,
                                 'max_percentage': max_percentage,
-                                'max_percentage_metric': f"{['下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨'][max_percentage_index]}({max_percentage}%)",
+                                'max_percentage_metric': f"{metric_labels[max_percentage_index]}({max_percentage}%)",
                                 'buy_price': price_data['buy_price'],
                                 'sell_price': price_data['sell_price'],
                                 'change_percent': price_data['change_percent'],

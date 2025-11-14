@@ -230,6 +230,12 @@ class GPUBatchPearsonAnalyzer:
             'gpu_step4_batch_merging': ('3-11', '合并批次结果'),
             'gpu_step5_result_processing': ('3-12', '处理批量相关性结果'),
             'integrated_result_processing': ('3-13', '集成结果处理'),
+            'batch_total_time': ('3-14', '批次总耗时（GPU+非GPU）'),
+            'batch_units_preparation': ('3-15', '批次准备与分组'),
+            'post_batch_merging_cpu': ('3-16', '批次结果合并（CPU）'),
+            'post_batch_memory_cleanup': ('3-17', 'GPU/内存清理'),
+            'csv_data_prep': ('3-18', 'CSV数据准备'),
+            'csv_write': ('3-19', 'CSV写入'),
 
             # 总体统计
             'total_batch_analysis': ('总计', '完整批量分析')
@@ -314,7 +320,7 @@ class GPUBatchPearsonAnalyzer:
             
             # 使用与单日脚本相同的表头格式
             header = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
-                     '下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨']
+                     '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨']
             
             self.logger.info(f"📋 CSV表头字段: {header}")
             self.logger.info(f"📋 CSV表头字段数量: {len(header)}")
@@ -355,9 +361,13 @@ class GPUBatchPearsonAnalyzer:
                         self.logger.warning("🔧 检测到CSV缺少列 '实际计算数量'，将自动补齐并重排表头")
                         # 补齐缺失列，默认填充为0
                         existing_df['实际计算数量'] = 0
-                        # 目标列顺序与新表头一致
+                        # 目标列顺序与新表头一致（包含新增上涨类别列）
                         desired_columns = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
-                                           '下1日高开', '下1日上涨', '下3日上涨', '下5日上涨', '下10日上涨']
+                                           '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨']
+                        # 为缺失的新增列填充默认值
+                        for col in desired_columns:
+                            if col not in existing_df.columns:
+                                existing_df[col] = 'N/A'
                         # 仅重排存在的列，其余保持在末尾
                         reordered = [col for col in desired_columns if col in existing_df.columns]
                         remaining = [col for col in existing_df.columns if col not in reordered]
@@ -365,6 +375,20 @@ class GPUBatchPearsonAnalyzer:
                         # 覆写原文件
                         existing_df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
                         self.logger.info("✅ 已为现有CSV补齐缺失列并更新表头")
+                else:
+                    # 即使行数>0且已存在'实际计算数量'，也检查新增上涨列是否存在，不存在则自愈
+                    desired_columns = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
+                                       '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨']
+                    missing_cols = [col for col in desired_columns if col not in existing_df.columns]
+                    if missing_cols:
+                        self.logger.warning(f"🔧 检测到CSV缺少新增列 {missing_cols}，将自动补齐并重排表头")
+                        for col in missing_cols:
+                            existing_df[col] = 'N/A'
+                        reordered = [col for col in desired_columns if col in existing_df.columns]
+                        remaining = [col for col in existing_df.columns if col not in reordered]
+                        existing_df = existing_df[reordered + remaining]
+                        existing_df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
+                        self.logger.info("✅ 已补齐新增上涨列并更新表头")
                     # 显示最近的几条记录作为参考
                     if row_count <= 3:
                         self.logger.info(f"📋 现有数据预览: \n{existing_df.to_string()}")
@@ -2368,13 +2392,25 @@ class GPUBatchPearsonAnalyzer:
             'total_periods': len(high_correlation_periods),
             'next_day_gap_up': 0,  # 下1个交易日高开
             'next_1_day_up': 0,    # 下1个交易日上涨
+            'next_2_day_up': 0,    # 下2个交易日上涨
             'next_3_day_up': 0,    # 下3个交易日上涨
+            'next_4_day_up': 0,    # 下4个交易日上涨
             'next_5_day_up': 0,    # 下5个交易日上涨
+            'next_6_day_up': 0,    # 下6个交易日上涨
+            'next_7_day_up': 0,    # 下7个交易日上涨
+            'next_8_day_up': 0,    # 下8个交易日上涨
+            'next_9_day_up': 0,    # 下9个交易日上涨
             'next_10_day_up': 0,   # 下10个交易日上涨
             'valid_periods': {
                 'next_day': 0,
+                'next_2_day': 0,
                 'next_3_day': 0,
+                'next_4_day': 0,
                 'next_5_day': 0,
+                'next_6_day': 0,
+                'next_7_day': 0,
+                'next_8_day': 0,
+                'next_9_day': 0,
                 'next_10_day': 0
             }
         }
@@ -2448,7 +2484,24 @@ class GPUBatchPearsonAnalyzer:
             else:
                 if self.debug:
                     self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 次日数据不足，无法统计")
-            
+
+            # 检查下2个交易日
+            if end_idx + 2 < len(source_data):
+                day_2_close = source_data.iloc[end_idx + 2]['close']
+                stats['valid_periods']['next_2_day'] += 1
+                if day_2_close > up_threshold_price:
+                    stats['next_2_day_up'] += 1
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第2日: 收:{float(day_2_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_2_close > up_threshold_price)}"
+                        )
+                    except Exception:
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第2日: 收:{day_2_close}")
+            else:
+                if self.debug:
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第2日数据不足，无法统计")
+
             # 检查下3个交易日
             if end_idx + 3 < len(source_data):
                 day_3_close = source_data.iloc[end_idx + 3]['close']
@@ -2466,7 +2519,24 @@ class GPUBatchPearsonAnalyzer:
             else:
                 if self.debug:
                     self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第3日数据不足，无法统计")
-            
+
+            # 检查下4个交易日
+            if end_idx + 4 < len(source_data):
+                day_4_close = source_data.iloc[end_idx + 4]['close']
+                stats['valid_periods']['next_4_day'] += 1
+                if day_4_close > up_threshold_price:
+                    stats['next_4_day_up'] += 1
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第4日: 收:{float(day_4_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_4_close > up_threshold_price)}"
+                        )
+                    except Exception:
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第4日: 收:{day_4_close}")
+            else:
+                if self.debug:
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第4日数据不足，无法统计")
+
             # 检查下5个交易日
             if end_idx + 5 < len(source_data):
                 day_5_close = source_data.iloc[end_idx + 5]['close']
@@ -2484,7 +2554,75 @@ class GPUBatchPearsonAnalyzer:
             else:
                 if self.debug:
                     self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第5日数据不足，无法统计")
-            
+
+            # 检查下6个交易日
+            if end_idx + 6 < len(source_data):
+                day_6_close = source_data.iloc[end_idx + 6]['close']
+                stats['valid_periods']['next_6_day'] += 1
+                if day_6_close > up_threshold_price:
+                    stats['next_6_day_up'] += 1
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第6日: 收:{float(day_6_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_6_close > up_threshold_price)}"
+                        )
+                    except Exception:
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第6日: 收:{day_6_close}")
+            else:
+                if self.debug:
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第6日数据不足，无法统计")
+
+            # 检查下7个交易日
+            if end_idx + 7 < len(source_data):
+                day_7_close = source_data.iloc[end_idx + 7]['close']
+                stats['valid_periods']['next_7_day'] += 1
+                if day_7_close > up_threshold_price:
+                    stats['next_7_day_up'] += 1
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第7日: 收:{float(day_7_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_7_close > up_threshold_price)}"
+                        )
+                    except Exception:
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第7日: 收:{day_7_close}")
+            else:
+                if self.debug:
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第7日数据不足，无法统计")
+
+            # 检查下8个交易日
+            if end_idx + 8 < len(source_data):
+                day_8_close = source_data.iloc[end_idx + 8]['close']
+                stats['valid_periods']['next_8_day'] += 1
+                if day_8_close > up_threshold_price:
+                    stats['next_8_day_up'] += 1
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第8日: 收:{float(day_8_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_8_close > up_threshold_price)}"
+                        )
+                    except Exception:
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第8日: 收:{day_8_close}")
+            else:
+                if self.debug:
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第8日数据不足，无法统计")
+
+            # 检查下9个交易日
+            if end_idx + 9 < len(source_data):
+                day_9_close = source_data.iloc[end_idx + 9]['close']
+                stats['valid_periods']['next_9_day'] += 1
+                if day_9_close > up_threshold_price:
+                    stats['next_9_day_up'] += 1
+                if self.debug:
+                    try:
+                        self.logger.debug(
+                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第9日: 收:{float(day_9_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_9_close > up_threshold_price)}"
+                        )
+                    except Exception:
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第9日: 收:{day_9_close}")
+            else:
+                if self.debug:
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第9日数据不足，无法统计")
+
             # 检查下10个交易日
             if end_idx + 10 < len(source_data):
                 day_10_close = source_data.iloc[end_idx + 10]['close']
@@ -2508,13 +2646,31 @@ class GPUBatchPearsonAnalyzer:
         if stats['valid_periods']['next_day'] > 0:
             stats['ratios']['next_day_gap_up'] = stats['next_day_gap_up'] / stats['valid_periods']['next_day']
             stats['ratios']['next_1_day_up'] = stats['next_1_day_up'] / stats['valid_periods']['next_day']
-        
+
+        if stats['valid_periods']['next_2_day'] > 0:
+            stats['ratios']['next_2_day_up'] = stats['next_2_day_up'] / stats['valid_periods']['next_2_day']
+
         if stats['valid_periods']['next_3_day'] > 0:
             stats['ratios']['next_3_day_up'] = stats['next_3_day_up'] / stats['valid_periods']['next_3_day']
-        
+
+        if stats['valid_periods']['next_4_day'] > 0:
+            stats['ratios']['next_4_day_up'] = stats['next_4_day_up'] / stats['valid_periods']['next_4_day']
+
         if stats['valid_periods']['next_5_day'] > 0:
             stats['ratios']['next_5_day_up'] = stats['next_5_day_up'] / stats['valid_periods']['next_5_day']
-        
+
+        if stats['valid_periods']['next_6_day'] > 0:
+            stats['ratios']['next_6_day_up'] = stats['next_6_day_up'] / stats['valid_periods']['next_6_day']
+
+        if stats['valid_periods']['next_7_day'] > 0:
+            stats['ratios']['next_7_day_up'] = stats['next_7_day_up'] / stats['valid_periods']['next_7_day']
+
+        if stats['valid_periods']['next_8_day'] > 0:
+            stats['ratios']['next_8_day_up'] = stats['next_8_day_up'] / stats['valid_periods']['next_8_day']
+
+        if stats['valid_periods']['next_9_day'] > 0:
+            stats['ratios']['next_9_day_up'] = stats['next_9_day_up'] / stats['valid_periods']['next_9_day']
+
         if stats['valid_periods']['next_10_day'] > 0:
             stats['ratios']['next_10_day_up'] = stats['next_10_day_up'] / stats['valid_periods']['next_10_day']
         # 🔧 Debug：预测统计汇总
@@ -2523,8 +2679,14 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.debug(
                     "🔧 [预测统计汇总] "
                     f"样本数={stats['total_periods']}, 次日(valid={stats['valid_periods']['next_day']}, 高开={stats['next_day_gap_up']}, 上涨={stats['next_1_day_up']}, 高开比={stats['ratios'].get('next_day_gap_up', 0):.3f}, 上涨比={stats['ratios'].get('next_1_day_up', 0):.3f}); "
+                    f"2日(valid={stats['valid_periods']['next_2_day']}, 上涨={stats['next_2_day_up']}, 比例={stats['ratios'].get('next_2_day_up', 0):.3f}); "
                     f"3日(valid={stats['valid_periods']['next_3_day']}, 上涨={stats['next_3_day_up']}, 比例={stats['ratios'].get('next_3_day_up', 0):.3f}); "
+                    f"4日(valid={stats['valid_periods']['next_4_day']}, 上涨={stats['next_4_day_up']}, 比例={stats['ratios'].get('next_4_day_up', 0):.3f}); "
                     f"5日(valid={stats['valid_periods']['next_5_day']}, 上涨={stats['next_5_day_up']}, 比例={stats['ratios'].get('next_5_day_up', 0):.3f}); "
+                    f"6日(valid={stats['valid_periods']['next_6_day']}, 上涨={stats['next_6_day_up']}, 比例={stats['ratios'].get('next_6_day_up', 0):.3f}); "
+                    f"7日(valid={stats['valid_periods']['next_7_day']}, 上涨={stats['next_7_day_up']}, 比例={stats['ratios'].get('next_7_day_up', 0):.3f}); "
+                    f"8日(valid={stats['valid_periods']['next_8_day']}, 上涨={stats['next_8_day_up']}, 比例={stats['ratios'].get('next_8_day_up', 0):.3f}); "
+                    f"9日(valid={stats['valid_periods']['next_9_day']}, 上涨={stats['next_9_day_up']}, 比例={stats['ratios'].get('next_9_day_up', 0):.3f}); "
                     f"10日(valid={stats['valid_periods']['next_10_day']}, 上涨={stats['next_10_day_up']}, 比例={stats['ratios'].get('next_10_day_up', 0):.3f})"
                 )
             except Exception as e:
@@ -3300,9 +3462,13 @@ class GPUBatchPearsonAnalyzer:
                 end_unit = min(start_unit + self.evaluation_batch_size, total_computation_units)
                 current_batch_units = end_unit - start_unit
                 
+                # 批次总耗时计时开始
+                batch_total_start_wall = time.time()
+                self.start_timer('batch_total_time')
                 self.logger.info(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {current_batch_units} 个计算单元")
                 
                 # 获取当前批次的计算单元
+                self.start_timer('batch_units_preparation')
                 batch_units = all_computation_units[start_unit:end_unit]
                 
                 # 按股票分组当前批次的计算单元
@@ -3325,6 +3491,7 @@ class GPUBatchPearsonAnalyzer:
                         batch_stock_indices.append(stock_idx)
                         batch_date_indices.append(date_idx)
                         batch_dates_list.append(date)
+                self.end_timer('batch_units_preparation')
                 
                 # 提取批次数据：[batch_size, window_size, 3]，并构建批次掩码 [1, batch_size]
                 # batch_recent_data: [num_stocks, evaluation_days, window_size, 3]
@@ -3395,6 +3562,7 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.info(f"🚀 批次 {batch_idx + 1} GPU计算 - 完成，共发现{total_high_correlations}个高相关记录，总耗时{elapsed_wall:.3f}秒")
                 
                 # 合并批次结果
+                self.start_timer('post_batch_merging_cpu')
                 if batch_correlations:
                     self.logger.debug(f"🔄 [批次合并] 开始合并第{batch_idx + 1}批结果")
                     
@@ -3456,12 +3624,19 @@ class GPUBatchPearsonAnalyzer:
                     self.logger.debug(f"🔄 [批次合并] 累加后总高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
                 else:
                     self.logger.warning(f"🔄 [批次合并] 第{batch_idx + 1}批没有返回结果")
+                self.end_timer('post_batch_merging_cpu')
                 
                 # 清理GPU缓存
+                self.start_timer('post_batch_memory_cleanup')
                 if self.device.type == 'cuda':
                     torch.cuda.empty_cache()
                     gc.collect()
+                self.end_timer('post_batch_memory_cleanup')
                 
+                total_elapsed = time.time() - batch_total_start_wall
+                non_gpu_elapsed = max(0.0, total_elapsed - elapsed_wall)
+                self.end_timer('batch_total_time')
+                self.logger.info(f"⏱️ 批次 {batch_idx + 1} 总耗时: {total_elapsed:.3f}秒 | 非GPU阶段: {non_gpu_elapsed:.3f}秒")
                 self.logger.debug(f"✅ 批次 {batch_idx + 1} 处理完成，已处理 {current_batch_units} 个计算单元")
         else:
             # 单股票模式的原有逻辑
@@ -3472,7 +3647,9 @@ class GPUBatchPearsonAnalyzer:
                 
                 batch_dates = valid_dates[start_idx:end_idx]
                 batch_size = len(batch_dates)
-                
+                # 批次总耗时计时开始
+                batch_total_start_wall = time.time()
+                self.start_timer('batch_total_time')
                 self.logger.debug(f"🔄 处理第 {batch_idx + 1}/{total_batches} 批: {batch_size} 个评测日期")
                 self.logger.info(f"📅 日期范围: {batch_dates[0]} 到 {batch_dates[-1]}")
                 
@@ -3502,6 +3679,7 @@ class GPUBatchPearsonAnalyzer:
                     self.logger.debug(f"   单元 {i+1}: 股票代码={self.stock_code}, 评测日期={date}")
                 
                 # 构建与评测单元一一对应的股票代码列表，并构造掩码子集
+                self.start_timer('batch_units_preparation')
                 batch_evaluation_unit_stock_codes = [self.stock_code] * len(batch_dates)
                 batch_valid_mask = None
                 if valid_mask is not None:
@@ -3514,12 +3692,16 @@ class GPUBatchPearsonAnalyzer:
                             batch_valid_mask = valid_mask[:, start_idx:end_idx].to(self.device).bool()
                     except Exception:
                         batch_valid_mask = None
+                self.end_timer('batch_units_preparation')
                 
                 batch_correlations = self.calculate_batch_gpu_correlation_optimized(
                     batch_recent_subset, historical_periods_data, batch_dates, stock_codes=batch_evaluation_unit_stock_codes, valid_mask=batch_valid_mask
                 )
                 self.monitor_gpu_memory(f"批次 {batch_idx + 1} 完成")
                 self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 完成")
+                total_elapsed = time.time() - batch_total_start_wall
+                self.end_timer('batch_total_time')
+                self.logger.info(f"⏱️ 批次 {batch_idx + 1} 总耗时: {total_elapsed:.3f}秒")
                 
                 if not batch_correlations:
                     self.logger.error(f"批次 {batch_idx + 1} 计算失败")
@@ -3916,6 +4098,7 @@ class GPUBatchPearsonAnalyzer:
             # 构建评测单元列表 - 使用和批次处理时相同的逻辑
             evaluation_units = []
             self.logger.debug("💾 开始构建评测单元列表...")
+            self.start_timer('csv_data_prep')
             
             # 获取评测日期列表
             evaluation_dates = result.get('evaluation_dates', [])
@@ -4006,8 +4189,14 @@ class GPUBatchPearsonAnalyzer:
                     '实际计算数量': daily_result.get('actual_used_unique_periods', 0),
                     '下1日高开': f"{prediction_stats.get('ratios', {}).get('next_day_gap_up', 0):.2%}" if prediction_stats else 'N/A',
                     '下1日上涨': f"{prediction_stats.get('ratios', {}).get('next_1_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下2日上涨': f"{prediction_stats.get('ratios', {}).get('next_2_day_up', 0):.2%}" if prediction_stats else 'N/A',
                     '下3日上涨': f"{prediction_stats.get('ratios', {}).get('next_3_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下4日上涨': f"{prediction_stats.get('ratios', {}).get('next_4_day_up', 0):.2%}" if prediction_stats else 'N/A',
                     '下5日上涨': f"{prediction_stats.get('ratios', {}).get('next_5_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下6日上涨': f"{prediction_stats.get('ratios', {}).get('next_6_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下7日上涨': f"{prediction_stats.get('ratios', {}).get('next_7_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下8日上涨': f"{prediction_stats.get('ratios', {}).get('next_8_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '下9日上涨': f"{prediction_stats.get('ratios', {}).get('next_9_day_up', 0):.2%}" if prediction_stats else 'N/A',
                     '下10日上涨': f"{prediction_stats.get('ratios', {}).get('next_10_day_up', 0):.2%}" if prediction_stats else 'N/A'
                 }
                 new_rows.append(row_data)
@@ -4025,6 +4214,7 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.debug(f"💾 待写入新数据行数: {len(new_rows)}")
                 
                 new_df = pd.DataFrame(new_rows)
+                self.end_timer('csv_data_prep')
                 self.logger.debug(f"💾 新DataFrame创建成功，列名: {list(new_df.columns)}")
                 
                 # 确保代码列为字符串类型
@@ -4035,6 +4225,7 @@ class GPUBatchPearsonAnalyzer:
                 
                 # 使用追加模式写入CSV
                 self.logger.debug(f"💾 开始追加写入CSV文件 (文件已存在: {file_exists})...")
+                self.start_timer('csv_write')
                 new_df.to_csv(
                     self.csv_results_file, 
                     mode='a' if file_exists else 'w',  # 如果文件存在则追加，否则新建
@@ -4042,6 +4233,7 @@ class GPUBatchPearsonAnalyzer:
                     index=False, 
                     encoding='utf-8-sig'
                 )
+                self.end_timer('csv_write')
                 
                 # 保存后验证
                 self.logger.debug(f"✅ CSV文件追加写入完成，新增 {len(new_rows)} 行数据")
