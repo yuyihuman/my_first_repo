@@ -288,6 +288,23 @@ def _format_table(headers, rows, aligns=None, sep='  '):
         lines.append(line)
     return '\n'.join(lines) + '\n'
 
+def _format_table_with_originals(headers, rows, original_lines, csv_file_path, aligns=None, sep='  '):
+    """生成带原始CSV记录前置输出的表格字符串"""
+    if not rows:
+        return ''
+    col_count = len(headers)
+    aligns = aligns or ['left'] * col_count
+    widths = [max(_display_width(headers[i]), max(_display_width(r[i]) for r in rows)) for i in range(col_count)]
+    lines = []
+    header_line = sep.join(_pad(headers[i], widths[i], aligns[i]) for i in range(col_count))
+    lines.append(header_line)
+    for r, orig in zip(rows, original_lines):
+        # 在每条对齐行之前输出对应的原始CSV记录
+        lines.append(f"原始记录({csv_file_path}): {orig}")
+        line = sep.join(_pad(r[i], widths[i], aligns[i]) for i in range(col_count))
+        lines.append(line)
+    return '\n'.join(lines) + '\n'
+
 def save_results_to_file(results, output_file, count_threshold=100):
     """将结果保存到文件"""
     try:
@@ -450,8 +467,12 @@ def save_results_to_file(results, output_file, count_threshold=100):
                 f.write(f"持平记录数: {flat_count} (0.00%)\n")
             f.write(f"无法计算记录数: {na_count}\n")
             
-            # 输出高性能记录详情表格（对齐）
-            f.write(_format_table(details_headers, details_rows, details_aligns))
+            # 输出高性能记录详情表格，且在每条记录前打印原始CSV行
+            details_original_lines = []
+            # 保持与details_rows一致的顺序，收集对应的原始CSV记录
+            for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True):
+                details_original_lines.append(','.join(detail.get('original_row', [])) if detail.get('original_row') else detail.get('original_csv_line', ''))
+            f.write(_format_table_with_originals(details_headers, details_rows, details_original_lines, results.get('csv_file_path', ''), details_aligns))
 
             # 添加按持股天数的涨跌统计
             f.write("\n----- 按持股天数的涨跌统计 -----\n")
@@ -554,7 +575,19 @@ def save_results_to_file(results, output_file, count_threshold=100):
                             str(detail.get('max_up_percent', 'N/A')),
                             str(detail.get('max_down_percent', 'N/A'))
                         ])
-                    f.write(_format_table(sub_headers, sub_rows, sub_aligns))
+                    # 在分类详细记录中，同样在每条表格行前打印原始CSV行
+                    sub_original_lines = []
+                    for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True):
+                        # 计算分类键
+                        sell_days = int(detail['sell_days'])
+                        if sell_days == 1:
+                            base_label = detail['max_percentage_metric'].split('(')[0]
+                            days_key_check = '1_high_open' if '高开' in base_label else '1_close'
+                        else:
+                            days_key_check = sell_days if sell_days in [3, 5, 10] else 'other'
+                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold and days_key_check == days:
+                            sub_original_lines.append(','.join(detail.get('original_row', [])) if detail.get('original_row') else detail.get('original_csv_line', ''))
+                    f.write(_format_table_with_originals(sub_headers, sub_rows, sub_original_lines, results.get('csv_file_path', ''), sub_aligns))
 
             # 按年度的持股天数涨跌统计
             f.write("\n----- 按年度的持股天数涨跌统计 -----\n")
@@ -752,7 +785,8 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
         'high_performance_records': 0,
         'stock_stats': defaultdict(lambda: {'total': 0, 'filtered': 0, 'high_performance': 0}),
         'date_stats': defaultdict(lambda: {'total': 0, 'filtered': 0, 'high_performance': 0}),
-        'details': []
+        'details': [],
+        'csv_file_path': csv_file_path
     }
     
     try:
@@ -859,7 +893,9 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                                 'sell_price': price_data['sell_price'],
                                 'change_percent': price_data['change_percent'],
                                 'max_up_percent': price_data.get('max_up_percent', 'N/A'),
-                                'max_down_percent': price_data.get('max_down_percent', 'N/A')
+                                'max_down_percent': price_data.get('max_down_percent', 'N/A'),
+                                'original_row': row,
+                                'original_csv_line': ','.join(row)
                             })
                     
                     logging.info(f"CSV文件分析完成，共处理 {results['total_records']} 条记录")
