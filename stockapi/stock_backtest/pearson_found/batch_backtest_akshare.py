@@ -2,6 +2,7 @@ import argparse
 import subprocess
 import sys
 from datetime import datetime, timedelta
+from typing import Optional
 from pathlib import Path
 
 
@@ -26,6 +27,16 @@ def parse_args():
     )
     parser.add_argument(
         "--evaluation_days", type=int, default=30, help="传递给 pearson_analyzer_gpu_3.py 的 --evaluation_days"
+    )
+
+    # 传递历史数据时间上下限（仅对对比股票生效，与 pearson_analyzer_gpu_3.py 保持一致）
+    parser.add_argument(
+        "--earliest_date", type=str, default="2020-01-01",
+        help="传递给 pearson_analyzer_gpu_3.py 的 --earliest_date（历史数据下限，仅对对比股票生效）"
+    )
+    parser.add_argument(
+        "--latest_date", type=str, default=None,
+        help="传递给 pearson_analyzer_gpu_3.py 的 --latest_date（历史数据上限，仅对对比股票生效）"
     )
 
     # 批量控制参数
@@ -133,6 +144,8 @@ def run_backtests_for_anchors(
     comparison_mode: str,
     csv_filename: str,
     evaluation_days: int,
+    earliest_date: str,
+    latest_date: Optional[str],
     append_date_to_csv: bool,
     sleep_seconds: float,
     script_path: Path,
@@ -160,7 +173,13 @@ def run_backtests_for_anchors(
             d,
             "--evaluation_days",
             str(evaluation_days),
+            "--earliest_date",
+            str(earliest_date),
         ]
+
+        # latest_date 仅在传入不为空时添加
+        if latest_date:
+            cmd.extend(["--latest_date", str(latest_date)])
 
         prefix = "DRY-RUN:" if dry_run else "RUN:"
         print(prefix, " ".join(cmd))
@@ -207,6 +226,8 @@ def main():
         comparison_mode=args.comparison_mode,
         csv_filename=args.csv_filename,
         evaluation_days=args.evaluation_days,
+        earliest_date=args.earliest_date,
+        latest_date=args.latest_date,
         append_date_to_csv=args.append_date_to_csv,
         sleep_seconds=args.sleep_seconds,
         script_path=script_path,

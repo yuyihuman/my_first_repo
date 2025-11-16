@@ -102,8 +102,8 @@ class GPUBatchPearsonAnalyzer:
                  evaluation_days=1, debug=False, comparison_stocks=None, 
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
-                 batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01',
-                 num_processes=None, evaluation_batch_size=30,
+                 batch_size=1000, gpu_memory_limit=0.8, earliest_date='2020-01-01', latest_date=None,
+                 num_processes=None, evaluation_batch_size=100,
                  max_prediction_stats_count=100,
                  up_threshold_pct=0.01):
         """
@@ -123,12 +123,13 @@ class GPUBatchPearsonAnalyzer:
             use_gpu: 是否使用GPU加速
             batch_size: GPU批处理大小
             gpu_memory_limit: GPU内存使用限制（0.0-1.0）
-            earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
+            earliest_date: 数据获取的最早日期下限 (格式: YYYY-MM-DD，默认: 2020-01-01)
+            latest_date: 数据获取的历史数据上限 (格式: YYYY-MM-DD，仅对对比股票生效，默认: 不限制)
             num_processes: 多进程数量，None表示自动检测（默认为CPU核心数-1）
             evaluation_batch_size: 每批次处理的计算单元数量，用于控制GPU内存使用
                               单股票模式: 直接表示评测日期数量
                               多股票模式: 表示总计算单元数 (股票数 × 评测日期数)
-                              例如: 100股票×15评测日期=1500计算单元，batch_size=15时分100批处理 (默认: 15)
+                              例如: 100股票×15评测日期=1500计算单元，batch_size=15时分100批处理 (默认: 100)
         """
         # 支持多个股票代码
         if isinstance(stock_code, str):
@@ -157,6 +158,7 @@ class GPUBatchPearsonAnalyzer:
         self.comparison_mode = comparison_mode
         self.backtest_date = pd.to_datetime(backtest_date) if backtest_date else None
         self.earliest_date = pd.to_datetime(earliest_date)
+        self.latest_date = pd.to_datetime(latest_date) if latest_date else None
         self.use_gpu = use_gpu
         self.batch_size = batch_size
         self.gpu_memory_limit = gpu_memory_limit
@@ -310,6 +312,15 @@ class GPUBatchPearsonAnalyzer:
         
         self.logger.addHandler(file_handler)
         self.logger.info(f"批量评测日志文件创建: {log_path}")
+
+        # 若评测锚点在 latest_date 之后：不影响目标股票窗口与相关性计算，仅提示对比股票的历史窗口仅限 latest_date 之前
+        if self.backtest_date is not None and self.latest_date is not None:
+            if self.backtest_date > self.latest_date:
+                self.logger.warning(
+                    f"评测锚点 {self.backtest_date.strftime('%Y-%m-%d')} 晚于 latest_date "
+                    f"{self.latest_date.strftime('%Y-%m-%d')}。目标股票窗口不受限制，相关性将与 latest_date 之前的历史窗口比较，"
+                    f"对比股票在该日期之后的数据不会参与比较。"
+                )
     
     def _setup_csv_file(self):
         """设置CSV文件，如果不存在则创建"""
@@ -567,13 +578,23 @@ class GPUBatchPearsonAnalyzer:
             
         original_count = len(data)
         date_filtered_count = original_count
-        date_removed_count = 0
+        date_removed_lower_count = 0
+        date_removed_upper_count = 0
         
         # 只对对比股票应用日期过滤，目标股票使用完整历史数据
         if not is_target_stock:
+            # 下限过滤（earliest_date）
             data = data[data.index >= self.earliest_date]
-            date_filtered_count = len(data)
-            date_removed_count = original_count - date_filtered_count
+            date_filtered_after_lower = len(data)
+            date_removed_lower_count = original_count - date_filtered_after_lower
+
+            # 上限过滤（latest_date，若设置）
+            if self.latest_date is not None:
+                data = data[data.index <= self.latest_date]
+                date_filtered_count = len(data)
+                date_removed_upper_count = date_filtered_after_lower - date_filtered_count
+            else:
+                date_filtered_count = date_filtered_after_lower
         
         # 数据质量过滤（对所有股票都应用）
         data = data[
@@ -586,8 +607,10 @@ class GPUBatchPearsonAnalyzer:
         final_count = len(data)
         quality_removed_count = date_filtered_count - final_count
         
-        if date_removed_count > 0:
-            self.logger.debug(f"对比股票 {stock_code} 日期过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_count} 条数据")
+        if date_removed_lower_count > 0:
+            self.logger.debug(f"对比股票 {stock_code} 日期下限过滤完成，移除早于 {self.earliest_date.strftime('%Y-%m-%d')} 的 {date_removed_lower_count} 条数据")
+        if date_removed_upper_count > 0 and self.latest_date is not None:
+            self.logger.debug(f"对比股票 {stock_code} 日期上限过滤完成，移除晚于 {self.latest_date.strftime('%Y-%m-%d')} 的 {date_removed_upper_count} 条数据")
         elif is_target_stock:
             self.logger.debug(f"目标股票 {stock_code} 使用完整历史数据，无日期过滤")
         
@@ -4283,8 +4306,8 @@ class GPUBatchPearsonAnalyzer:
 def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evaluation_days=1, 
                                          window_size=15, threshold=0.85, comparison_mode='default', 
                                          comparison_stocks=None, debug=False, csv_filename=None, 
-                                         use_gpu=True, batch_size=1000, earliest_date='2020-01-01',
-                                         num_processes=None, evaluation_batch_size=30):
+                                         use_gpu=True, batch_size=1000, earliest_date='2020-01-01', latest_date=None,
+                                         num_processes=None, evaluation_batch_size=100):
     """
     GPU批量评测Pearson相关性分析的便捷函数
     
@@ -4300,7 +4323,8 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         csv_filename: CSV文件名
         use_gpu: 是否使用GPU
         batch_size: 批处理大小
-        earliest_date: 数据获取的最早日期限制 (格式: YYYY-MM-DD，默认: 2020-01-01)
+        earliest_date: 数据获取的最早日期下限 (格式: YYYY-MM-DD，默认: 2020-01-01)
+        latest_date: 数据获取的历史数据上限 (格式: YYYY-MM-DD，仅对对比股票生效，默认: 不限制)
         evaluation_batch_size: 每批次处理的评测日期数量
         
     Returns:
@@ -4311,7 +4335,7 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
     
     if csv_filename is None:
         csv_filename = 'batch_evaluation_results.csv'
-    
+
     analyzer = GPUBatchPearsonAnalyzer(
         stock_code=stock_code,
         window_size=window_size,
@@ -4325,6 +4349,7 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         use_gpu=use_gpu,
         batch_size=batch_size,
         earliest_date=earliest_date,
+        latest_date=latest_date,
         num_processes=num_processes,
         evaluation_batch_size=evaluation_batch_size
     )
@@ -4352,13 +4377,15 @@ if __name__ == "__main__":
                        help='GPU批处理大小 - 控制单次GPU计算的数据量，影响内存使用和计算效率。'
                             '推荐值：RTX 3060(8GB)=500-1000, RTX 3080(10GB)=1000-2000, RTX 4090(24GB)=2000-5000 (默认: 1000)')
     parser.add_argument('--earliest_date', type=str, default='2020-01-01', 
-                       help='数据获取的最早日期限制 (YYYY-MM-DD)，早于此日期的数据将被过滤掉 (默认: 2020-01-01)')
+                       help='历史数据的日期下限 (YYYY-MM-DD)，早于此日期的数据将被过滤掉（仅对对比股票生效，默认: 2020-01-01）')
+    parser.add_argument('--latest_date', type=str, default=None,
+                       help='历史数据的日期上限 (YYYY-MM-DD)，晚于此日期的数据将被过滤掉（仅对对比股票生效，默认: 不限制）')
     parser.add_argument('--num_processes', type=int, default=None,
                        help='多进程数量，None表示自动检测（默认为CPU核心数-1）')
-    parser.add_argument('--evaluation_batch_size', type=int, default=30,
+    parser.add_argument('--evaluation_batch_size', type=int, default=100,
                         help='每批次处理的计算单元数量，用于控制GPU内存使用。'
                              '单股票模式: 直接表示评测日期数量 (如evaluation_days=100, batch_size=15, 分7批处理)。'
-                             '多股票模式: 表示总计算单元数 (如100股票×15评测日期=1500单元, batch_size=15, 分100批处理) (默认: 30)')
+                             '多股票模式: 表示总计算单元数 (如100股票×15评测日期=1500单元, batch_size=15, 分100批处理) (默认: 100)')
 
     args = parser.parse_args()
     
@@ -4408,6 +4435,7 @@ if __name__ == "__main__":
         use_gpu=not args.no_gpu,
         batch_size=args.batch_size,
         earliest_date=args.earliest_date,
+        latest_date=args.latest_date,
         num_processes=args.num_processes,
         evaluation_batch_size=args.evaluation_batch_size
     )

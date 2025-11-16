@@ -510,9 +510,9 @@ def save_results_to_file(results, output_file, count_threshold=100):
 
             # 添加按持股天数的涨跌统计
             f.write("\n----- 按持股天数的涨跌统计 -----\n")
-            
-            # 按固定顺序显示统计结果
-            for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'other']:
+
+            # 按固定顺序显示统计结果（移除“其他天数持股”输出）
+            for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10]:
                 stats = days_stats[days]
                 
                 # 根据不同的持股天数设置标签
@@ -520,8 +520,6 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     days_label = "1日持股(开盘卖出/下1日高开)"
                 elif days == '1_close':
                     days_label = "1日持股(收盘卖出/下1日上涨)"
-                elif days == 'other':
-                    days_label = "其他天数持股"
                 else:
                     days_label = f"{days}日持股"
                 
@@ -540,9 +538,9 @@ def save_results_to_file(results, output_file, count_threshold=100):
             
             # 添加实际计算数量大于等于阈值的统计
             f.write(f"\n----- 实际计算数量大于等于{count_threshold}的统计 -----\n")
-            
-            # 按固定顺序显示相关数量大于阈值的统计结果
-            for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'other']:
+
+            # 按固定顺序显示相关数量大于阈值的统计结果（移除“其他天数持股”输出）
+            for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10]:
                 stats = high_corr_stats[days]
                 
                 # 根据不同的持股天数设置标签
@@ -550,8 +548,6 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     days_label = "1日持股(开盘卖出/下1日高开)"
                 elif days == '1_close':
                     days_label = "1日持股(收盘卖出/下1日上涨)"
-                elif days == 'other':
-                    days_label = "其他天数持股"
                 else:
                     days_label = f"{days}日持股"
                 
@@ -675,14 +671,13 @@ def save_results_to_file(results, output_file, count_threshold=100):
                 return (9999 if isinstance(y, str) else int(y))
             for year in sorted(year_days_stats.keys(), key=_year_sort_key):
                 f.write(f"\n[年度: {year}]\n")
-                for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'other']:
+                # 年度持股天数统计（移除“其他天数持股”输出）
+                for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10]:
                     stats = year_days_stats[year][days]
                     if days == '1_high_open':
                         days_label = "1日持股(开盘卖出/下1日高开)"
                     elif days == '1_close':
                         days_label = "1日持股(收盘卖出/下1日上涨)"
-                    elif days == 'other':
-                        days_label = "其他天数持股"
                     else:
                         days_label = f"{days}日持股"
                     total_valid_days = stats['up'] + stats['down'] + stats['flat']
@@ -751,14 +746,13 @@ def save_results_to_file(results, output_file, count_threshold=100):
             # 输出每年度高相关统计
             for year in sorted(year_high_corr_stats.keys(), key=_year_sort_key):
                 f.write(f"\n[年度: {year}]\n")
-                for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'other']:
+                # 年度高相关统计（移除“其他天数持股”输出）
+                for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10]:
                     stats = year_high_corr_stats[year][days]
                     if days == '1_high_open':
                         days_label = "1日持股(开盘卖出/下1日高开)"
                     elif days == '1_close':
                         days_label = "1日持股(收盘卖出/下1日上涨)"
-                    elif days == 'other':
-                        days_label = "其他天数持股"
                     else:
                         days_label = f"{days}日持股"
                     total_valid_days = stats['up'] + stats['down'] + stats['flat']
