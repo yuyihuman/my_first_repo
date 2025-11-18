@@ -1283,35 +1283,35 @@
     "2025-09": {
       "year": 2025,
       "month": 9,
-      "price_index": 169.59,
-      "yoy_change": -4.27,
-      "total_price": 2382000495,
-      "total_area": 55636,
-      "avg_price": 42814.01,
+      "price_index": 173.25,
+      "yoy_change": -3.76,
+      "total_price": 2557963791,
+      "total_area": 58483,
+      "avg_price": 43738.59,
       "valid_days": 30,
-      "total_records": 562
+      "total_records": 590
     },
     "2025-10": {
       "year": 2025,
       "month": 10,
-      "price_index": 157.78,
-      "yoy_change": -5.8,
-      "total_price": 1058272819,
-      "total_area": 26567,
-      "avg_price": 39834.11,
+      "price_index": 154.92,
+      "yoy_change": -5.68,
+      "total_price": 2086871814,
+      "total_area": 53356,
+      "avg_price": 39112.22,
       "valid_days": 30,
-      "total_records": 273
+      "total_records": 547
     },
     "2025-11": {
       "year": 2025,
       "month": 11,
-      "price_index": 182.09,
-      "yoy_change": -4.19,
-      "total_price": 552938572,
-      "total_area": 12028,
-      "avg_price": 45970.95,
+      "price_index": 179.73,
+      "yoy_change": -4.41,
+      "total_price": 542922837,
+      "total_area": 11965,
+      "avg_price": 45375.92,
       "valid_days": 9,
-      "total_records": 123
+      "total_records": 122
     }
   }
 }
