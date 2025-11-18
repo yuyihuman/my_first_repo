@@ -27,11 +27,20 @@ def analyze_csv_data(file_path, min_correlation_count=10):
             date_index = header.index('评测日期')
             actual_index = header.index('实际计算数量')
 
-            # 动态识别指标列：包含“下…日上涨”或“下1日高开”的列均纳入
+            # 动态识别指标列：仅纳入“下1日高开”和“下1日上涨”，不考虑2-10日上涨
             metric_labels = []
             for col in header:
-                if col.startswith('下') and ('上涨' in col or '高开' in col):
-                    metric_labels.append(col)
+                if col.startswith('下') and (('上涨' in col) or ('高开' in col)):
+                    # 兼容“下一日”与“下1日”的写法
+                    col_norm = col.replace('下一日', '下1日')
+                    m = re.search(r'下(\d+)日', col_norm)
+                    if m:
+                        try:
+                            d = int(m.group(1))
+                            if d == 1:
+                                metric_labels.append(col)
+                        except Exception:
+                            pass
             # 保持原有顺序（按CSV表头）
             metrics_indices = [header.index(lbl) for lbl in metric_labels]
 
@@ -267,20 +276,28 @@ def setup_logging(log_dir='logs'):
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     
-    # 添加文件处理器
+    # 添加文件处理器（包含文件名与代码行号）
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'))
     logger.addHandler(file_handler)
     
-    # 添加控制台处理器
+    # 添加控制台处理器（包含文件名与代码行号）
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'))
     logger.addHandler(console_handler)
     
     # 测试日志
     logger.info(f"日志系统初始化完成，日志文件: {log_file}")
+
+    # 统计并输出当前脚本的代码行数
+    try:
+        with open(__file__, 'r', encoding='utf-8') as _f:
+            _line_count = sum(1 for _ in _f)
+        logger.info(f"当前脚本代码行数: {_line_count}")
+    except Exception as e:
+        logger.warning(f"无法统计代码行数: {e}")
     
-    return logger
+    return logger, log_file
 
 def _display_width(text):
     """计算文本的显示宽度，CJK宽字符按宽度2，其他按1"""
@@ -340,9 +357,15 @@ def _format_table_with_originals(headers, rows, original_lines, csv_file_path, a
         lines.append(line)
     return '\n'.join(lines) + '\n'
 
-def save_results_to_file(results, output_file, count_threshold=100):
+def save_results_to_file(results, output_file, count_threshold=100, eval_days=15, selected_day=5, selected_days=None):
     """将结果保存到文件"""
     try:
+        # 确保输出目录存在
+        abs_path = os.path.abspath(output_file)
+        out_dir = os.path.dirname(abs_path)
+        if out_dir and not os.path.exists(out_dir):
+            os.makedirs(out_dir, exist_ok=True)
+
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write("===== 分析结果 =====\n")
             f.write(f"总记录数: {results['total_records']}\n")
@@ -386,45 +409,117 @@ def save_results_to_file(results, output_file, count_threshold=100):
             ]
             details_aligns = ['left','left','right','right','left','left','left','left','right','right','right','right','right']
             
+            # 选择器：统计“所选持股天数列表”内的记录
+            days_list = []
+            if isinstance(selected_days, (list, tuple)) and len(selected_days) > 0:
+                days_list = [int(x) for x in selected_days]
+            else:
+                days_list = [int(selected_day)]
+
+            def _is_selected_detail(d):
+                # 依据持股天数是否在选择列表中
+                try:
+                    sd = int(d.get('sell_days', 0))
+                except Exception:
+                    return False
+                return sd in days_list
+
             # 统计涨跌情况
             up_count = 0
             down_count = 0
             flat_count = 0
             na_count = 0
             
-            # 按持股天数统计（支持2/4/6/7/8/9日）
-            allowed_days = [2, 3, 4, 5, 6, 7, 8, 9, 10]
+            # 按持股天数统计（统计所选持股天数列表：均为收盘卖出一类）
+            allowed_days = days_list
             days_stats = {
-                '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},  # 1日持股开盘卖出
-                '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},  # 1日持股收盘卖出
+                f"{d}_close": {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+                for d in days_list
             }
-            for d in allowed_days:
-                days_stats[d] = {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
-            days_stats['other'] = {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
             
-            # 相关数量大于阈值的统计
+            # 相关数量大于阈值的统计（统计所选持股天数列表：收盘卖出一类）
             high_corr_stats = {
-                '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                f"{d}_close": {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+                for d in days_list
             }
-            for d in allowed_days:
-                high_corr_stats[d] = {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
-            high_corr_stats['other'] = {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+
+            # 新增：按区间位置条件分组统计（过去 eval_days 个交易日，含当日）
+            from data_loader import StockDataLoader
+            loader = StockDataLoader()
+            # 这里返回中文标签，便于直接用于输出
+            price_zone_stats = {
+                '满足条件': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+                '不满足条件': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
+            }
+
+            def _ma10_condition_for_date(stock_code, date_str, window_days):
+                """
+                分组条件（过去 window_days 个交易日，含当日）：
+                计算窗口内的总交易区间：使用 min(low) 与 max(high)（如无则退化为 min(close) 与 max(close)）。
+                当日收盘在该区间的位置占比 pos = (close_today - min_low) / (max_high - min_low)。
+                若 pos <= 0.10 则返回 '满足条件'，否则返回 '不满足条件'。
+                """
+                try:
+                    import pandas as pd
+                    # 需要 close/low/high 列（low/high优先，缺失则退化为close）
+                    df = loader.load_stock_data(stock_code, 'daily', fields=['close', 'low', 'high'])
+                    if df is None or df.empty:
+                        return '不满足条件'
+                    buy_dt = pd.to_datetime(date_str)
+                    # 若买入日期不在索引，使用最近不晚于买入日的日期
+                    if buy_dt not in df.index:
+                        prior = df.index[df.index <= buy_dt]
+                        if len(prior) == 0:
+                            return '不满足条件'
+                        buy_idx = df.index.get_loc(prior[-1])
+                    else:
+                        buy_idx = df.index.get_loc(buy_dt)
+
+                    # 窗口：过去 window_days 个交易日
+                    wd = max(1, int(window_days))
+                    start_idx = max(0, buy_idx - (wd - 1))
+                    end_idx = buy_idx
+                    window = df.iloc[start_idx:end_idx + 1]
+                    if window is None or window.empty:
+                        return '不满足条件'
+                    # 计算区间上下界
+                    if 'low' in window.columns and 'high' in window.columns and window['low'].notna().any() and window['high'].notna().any():
+                        min_low = float(window['low'].min())
+                        max_high = float(window['high'].max())
+                    else:
+                        # 退化为 close 的极值
+                        min_low = float(window['close'].min())
+                        max_high = float(window['close'].max())
+                    price_range = max_high - min_low
+                    if price_range <= 0:
+                        return '不满足条件'
+                    close_today = float(window.iloc[-1]['close'])
+                    pos = (close_today - min_low) / price_range
+                    return '满足条件' if pos <= 0.10 else '不满足条件'
+                except Exception:
+                    return '不满足条件'
             
-            for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True):
+            # 改为按持股时间排序：先按天数升序，1日中“开盘卖出”优先于“收盘卖出”
+            def _holding_sort_key(d):
+                try:
+                    sd = int(d.get('sell_days', 99))
+                except Exception:
+                    sd = 99
+                mode_order = 2
+                if sd == 1:
+                    base_label = d.get('max_percentage_metric', '').split('(')[0]
+                    # "高开"表示开盘卖出优先，其次为收盘卖出（含“上涨”）
+                    mode_order = 0 if ('高开' in base_label) else 1
+                return (sd, mode_order)
+
+            for detail in sorted(results['details'], key=_holding_sort_key):
                 metrics_str = ', '.join(detail['metrics'])
                 
-                # 处理1日持股的开盘/收盘卖出显示
+                # 仅展示所选持股天数的记录
+                if not _is_selected_detail(detail):
+                    continue
                 sell_days = int(detail['sell_days'])
-                sell_time_info = ""
-                
-                # 根据最佳指标来确定1日持股的卖出方式（不再使用股票代码奇偶数）
-                if sell_days == 1:
-                    base_label = detail['max_percentage_metric'].split('(')[0]
-                    if '高开' in base_label:
-                        sell_time_info = "开盘卖出"
-                    else:
-                        sell_time_info = "收盘卖出"
+                sell_time_info = "收盘卖出"
                 
                 # 构建卖出描述
                 sell_desc = f"买入{detail['stock_code']}，{detail['sell_days']}日后"
@@ -447,44 +542,46 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     str(detail.get('max_down_percent', 'N/A'))
                 ])
                 
-                # 统计涨跌情况
+                # 统计涨跌情况（统计所选持股天数列表）
                 sell_days = int(detail['sell_days'])  # 确保sell_days是整数
+                if sell_days not in days_list:
+                    continue
+                days_key = f"{sell_days}_close"
                 
-                # 区分1日持股的开盘卖出和收盘卖出
-                if sell_days == 1:
-                    base_label = detail['max_percentage_metric'].split('(')[0]
-                    days_key = '1_high_open' if '高开' in base_label else '1_close'
-                else:
-                    days_key = sell_days if sell_days in allowed_days else 'other'
-                
+                # 10日均线条件分组（过去 eval_days 个交易日，含当日）
+                zone_key = _ma10_condition_for_date(detail['stock_code'], detail['date'], eval_days)
+                price_zone_stats[zone_key]['total'] += 1
+
+                # 涨跌
                 if detail['change_percent'] != 'N/A':
                     change_value = float(detail['change_percent'].strip('%'))
                     if change_value > 0:
                         up_count += 1
                         days_stats[days_key]['up'] += 1
-                        # 实际计算数量大于等于阈值的统计
+                        price_zone_stats[zone_key]['up'] += 1
                         if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
                             high_corr_stats[days_key]['up'] += 1
                             high_corr_stats[days_key]['total'] += 1
                     elif change_value < 0:
                         down_count += 1
                         days_stats[days_key]['down'] += 1
-                        # 实际计算数量大于等于阈值的统计
+                        price_zone_stats[zone_key]['down'] += 1
                         if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
                             high_corr_stats[days_key]['down'] += 1
                             high_corr_stats[days_key]['total'] += 1
                     else:
                         flat_count += 1
                         days_stats[days_key]['flat'] += 1
-                        # 实际计算数量大于等于阈值的统计
+                        price_zone_stats[zone_key]['flat'] += 1
                         if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
                             high_corr_stats[days_key]['flat'] += 1
                             high_corr_stats[days_key]['total'] += 1
                     days_stats[days_key]['total'] += 1
                 else:
+                    # 无法计算数量
                     na_count += 1
                     days_stats[days_key]['na'] += 1
-                    # 实际计算数量大于等于阈值的统计
+                    price_zone_stats[zone_key]['na'] += 1
                     if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
                         high_corr_stats[days_key]['na'] += 1
             
@@ -504,27 +601,18 @@ def save_results_to_file(results, output_file, count_threshold=100):
             # 输出高性能记录详情表格，且在每条记录前打印原始CSV行
             details_original_lines = []
             # 保持与details_rows一致的顺序，收集对应的原始CSV记录
-            for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True):
+            # 原始CSV行也按持股时间的排序保持一致
+            for detail in sorted(results['details'], key=_holding_sort_key):
                 details_original_lines.append(','.join(detail.get('original_row', [])) if detail.get('original_row') else detail.get('original_csv_line', ''))
             f.write(_format_table_with_originals(details_headers, details_rows, details_original_lines, results.get('csv_file_path', ''), details_aligns))
 
-            # 添加按持股天数的涨跌统计
-            f.write("\n----- 按持股天数的涨跌统计 -----\n")
-
-            # 按固定顺序显示统计结果（移除“其他天数持股”输出）
-            for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+            # 添加按持股天数的涨跌统计（所选持股天数）
+            f.write(f"\n----- 按持股天数的涨跌统计（所选持股天数） -----\n")
+            for d in days_list:
+                days = f"{d}_close"
                 stats = days_stats[days]
-                
-                # 根据不同的持股天数设置标签
-                if days == '1_high_open':
-                    days_label = "1日持股(开盘卖出/下1日高开)"
-                elif days == '1_close':
-                    days_label = "1日持股(收盘卖出/下1日上涨)"
-                else:
-                    days_label = f"{days}日持股"
-                
+                days_label = f"{d}日持股(收盘卖出/下{d}日上涨)"
                 total_valid_days = stats['up'] + stats['down'] + stats['flat']
-                
                 if total_valid_days > 0:
                     up_percent = stats['up'] / total_valid_days * 100
                     down_percent = stats['down'] / total_valid_days * 100
@@ -539,17 +627,13 @@ def save_results_to_file(results, output_file, count_threshold=100):
             # 添加实际计算数量大于等于阈值的统计
             f.write(f"\n----- 实际计算数量大于等于{count_threshold}的统计 -----\n")
 
-            # 按固定顺序显示相关数量大于阈值的统计结果（移除“其他天数持股”输出）
-            for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+            # 显示相关数量≥阈值的统计结果（所选持股天数）
+            for d in days_list:
+                days = f"{d}_close"
                 stats = high_corr_stats[days]
                 
-                # 根据不同的持股天数设置标签
-                if days == '1_high_open':
-                    days_label = "1日持股(开盘卖出/下1日高开)"
-                elif days == '1_close':
-                    days_label = "1日持股(收盘卖出/下1日上涨)"
-                else:
-                    days_label = f"{days}日持股"
+                # 标签（收盘卖出）
+                days_label = f"{d}日持股(收盘卖出/下{d}日上涨)"
                 
                 total_valid_days = stats['up'] + stats['down'] + stats['flat']
                 
@@ -574,19 +658,12 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True):
                         if detail.get('actual_calc_count', detail.get('correlation_count', 0)) < count_threshold:
                             continue
-                        # 计算分类键
-                        sell_days = int(detail['sell_days'])
-                        if sell_days == 1:
-                            base_label = detail['max_percentage_metric'].split('(')[0]
-                            days_key = '1_high_open' if '高开' in base_label else '1_close'
-                        else:
-                            days_key = sell_days if sell_days in allowed_days else 'other'
-                        if days_key != days:
+                        if not _is_selected_detail(detail):
                             continue
-                        # 展示卖出方式文案
-                        sell_time_info = ""
-                        if sell_days == 1:
-                            sell_time_info = "开盘卖出" if days_key == '1_high_open' else "收盘卖出"
+                        if int(detail.get('sell_days', 0)) != d:
+                            continue
+                        # 展示卖出方式文案（5日上涨为收盘卖出）
+                        sell_time_info = "收盘卖出"
                         sell_desc = f"买入{detail['stock_code']}，{detail['sell_days']}日后"
                         if sell_time_info:
                             sell_desc += f"{sell_time_info}"
@@ -608,34 +685,96 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     # 在分类详细记录中，同样在每条表格行前打印原始CSV行
                     sub_original_lines = []
                     for detail in sorted(results['details'], key=lambda x: x.get('actual_calc_count', x.get('correlation_count', 0)), reverse=True):
-                        # 计算分类键
-                        sell_days = int(detail['sell_days'])
-                        if sell_days == 1:
-                            base_label = detail['max_percentage_metric'].split('(')[0]
-                            days_key_check = '1_high_open' if '高开' in base_label else '1_close'
-                        else:
-                            days_key_check = sell_days if sell_days in allowed_days else 'other'
-                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold and days_key_check == days:
+                        if not _is_selected_detail(detail):
+                            continue
+                        if int(detail.get('sell_days', 0)) != d:
+                            continue
+                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
                             sub_original_lines.append(','.join(detail.get('original_row', [])) if detail.get('original_row') else detail.get('original_csv_line', ''))
                     f.write(_format_table_with_originals(sub_headers, sub_rows, sub_original_lines, results.get('csv_file_path', ''), sub_aligns))
 
-            # 按年度的持股天数涨跌统计
-            f.write("\n----- 按年度的持股天数涨跌统计 -----\n")
+            # 输出按区间位置的条件分组统计（过去 eval_days 个交易日，所选持股天数）
+            f.write(f"\n----- 按15日区间位置分组统计（过去{eval_days}个交易日） -----\n")
+            for zone in ['满足条件', '不满足条件']:
+                stats = price_zone_stats[zone]
+                total_valid = stats['up'] + stats['down'] + stats['flat']
+                # 在分组标题后写清具体条件（过去15日总区间位置）
+                if zone == '满足条件':
+                    cond_desc = (
+                        f"过去{eval_days}个交易日总区间内，当日收盘位于底部0-10%"
+                    )
+                else:
+                    cond_desc = (
+                        f"过去{eval_days}个交易日总区间内，当日收盘高于底部10%"
+                    )
+                f.write(f"\n条件 {zone}：{cond_desc}\n")
+                f.write(f"  总记录数: {stats['total']}\n")
+                if total_valid > 0:
+                    up_percent = stats['up'] / total_valid * 100
+                    down_percent = stats['down'] / total_valid * 100
+                    flat_percent = stats['flat'] / total_valid * 100
+                    f.write(f"  上涨记录数: {stats['up']} ({up_percent:.2f}%)\n")
+                    f.write(f"  下跌记录数: {stats['down']} ({down_percent:.2f}%)\n")
+                    f.write(f"  持平记录数: {stats['flat']} ({flat_percent:.2f}%)\n")
+                else:
+                    f.write(f"  上涨记录数: {stats['up']} (0.00%)\n")
+                    f.write(f"  下跌记录数: {stats['down']} (0.00%)\n")
+                    f.write(f"  持平记录数: {stats['flat']} (0.00%)\n")
+                if stats['na'] > 0:
+                    f.write(f"  无法计算记录数: {stats['na']}\n")
+
+                # 条件分组对应的详细记录清单（与详情表同样的格式，所选持股天数）
+                f.write("  详细记录:\n")
+                sub_rows = []
+                sub_headers = details_headers
+                sub_aligns = details_aligns
+                sub_original_lines = []
+                # 保持与主详情一致的排序（先按持股天数升序，1日高开优先）
+                for detail in sorted(results['details'], key=_holding_sort_key):
+                    if not _is_selected_detail(detail):
+                        continue
+                    # 计算该记录的条件分组
+                    zone_key = _ma10_condition_for_date(detail['stock_code'], detail['date'], eval_days)
+                    if zone_key != zone:
+                        continue
+                    # 卖出方式文案（5日上涨为收盘卖出）
+                    try:
+                        sell_days = int(detail['sell_days'])
+                    except Exception:
+                        sell_days = detail.get('sell_days', 0)
+                    sell_time_info = "收盘卖出"
+                    sell_desc = f"买入{detail['stock_code']}，{detail['sell_days']}日后"
+                    if sell_time_info:
+                        sell_desc += f"{sell_time_info}"
+                    # 构建子表行
+                    sub_rows.append([
+                        detail['stock_code'],
+                        detail['date'],
+                        str(detail.get('actual_calc_count', detail.get('correlation_count', 0))),
+                        f"{detail['high_performance_count']}/{detail.get('valid_metrics_count', detail.get('total_metrics', 0))}",
+                        detail['max_percentage_metric'],
+                        detail.get('buy_date', detail['date']),
+                        f"{detail['sell_days']}日后",
+                        sell_desc,
+                        str(detail['buy_price']),
+                        str(detail['sell_price']),
+                        detail['change_percent'],
+                        str(detail.get('max_up_percent', 'N/A')),
+                        str(detail.get('max_down_percent', 'N/A'))
+                    ])
+                    # 原始CSV行
+                    sub_original_lines.append(','.join(detail.get('original_row', [])) if detail.get('original_row') else detail.get('original_csv_line', ''))
+                # 输出该价格区间的详细清单（含原始记录）
+                if sub_rows:
+                    f.write(_format_table_with_originals(sub_headers, sub_rows, sub_original_lines, results.get('csv_file_path', ''), sub_aligns))
+
+            # 按年度的持股天数涨跌统计（所选持股天数）
+            f.write(f"\n----- 按年度的持股天数涨跌统计（所选持股天数） -----\n")
             from collections import defaultdict as _dd
             import re
             year_days_stats = _dd(lambda: {
-                '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                2: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                3: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                4: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                5: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                6: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                7: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                8: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                9: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                10: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                'other': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+                f"{d}_close": {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+                for d in days_list
             })
             for detail in results['details']:
                 # 解析年份
@@ -649,11 +788,9 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     year_val = int(m.group(1)) if m else '未知'
                 # 分类键
                 sell_days = int(detail['sell_days'])
-                if sell_days == 1:
-                    base_label = detail['max_percentage_metric'].split('(')[0]
-                    days_key = '1_high_open' if '高开' in base_label else '1_close'
-                else:
-                    days_key = sell_days if sell_days in allowed_days else 'other'
+                if sell_days not in days_list:
+                    continue
+                days_key = f"{sell_days}_close"
                 # 统计涨跌
                 if detail['change_percent'] != 'N/A':
                     change_value = float(str(detail['change_percent']).strip('%'))
@@ -671,15 +808,11 @@ def save_results_to_file(results, output_file, count_threshold=100):
                 return (9999 if isinstance(y, str) else int(y))
             for year in sorted(year_days_stats.keys(), key=_year_sort_key):
                 f.write(f"\n[年度: {year}]\n")
-                # 年度持股天数统计（移除“其他天数持股”输出）
-                for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+                # 年度持股天数统计（收盘卖出）
+                for d in days_list:
+                    days = f"{d}_close"
                     stats = year_days_stats[year][days]
-                    if days == '1_high_open':
-                        days_label = "1日持股(开盘卖出/下1日高开)"
-                    elif days == '1_close':
-                        days_label = "1日持股(收盘卖出/下1日上涨)"
-                    else:
-                        days_label = f"{days}日持股"
+                    days_label = f"{d}日持股(收盘卖出/下{d}日上涨)"
                     total_valid_days = stats['up'] + stats['down'] + stats['flat']
                     f.write(f"{days_label}统计:\n")
                     f.write(f"  总记录数: {total_valid_days}\n")
@@ -695,21 +828,11 @@ def save_results_to_file(results, output_file, count_threshold=100):
                         f.write(f"  下跌记录数: {stats['down']} (0.00%)\n")
                         f.write(f"  持平记录数: {stats['flat']} (0.00%)\n")
 
-            # 按年度且实际计算数量≥阈值的持股天数统计
-            f.write(f"\n----- 按年度且实际计算数量>={count_threshold}的持股天数统计 -----\n")
+            # 按年度且实际计算数量≥阈值的持股天数统计（所选持股天数）
+            f.write(f"\n----- 按年度且实际计算数量>={count_threshold}的持股天数统计（所选持股天数） -----\n")
             year_high_corr_stats = _dd(lambda: {
-                '1_high_open': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                '1_close': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                2: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                3: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                4: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                5: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                6: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                7: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                8: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                9: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                10: {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0},
-                'other': {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+                f"{d}_close": {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
+                for d in days_list
             })
             for detail in results['details']:
                 # 过滤阈值
@@ -726,11 +849,9 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     year_val = int(m.group(1)) if m else '未知'
                 # 分类键
                 sell_days = int(detail['sell_days'])
-                if sell_days == 1:
-                    base_label = detail['max_percentage_metric'].split('(')[0]
-                    days_key = '1_high_open' if '高开' in base_label else '1_close'
-                else:
-                    days_key = sell_days if sell_days in allowed_days else 'other'
+                if sell_days not in days_list:
+                    continue
+                days_key = f"{sell_days}_close"
                 # 统计涨跌
                 if detail['change_percent'] != 'N/A':
                     change_value = float(str(detail['change_percent']).strip('%'))
@@ -743,18 +864,13 @@ def save_results_to_file(results, output_file, count_threshold=100):
                     year_high_corr_stats[year_val][days_key]['total'] += 1
                 else:
                     year_high_corr_stats[year_val][days_key]['na'] += 1
-            # 输出每年度高相关统计
+            # 输出每年度高相关统计（仅selected_day日上涨）
             for year in sorted(year_high_corr_stats.keys(), key=_year_sort_key):
                 f.write(f"\n[年度: {year}]\n")
-                # 年度高相关统计（移除“其他天数持股”输出）
-                for days in ['1_high_open', '1_close', 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+                for d in days_list:
+                    days = f"{d}_close"
                     stats = year_high_corr_stats[year][days]
-                    if days == '1_high_open':
-                        days_label = "1日持股(开盘卖出/下1日高开)"
-                    elif days == '1_close':
-                        days_label = "1日持股(收盘卖出/下1日上涨)"
-                    else:
-                        days_label = f"{days}日持股"
+                    days_label = f"{d}日持股(收盘卖出/下{d}日上涨)"
                     total_valid_days = stats['up'] + stats['down'] + stats['flat']
                     f.write(f"{days_label}统计(实际计算数量>={count_threshold}):\n")
                     f.write(f"  总记录数: {total_valid_days}\n")
@@ -800,10 +916,11 @@ def save_results_to_file(results, output_file, count_threshold=100):
         logging.info(f"结果已保存到文件: {output_file}")
         return True
     except Exception as e:
-        logging.error(f"保存结果到文件时出错: {e}")
+        # 记录详细异常信息（包含类型与堆栈）
+        logging.exception(f"保存结果到文件时出错: {repr(e)}")
         return False
 
-def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
+def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0, selected_day=5, selected_days=None):
     """
     分析CSV文件中相关数量超过指定阈值的数据，统计5个统计值中超过指定百分比的数量
     
@@ -847,11 +964,25 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                     date_index = header.index('评测日期')
                     actual_count_index = header.index('实际计算数量')
                     comp_count_index = header.index('对比股票数量')
-                    # 动态识别指标列（支持新增2/4/6/7/8/9日）：包含“下…日上涨”或“下1日高开”
+                    # 动态识别指标列：仅纳入“下N日上涨”指标（N来自 selected_days 列表或 selected_day）
                     metric_labels = []
+                    days_list = []
+                    if isinstance(selected_days, (list, tuple)) and len(selected_days) > 0:
+                        days_list = [int(x) for x in selected_days]
+                    else:
+                        days_list = [int(selected_day)]
                     for col in header:
-                        if col.startswith('下') and ('上涨' in col or '高开' in col):
-                            metric_labels.append(col)
+                        if col.startswith('下') and ('上涨' in col):
+                            # 兼容“下一日”与“下1日”的写法；匹配所选持股天数
+                            col_norm = col.replace('下一日', '下1日')
+                            m = re.search(r'下(\d+)日', col_norm)
+                            if m:
+                                try:
+                                    d = int(m.group(1))
+                                    if d in days_list:
+                                        metric_labels.append(col)
+                                except Exception:
+                                    pass
                     metrics_indices = [header.index(lbl) for lbl in metric_labels]
                     
                     logging.info(f"开始分析CSV文件: {csv_file_path}")
@@ -901,29 +1032,29 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0):
                             results['date_stats'][eval_date]['high_performance'] += 1
                             
                             # 记录详细信息
-                            # 找出百分比最大的指标及其对应的天数（从列名解析）
+                            # 找出百分比最大的指标及其对应的天数（平手时选择更长持股期）
                             max_percentage = -1.0
                             max_percentage_index = 0
+                            max_percentage_day = 0
                             for i, metric in enumerate(performance_metrics):
                                 if metric not in ('', 'N/A'):
                                     try:
                                         value = float(metric.strip('%'))
                                     except Exception:
                                         value = 0.0
-                                    if value > max_percentage:
+                                    # 解析该指标对应的持股天数
+                                    base_label = metric_labels[i].replace('下一日', '下1日')
+                                    mm = re.search(r'下(\d+)日', base_label)
+                                    dday = int(mm.group(1)) if mm else 0
+                                    if (value > max_percentage) or (value == max_percentage and dday > max_percentage_day):
                                         max_percentage = value
                                         max_percentage_index = i
+                                        max_percentage_day = dday
 
                             # 计算买入时间和卖出时间
                             buy_date = eval_date
-                            # 从指标列名中提取天数
-                            sell_days_offset = 1
-                            try:
-                                m = re.search(r'下(\d+)日', metric_labels[max_percentage_index])
-                                if m:
-                                    sell_days_offset = int(m.group(1))
-                            except Exception:
-                                sell_days_offset = 1
+                            # 设置持股天数为所选最佳指标对应天数
+                            sell_days_offset = max_percentage_day if max_percentage_day > 0 else selected_day
                             
                             # 获取价格数据
                             # 解析 1 日持股的卖出方式并传入价格计算
@@ -1045,64 +1176,87 @@ def main():
     parser.add_argument('--file', type=str, 
                         default='c:\\Users\\17701\\github\\my_first_repo\\stockapi\\stock_backtest\\pearson_found\\evaluation_results.csv',
                         help='CSV文件路径')
-    parser.add_argument('--min-count', type=int, default=10,
-                        help='最小相关数量阈值 (默认: 10)')
-    parser.add_argument('--high-percentage', type=float, default=80.0,
-                        help='高百分比阈值 (默认: 80.0)')
+    parser.add_argument('--min-count', type=int, default=30,
+                        help='最小相关数量阈值 (默认: 30')
+    parser.add_argument('--high-percentage', type=float, default=70.0,
+                        help='高百分比阈值 (默认: 65.0)')
     parser.add_argument('--detail-threshold', type=int, default=95,
                         help='“实际计算数量≥N统计”使用的独立阈值 (默认: 95)')
     parser.add_argument('--output', type=str, default='',
                         help='结果输出文件路径 (默认: results_YYYYMMDD_HHMMSS.txt)')
+    parser.add_argument('--eval-days', type=int, default=15,
+                        help='评测日期数：包括当日，往前数N个交易日 (默认: 15)')
+    parser.add_argument('--days', type=str, default='5',
+                        help='持股天数：传单个或逗号分隔列表。例如 5 或 3,5,8（范围: 2-10）')
     
     args = parser.parse_args()
     
     # 时间戳
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    
-    # 创建logs目录 - 使用完整路径
+
+    # 创建logs目录并初始化标准日志（包含文件名与代码行号）
     script_dir = os.path.dirname(os.path.abspath(__file__))
     logs_dir = os.path.join(script_dir, 'logs')
     if not os.path.exists(logs_dir):
         os.makedirs(logs_dir)
-    
-    # 日志文件路径 - 确保使用绝对路径
-    log_file = os.path.join(logs_dir, f'analyze_high_correlation_{timestamp}.log')
-    print(f"日志文件将保存到: {log_file}")
-    
-    # 直接写入日志文件
-    try:
-        with open(log_file, 'w', encoding='utf-8') as f:
-            f.write(f"[{datetime.datetime.now()}] 分析开始\n")
-        print(f"成功创建日志文件: {log_file}")
-    except Exception as e:
-        print(f"创建日志文件失败: {e}")
+
+    logger, log_file = setup_logging(log_dir=logs_dir)
+    logger.info("分析开始")
     
     # 如果未指定输出文件，生成默认文件名
     if not args.output:
         args.output = os.path.join(os.path.dirname(args.file), f'results_{timestamp}.txt')
     
-    print(f"[{datetime.datetime.now()}] 日志文件: {log_file}")
-    print(f"[{datetime.datetime.now()}] 分析文件: {args.file}")
-    print(f"[{datetime.datetime.now()}] 最小相关数量阈值: {args.min_count}")
-    print(f"[{datetime.datetime.now()}] 高百分比阈值: {args.high_percentage}%")
-    print(f"[{datetime.datetime.now()}] 明细统计阈值: {args.detail_threshold}")
-    print(f"[{datetime.datetime.now()}] 结果输出文件: {args.output}")
+    logger.info(f"日志文件: {log_file}")
+    logger.info(f"分析文件: {args.file}")
+    logger.info(f"最小相关数量阈值: {args.min_count}")
+    logger.info(f"高百分比阈值: {args.high_percentage}%")
+    logger.info(f"明细统计阈值: {args.detail_threshold}")
+    logger.info(f"结果输出文件: {args.output}")
+    logger.info(f"评测日期数: {args.eval_days} (含当日)")
+    # 解析 --days 参数，支持逗号与中文逗号
+    raw_days = (args.days or '').strip()
+    tokens = [t.strip() for t in raw_days.replace('，', ',').split(',') if t.strip()]
+    try:
+        parsed_days = [int(t) for t in tokens] if tokens else [5]
+    except Exception:
+        logger.error(f"持股天数解析失败: {args.days}，请传如 5 或 3,5,8")
+        return
+    # 校验范围 2-10
+    invalid = [d for d in parsed_days if d < 2 or d > 10]
+    if invalid:
+        logger.error(f"持股天数超出范围(2-10): {invalid}")
+        return
+    # 去重并排序，避免重复
+    selected_days_list = sorted(set(parsed_days))
+    if len(selected_days_list) > 1:
+        logger.info(f"持股天数选择: 下{','.join(str(d) for d in selected_days_list)}日上涨（同时分析）")
+    else:
+        logger.info(f"持股天数选择: 仅下{selected_days_list[0]}日上涨")
     
-    results = analyze_csv(args.file, args.min_count, args.high_percentage)
+    results = analyze_csv(
+        args.file,
+        args.min_count,
+        args.high_percentage,
+        selected_day=selected_days_list[0],
+        selected_days=selected_days_list
+    )
     if results:
         print_results(results)
-        save_results_to_file(results, args.output, count_threshold=args.detail_threshold)
-        message = f"[{datetime.datetime.now()}] 分析完成，结果已保存到: {args.output}"
-        print(message)
-        # 追加写入日志文件
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(message + "\n")
+        ok = save_results_to_file(
+            results,
+            args.output,
+            count_threshold=args.detail_threshold,
+            eval_days=args.eval_days,
+            selected_day=selected_days_list[0],
+            selected_days=selected_days_list
+        )
+        if ok:
+            logger.info(f"分析完成，结果已保存到: {args.output}")
+        else:
+            logger.error(f"分析完成，但保存结果到文件失败: {args.output}")
     else:
-        message = f"[{datetime.datetime.now()}] 错误: 分析失败，请检查文件路径和格式是否正确。"
-        print(message)
-        # 追加写入日志文件
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(message + "\n")
+        logger.error("错误: 分析失败，请检查文件路径和格式是否正确。")
 
 if __name__ == "__main__":
     main()
