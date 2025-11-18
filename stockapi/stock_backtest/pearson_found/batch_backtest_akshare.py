@@ -29,14 +29,14 @@ def parse_args():
         "--evaluation_days", type=int, default=30, help="传递给 pearson_analyzer_gpu_3.py 的 --evaluation_days"
     )
 
-    # 传递历史数据时间上下限（仅对对比股票生效，与 pearson_analyzer_gpu_3.py 保持一致）
-    parser.add_argument(
-        "--earliest_date", type=str, default="2020-01-01",
-        help="传递给 pearson_analyzer_gpu_3.py 的 --earliest_date（历史数据下限，仅对对比股票生效）"
-    )
+    # 传递历史数据上限与数量限制（仅对对比股票生效，与 pearson_analyzer_gpu_3.py 保持一致）
     parser.add_argument(
         "--latest_date", type=str, default=None,
         help="传递给 pearson_analyzer_gpu_3.py 的 --latest_date（历史数据上限，仅对对比股票生效）"
+    )
+    parser.add_argument(
+        "--comparison_date_count", type=int, default=1000,
+        help="传递给 pearson_analyzer_gpu_3.py 的 --comparison_date_count（保留 latest_date 及之前最近 N 个交易日，仅对对比股票生效，默认 1000）"
     )
 
     # 批量控制参数
@@ -144,8 +144,8 @@ def run_backtests_for_anchors(
     comparison_mode: str,
     csv_filename: str,
     evaluation_days: int,
-    earliest_date: str,
-    latest_date: Optional[str],
+    latest_dates: Optional[list],
+    comparison_date_count: int,
     append_date_to_csv: bool,
     sleep_seconds: float,
     script_path: Path,
@@ -154,7 +154,11 @@ def run_backtests_for_anchors(
     """按锚点日期（每隔固定交易日）调用 pearson_analyzer_gpu_3.py。"""
     import time
 
-    for d in anchors:
+    for idx, d in enumerate(anchors):
+        ld = None
+        if latest_dates is not None and idx < len(latest_dates):
+            ld = latest_dates[idx]
+
         csv_out = csv_filename
         if append_date_to_csv:
             stem, suffix = Path(csv_filename).stem, Path(csv_filename).suffix
@@ -173,13 +177,13 @@ def run_backtests_for_anchors(
             d,
             "--evaluation_days",
             str(evaluation_days),
-            "--earliest_date",
-            str(earliest_date),
         ]
 
-        # latest_date 仅在传入不为空时添加
-        if latest_date:
-            cmd.extend(["--latest_date", str(latest_date)])
+        # latest_date（每组）仅在存在时添加
+        if ld:
+            cmd.extend(["--latest_date", str(ld)])
+        # comparison_date_count 始终传递（与分析器默认值一致但允许覆盖）
+        cmd.extend(["--comparison_date_count", str(comparison_date_count)])
 
         prefix = "DRY-RUN:" if dry_run else "RUN:"
         print(prefix, " ".join(cmd))
@@ -220,14 +224,36 @@ def main():
 
     print("将执行的锚点日期（最近→更早）:", ", ".join(anchors))
     total_trading_days = len(anchors)
+    # 计算每组 latest_date：
+    # 若用户显式给出，则所有组使用相同值；否则默认取“下一更早锚点”，
+    # 最后一组回退 step_trading_days 个交易日（若不足则不设置 latest_date）。
+    per_group_latest_dates: Optional[list] = None
+    if args.latest_date:
+        per_group_latest_dates = [args.latest_date] * len(anchors)
+    else:
+        per_group_latest_dates = []
+        # 先用下一更早锚点填充
+        for i in range(len(anchors)):
+            if i < len(anchors) - 1:
+                per_group_latest_dates.append(anchors[i + 1])
+            else:
+                # 最后一组：按步长回退
+                calendar = get_trading_calendar_upto(anchors[i])
+                last_idx = len(calendar) - 1
+                target_idx = last_idx - args.step_trading_days
+                if target_idx >= 0:
+                    per_group_latest_dates.append(calendar[target_idx])
+                else:
+                    per_group_latest_dates.append(None)
+
     run_backtests_for_anchors(
         anchors=anchors,
         stock_code=args.stock_code,
         comparison_mode=args.comparison_mode,
         csv_filename=args.csv_filename,
         evaluation_days=args.evaluation_days,
-        earliest_date=args.earliest_date,
-        latest_date=args.latest_date,
+        latest_dates=per_group_latest_dates,
+        comparison_date_count=args.comparison_date_count,
         append_date_to_csv=args.append_date_to_csv,
         sleep_seconds=args.sleep_seconds,
         script_path=script_path,
