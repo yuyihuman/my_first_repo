@@ -1010,38 +1010,65 @@ def check_adb_connection():
         logger.info(f"设备已连接: {devices}")
         return True
 
-def process_location_list(location_list):
-    """依次处理多个位置关键词，成功则调用house_price.py脚本"""
+def process_location_list(location_list, max_retries: int = 3):
+    """以轮询方式处理多个位置关键词：每轮对每个地点尝试一次。
+
+    - 每个地点最多尝试 max_retries 次；
+    - 一轮内失败的地点留待下一轮再试；
+    - 成功立即调用 house_price.py，并在后续轮次跳过该地点。
+    """
     logger.info(f"开始处理位置列表: {location_list}")
-    
-    # 移除单独创建日志文件的代码
-    
-    for location in location_list:
-        logger.info(f"===== 开始处理位置: {location} =====")
-        
-        # 搜索位置
-        search_success = search_for_location(location)
-        
-        if search_success:
-            logger.info(f"搜索'{location}'成功，调用house_price.py脚本")
-            
-            # 记录开始执行的时间
-            start_time = datetime.now()
-            logger.info(f"开始执行house_price.py: {start_time}")
-            
-            # 执行命令并重定向输出
-            house_price_cmd = f"python house_price.py -n \"{location}\""
-            logger.info(f"执行命令: {house_price_cmd}")
-            return_code = os.system(house_price_cmd)
-            
-            # 记录结束时间
-            end_time = datetime.now()
-            if return_code == 0:
-                logger.info(f"house_price.py脚本执行成功，结束时间: {end_time}")
-            else:
-                logger.error(f"house_price.py脚本执行失败，返回代码: {return_code}，结束时间: {end_time}")
-        
-        logger.info(f"===== 完成处理位置: {location} =====")
+
+    attempts = {loc: 0 for loc in location_list}
+    succeeded = {loc: False for loc in location_list}
+
+    for round_idx in range(1, max_retries + 1):
+        logger.info(f"===== 开始第{round_idx}轮尝试（最多{max_retries}轮） =====")
+        for location in location_list:
+            if succeeded[location]:
+                continue
+
+            logger.info(f"===== 开始处理位置: {location} =====")
+            if attempts[location] > 0:
+                logger.warning(f"第{attempts[location]}次重试搜索'{location}'")
+
+            # 每轮仅尝试一次
+            search_success = search_for_location(location, max_retries=1)
+            attempts[location] += 1
+
+            if search_success:
+                succeeded[location] = True
+                logger.info(f"搜索'{location}'成功，调用house_price.py脚本")
+
+                start_time = datetime.now()
+                logger.info(f"开始执行house_price.py: {start_time}")
+
+                house_price_cmd = f"python house_price.py -n \"{location}\""
+                logger.info(f"执行命令: {house_price_cmd}")
+                return_code = os.system(house_price_cmd)
+
+                end_time = datetime.now()
+                if return_code == 0:
+                    logger.info(f"house_price.py脚本执行成功，结束时间: {end_time}")
+                else:
+                    logger.error(f"house_price.py脚本执行失败，返回代码: {return_code}，结束时间: {end_time}")
+
+            logger.info(f"===== 完成处理位置: {location} =====")
+
+        # 如果所有地点都成功则提前结束
+        if all(succeeded.values()):
+            logger.info("所有地点均已成功，结束处理。")
+            break
+
+    # 输出最终总结
+    failed_locations = [loc for loc in location_list if not succeeded[loc]]
+    if failed_locations:
+        logger.warning(
+            f"以下地点在{max_retries}轮尝试后仍未成功: {failed_locations}；"
+            f"尝试次数: {{loc: attempts[loc] for loc in failed_locations}}"
+        )
+    else:
+        logger.info("所有地点在指定轮次内成功完成。")
     
     logger.info("所有位置处理完毕")
     return None  # 不再返回日志文件路径
