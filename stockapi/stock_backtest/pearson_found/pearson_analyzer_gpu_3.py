@@ -333,7 +333,8 @@ class GPUBatchPearsonAnalyzer:
             
             # 使用与单日脚本相同的表头格式
             header = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
-                     '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨']
+                     '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨',
+                     '10日内最大涨幅', '10日内平均最大涨幅', '10日内最大跌幅', '10日内平均最大跌幅']
             
             self.logger.info(f"📋 CSV表头字段: {header}")
             self.logger.info(f"📋 CSV表头字段数量: {len(header)}")
@@ -358,6 +359,22 @@ class GPUBatchPearsonAnalyzer:
                 raise
         else:
             # 文件已存在，检查文件状态，并在缺列时自愈
+            try:
+                df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig', dtype={'代码': str})
+                required_cols = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
+                                 '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨',
+                                 '10日内最大涨幅', '10日内平均最大涨幅', '10日内最大跌幅', '10日内平均最大跌幅']
+                missing = [c for c in required_cols if c not in df.columns]
+                if missing:
+                    self.logger.info(f"📋 检测到CSV缺少列，执行自愈：缺失列 {missing}")
+                    for c in missing:
+                        df[c] = np.nan
+                    # 统一列顺序
+                    df = df[required_cols]
+                    df.to_csv(self.csv_results_file, index=False, encoding='utf-8-sig')
+                    self.logger.info("✅ CSV列自愈完成并已重写表头")
+            except Exception as e:
+                self.logger.warning(f"⚠️ CSV自愈失败或读取失败: {str(e)}")
             try:
                 file_size = os.path.getsize(self.csv_results_file)
                 existing_df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig', dtype={'代码': str})
@@ -2426,6 +2443,9 @@ class GPUBatchPearsonAnalyzer:
             'next_8_day_up': 0,    # 下8个交易日上涨
             'next_9_day_up': 0,    # 下9个交易日上涨
             'next_10_day_up': 0,   # 下10个交易日上涨
+            # 10日窗口内涨跌幅统计（按参与实际计算的期间逐个计算）
+            'period_max_rise': [],  # 每个期间的10日内最大涨幅（相对期末收盘价）
+            'period_max_fall': [],  # 每个期间的10日内最大跌幅（相对期末收盘价）
             'valid_periods': {
                 'next_day': 0,
                 'next_2_day': 0,
@@ -2665,6 +2685,35 @@ class GPUBatchPearsonAnalyzer:
             else:
                 if self.debug:
                     self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第10日数据不足，无法统计")
+
+            # 计算该期间内未来10日的最大涨跌（基于收盘价、相对期末收盘）
+            # 严格要求未来满10个交易日才参与10日涨跌幅聚合（与10日valid口径一致）
+            if end_idx + 10 <= len(source_data) - 1:
+                future_closes = source_data.iloc[end_idx + 1:end_idx + 11]['close'].values  # 恰好10日
+                # 相对期末收盘价的收益率数组（10日）
+                rel_returns = (future_closes - period_close) / period_close
+                # 最大涨幅与最大跌幅（跌幅为最小值，通常为负数）
+                # 涨幅为非负值；若未来均为下跌，则记为0
+                period_max_rise = float(np.max(rel_returns)) if rel_returns.size > 0 else 0.0
+                period_max_rise = max(period_max_rise, 0.0)
+                period_max_fall = float(np.min(rel_returns)) if rel_returns.size > 0 else 0.0
+                stats['period_max_rise'].append(period_max_rise)
+                stats['period_max_fall'].append(period_max_fall)
+
+                # Debug详细日志：记录该期间的未来数据与统计结果
+                if self.debug:
+                    try:
+                        closes_preview = [float(x) for x in future_closes]
+                        returns_preview = [float(x) for x in rel_returns]
+                        self.logger.debug(
+                            f"🔧 [10日涨跌幅统计] 期间({source_stock_code} {end_date}) 基准收盘={float(period_close):.4f}, "
+                            f"未来天数=10, 未来收盘={closes_preview}, 相对收益={returns_preview}"
+                        )
+                        self.logger.debug(
+                            f"🔧 [10日涨跌幅统计] 期间最大涨幅={period_max_rise:.4f}, 期间最大跌幅={period_max_fall:.4f}"
+                        )
+                    except Exception as e:
+                        self.logger.debug(f"🔧 [10日涨跌幅统计] 期间日志记录失败: {str(e)}")
         
         # 计算比例
         stats['ratios'] = {}
@@ -2698,6 +2747,39 @@ class GPUBatchPearsonAnalyzer:
 
         if stats['valid_periods']['next_10_day'] > 0:
             stats['ratios']['next_10_day_up'] = stats['next_10_day_up'] / stats['valid_periods']['next_10_day']
+
+        # 计算10日窗口的涨跌幅聚合统计（基于参与实际计算的期间）
+        try:
+            if len(stats['period_max_rise']) > 0:
+                stats['max_10d_rise'] = float(np.max(stats['period_max_rise']))
+                stats['avg_max_10d_rise'] = float(np.mean(stats['period_max_rise']))
+            else:
+                stats['max_10d_rise'] = 0.0
+                stats['avg_max_10d_rise'] = 0.0
+            if len(stats['period_max_fall']) > 0:
+                stats['max_10d_fall'] = float(np.min(stats['period_max_fall']))  # 跌幅取最小（更负）作为总体最大跌幅
+                stats['avg_max_10d_fall'] = float(np.mean(stats['period_max_fall']))
+            else:
+                stats['max_10d_fall'] = 0.0
+                stats['avg_max_10d_fall'] = 0.0
+
+            # Debug详细日志：记录聚合统计结果
+            if self.debug:
+                try:
+                    self.logger.debug(
+                        f"🔧 [10日涨跌幅统计] 聚合: 参与期间数={len(stats['period_max_rise'])}, "
+                        f"max_10d_rise={stats['max_10d_rise']:.4f}, avg_max_10d_rise={stats['avg_max_10d_rise']:.4f}, "
+                        f"max_10d_fall={stats['max_10d_fall']:.4f}, avg_max_10d_fall={stats['avg_max_10d_fall']:.4f}"
+                    )
+                except Exception as e:
+                    self.logger.debug(f"🔧 [10日涨跌幅统计] 聚合日志记录失败: {str(e)}")
+        except Exception as e:
+            # 保底处理，避免统计失败影响主流程
+            self.logger.debug(f"🔧 [10日涨跌幅统计] 计算失败: {str(e)}")
+            stats['max_10d_rise'] = stats.get('max_10d_rise', 0.0)
+            stats['avg_max_10d_rise'] = stats.get('avg_max_10d_rise', 0.0)
+            stats['max_10d_fall'] = stats.get('max_10d_fall', 0.0)
+            stats['avg_max_10d_fall'] = stats.get('avg_max_10d_fall', 0.0)
         # 🔧 Debug：预测统计汇总
         if self.debug:
             try:
@@ -4222,7 +4304,11 @@ class GPUBatchPearsonAnalyzer:
                     '下7日上涨': f"{prediction_stats.get('ratios', {}).get('next_7_day_up', 0):.2%}" if prediction_stats else 'N/A',
                     '下8日上涨': f"{prediction_stats.get('ratios', {}).get('next_8_day_up', 0):.2%}" if prediction_stats else 'N/A',
                     '下9日上涨': f"{prediction_stats.get('ratios', {}).get('next_9_day_up', 0):.2%}" if prediction_stats else 'N/A',
-                    '下10日上涨': f"{prediction_stats.get('ratios', {}).get('next_10_day_up', 0):.2%}" if prediction_stats else 'N/A'
+                    '下10日上涨': f"{prediction_stats.get('ratios', {}).get('next_10_day_up', 0):.2%}" if prediction_stats else 'N/A',
+                    '10日内最大涨幅': f"{prediction_stats.get('max_10d_rise', 0):.2%}" if prediction_stats else 'N/A',
+                    '10日内平均最大涨幅': f"{prediction_stats.get('avg_max_10d_rise', 0):.2%}" if prediction_stats else 'N/A',
+                    '10日内最大跌幅': f"{prediction_stats.get('max_10d_fall', 0):.2%}" if prediction_stats else 'N/A',
+                    '10日内平均最大跌幅': f"{prediction_stats.get('avg_max_10d_fall', 0):.2%}" if prediction_stats else 'N/A'
                 }
                 new_rows.append(row_data)
                 
