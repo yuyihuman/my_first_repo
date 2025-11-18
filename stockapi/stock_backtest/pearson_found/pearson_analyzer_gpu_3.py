@@ -143,7 +143,9 @@ class GPUBatchPearsonAnalyzer:
             self.stock_codes = [str(stock_code)]
         
         self.stock_code = self.stock_codes[0]  # 保持向后兼容性，主要股票代码
-        self.is_multi_stock = len(self.stock_codes) > 1
+        # 统一流程：即使只有1只股票也走“多股票（列表）模式”
+        # 原逻辑为>1才视为多股票；现改为>=1，以便单股票并入列表处理路径
+        self.is_multi_stock = len(self.stock_codes) >= 1
         
         # 设置固定的绝对路径
         script_dir = r'C:\Users\17701\github\my_first_repo\stockapi\stock_backtest\pearson_found'
