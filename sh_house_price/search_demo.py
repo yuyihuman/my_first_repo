@@ -1,10 +1,21 @@
 import subprocess
 import time
 import os
+# 解决 OpenMP 重复加载冲突（Intel MKL / libiomp5md.dll 与其他库同时初始化）
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 import logging
 from datetime import datetime
 import re
 import glob
+import json
+import pypinyin
+from PIL import Image
+import pytesseract
+import numpy as np
+import cv2
+import math
+import easyocr
 
 # 清除之前的所有日志文件
 def clear_previous_logs():
@@ -117,17 +128,17 @@ def get_device_info():
     }
 
 def get_screen_resolution():
-    """获取屏幕分辨率"""
+    """使用固定分辨率1080x1920；仅校验设备报告并给出警告"""
     resolution_str = adb_command("adb shell wm size")
-    # 解析分辨率字符串，例如 "Physical size: 1080x2340"
+    expected = "1080x1920"
     try:
-        width, height = resolution_str.split(": ")[1].split("x")
-        return int(width), int(height)
-    except (IndexError, ValueError) as e:
-        logger.error(f"解析分辨率失败: {e}")
-        logger.error(f"原始分辨率字符串: {resolution_str}")
-        # 返回默认分辨率
-        return 1080, 1920
+        if expected in resolution_str:
+            logger.info(f"分辨率校验通过: {expected}")
+        else:
+            logger.warning(f"分辨率与预期不一致: {resolution_str}；将使用{expected}")
+    except Exception as e:
+        logger.warning(f"分辨率校验异常: {e}；原始: {resolution_str}；将使用{expected}")
+    return 1080, 1920
 
 def tap_screen(x, y):
     """点击屏幕上的指定坐标"""
@@ -169,10 +180,6 @@ def input_text(text):
     """根据按键坐标表点击拼音输入，每输入一个字母就检查候选词区域"""
     logger.info(f"输入文本: {text}")
 
-    import json
-    import pypinyin
-    from PIL import Image
-    import pytesseract
 
     pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
 
@@ -196,34 +203,13 @@ def input_text(text):
         
         logger.info(f"=== 候选区域OCR识别详情 (目标字符: '{target_char}') ===")
         
-        # 准备多种预处理方法
-        processed_standard = preprocess_image_for_ocr(candidate_area)
-        processed_large = preprocess_for_large_text(candidate_area)
-        
-        # 保存预处理后的图片用于调试
-        processed_standard_file = f"{timestamp}_candidate_standard_{target_char}.png"
-        processed_large_file = f"{timestamp}_candidate_large_{target_char}.png"
-        processed_standard.save(f"screenshots/{processed_standard_file}")
-        processed_large.save(f"screenshots/{processed_large_file}")
-        
         best_result = None
         best_confidence = 0
         best_method = ""
         
-        # 测试配置：(图像, 方法名, PSM模式)
+        # 测试配置：(图像, 方法名, PSM模式) — 仅保留原图(PSM6)
         test_configs = [
-            (candidate_area, "原图", 6),
-            (processed_standard, "标准预处理", 6),
-            (processed_large, "大字体预处理", 6),
-            (candidate_area, "原图", 7),
-            (processed_standard, "标准预处理", 7),
-            (processed_large, "大字体预处理", 7),
-            (candidate_area, "原图", 8),
-            (processed_standard, "标准预处理", 8),
-            (processed_large, "大字体预处理", 8),
-            (candidate_area, "原图", 13),
-            (processed_standard, "标准预处理", 13),
-            (processed_large, "大字体预处理", 13)
+            (candidate_area, "原图", 6)
         ]
         
         for test_img, method_name, psm_mode in test_configs:
@@ -282,15 +268,16 @@ def input_text(text):
                         # 检查与其他字符中心点的距离是否小于100像素
                         has_nearby_char = False
                         for other in all_texts:
-                            if other['text'] != target_char:  # 不与自己比较
-                                # 计算两个字符中心点之间的距离
-                                distance = ((item['center_x'] - other['center_x']) ** 2 + 
-                                           (item['center_y'] - other['center_y']) ** 2) ** 0.5
-                                
-                                if distance < 100:
-                                    has_nearby_char = True
-                                    logger.info(f"    字符'{target_char}'中心点100像素内有其他汉字'{other['text']}'，距离为{distance:.2f}像素")
-                                    break
+                            if other is item:
+                                continue  # 跳过自身
+                            # 计算两个字符中心点之间的距离（包含同字在内的所有汉字）
+                            distance = ((item['center_x'] - other['center_x']) ** 2 + 
+                                       (item['center_y'] - other['center_y']) ** 2) ** 0.5
+                            
+                            if distance < 100:
+                                has_nearby_char = True
+                                logger.info(f"    字符'{target_char}'中心点100像素内有其他候选'{other['text']}'，距离为{distance:.2f}像素")
+                                break
                         
                         if not has_nearby_char and item['confidence'] > best_confidence:
                             best_result = item
@@ -621,11 +608,7 @@ def click_first_search_result(search_term):
     screenshot_file = f"{timestamp}_search_results_ocr_{search_term}.png"
     capture_screenshot(screenshot_file)
     
-    # 使用OCR识别
-    from PIL import Image
-    import pytesseract
-
-    pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+    # 使用OCR识别（EasyOCR，依赖在脚本开头导入）
     
     # 读取截图
     img = Image.open(f"screenshots/{screenshot_file}")
@@ -668,9 +651,7 @@ def click_first_search_result(search_term):
 
 def preprocess_image_for_ocr(image):
     """图像预处理以提高OCR识别准确性"""
-    import cv2
-    import numpy as np
-    from PIL import Image  # 添加这行导入
+    # 依赖已在脚本开头导入
     
     # 将PIL图像转换为OpenCV格式
     img_array = np.array(image)
@@ -704,8 +685,7 @@ def preprocess_image_for_ocr(image):
 
 def split_image_for_ocr(image, block_height=200, overlap=50):
     """将图片在纵向分割成小块进行OCR识别（横向保持完整）"""
-    from PIL import Image
-    import math
+    # 依赖已在脚本开头导入
     
     width, height = image.size
     blocks = []
@@ -733,9 +713,7 @@ def split_image_for_ocr(image, block_height=200, overlap=50):
 
 def preprocess_for_large_text(image):
     """专门针对大字体文本的预处理"""
-    import cv2
-    import numpy as np
-    from PIL import Image
+    # 依赖已在脚本开头导入
     
     # 将PIL图像转换为OpenCV格式
     img_array = np.array(image)
@@ -767,8 +745,7 @@ def preprocess_for_large_text(image):
 
 def ocr_image_blocks(image, search_term, timestamp):
     """对图片进行纵向分块OCR识别"""
-    import pytesseract
-    from PIL import Image
+    # 依赖已在脚本开头导入
     
     pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
     
@@ -874,83 +851,65 @@ def verify_search_results(search_term):
     screenshot_file = f"{timestamp}_search_results_verify_{search_term}.png"
     capture_screenshot(screenshot_file)
     
-    # 使用OCR识别
-    from PIL import Image
-    import pytesseract
-    
-    pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+    # 使用OCR识别（Top-level 导入）
     
     # 读取截图
     img = Image.open(f"screenshots/{screenshot_file}")
     
-    # 方法1: 分块识别
-    logger.info("开始分块识别...")
-    block_count, block_texts = ocr_image_blocks(img, search_term, timestamp)
-    
-    # 方法2: 整图预处理识别（作为对比）
-    logger.info("开始整图预处理识别...")
-    processed_img = preprocess_image_for_ocr(img)
-    processed_file = f"{timestamp}_processed_{search_term}.png"
-    processed_img.save(f"screenshots/{processed_file}")
-    
+    # 仅识别固定区域 y:[415,515]，出现一次即通过
+    logger.info("开始区域识别 y:[415,515]，只要出现一次即通过")
+
     try:
-        ocr_data = pytesseract.image_to_data(processed_img, lang='chi_sim', output_type=pytesseract.Output.DICT)
-        
-        logger.info("=== 整图OCR识别详情 ===")
-        detected_texts = []
-        valid_whole_texts = []
-        
-        for i, conf in enumerate(ocr_data['conf']):
-            text = ocr_data['text'][i].strip()
-            confidence = int(conf)
-            
-            if text:
-                x = ocr_data['left'][i]
-                y = ocr_data['top'][i]
-                w = ocr_data['width'][i]
-                h = ocr_data['height'][i]
-                
-                logger.info(f"  文字: '{text}' | 置信度: {confidence} | 位置: ({x},{y},{x+w},{y+h})")
-                
-                if confidence > 30:
-                    detected_texts.append(text)
-                    valid_whole_texts.append(f"'{text}'({confidence})")
-        
-        if valid_whole_texts:
-            logger.info(f"整图有效文字(置信度>30): {', '.join(valid_whole_texts)}")
-        
-        full_text = ''.join(detected_texts)
-        whole_count = full_text.count(search_term)
-        logger.info(f"整图识别完整文本: {full_text}")
-        
+        # 裁剪区域：整宽，y=415到515
+        width, height = img.size
+        region_box = (0, 415, width, 515)
+        region_img = img.crop(region_box)
+        logger.info(f"区域裁剪信息: box={region_box}, 原图尺寸={width}x{height}, 区域尺寸={region_img.size[0]}x{region_img.size[1]}")
+        # 保存区域截图用于调试
+        region_file = f"screenshots/{timestamp}_region_{search_term}.png"
+        try:
+            region_img.save(region_file)
+            logger.info(f"区域截图已保存: {region_file}")
+        except Exception as e:
+            logger.warning(f"区域截图保存失败: {e}")
+        # 区域OCR（EasyOCR）
+        reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
+        np_img = np.array(region_img)
+        easy_results = reader.readtext(np_img, detail=1, paragraph=False)
+        raw_text = " ".join([
+            (r[1] or "").strip() if isinstance(r, (list, tuple)) and len(r) >= 2 else ""
+            for r in easy_results
+        ]).strip()
+        logger.info(f"区域原始字符串: {raw_text}")
+
     except Exception as e:
-        logger.warning(f"整图OCR识别失败: {e}")
-        whole_count = 0
-        full_text = ""
-    
-    # 方法3: 原始图像识别（作为备用）
-    logger.info("开始原始图像识别...")
-    try:
-        original_ocr = pytesseract.image_to_string(img, lang='chi_sim')
-        original_clean = original_ocr.replace(" ", "").replace("\t", "").replace("\n", "").replace("\r", "")
-        original_count = original_clean.count(search_term)
-        logger.info(f"原始图像识别结果: {original_ocr}")
-        logger.info(f"原始图像清理后文本: {original_clean}")
-    except Exception as e:
-        logger.warning(f"原始图像OCR识别失败: {e}")
-        original_count = 0
-    
-    # 记录结果
-    logger.info(f"=== 最终识别结果对比 ===")
-    logger.info(f"分块识别找到{block_count}个'{search_term}'")
-    logger.info(f"整图预处理识别找到{whole_count}个'{search_term}'")
-    logger.info(f"原始图像识别找到{original_count}个'{search_term}'")
-    
-    # 返回最大的计数值
-    final_count = max(block_count, whole_count, original_count)
-    logger.info(f"最终结果: 找到{final_count}个'{search_term}'")
-    
-    return final_count
+        logger.warning(f"区域OCR识别失败: {e}")
+
+    # 记录并返回结果（仅整图预处理识别）
+    # 打印区域OCR识别详情
+    logger.info("=== 区域OCR识别详情 ===")
+    texts = []
+    region_count = 0
+    for r in easy_results:
+        try:
+            bbox, etext, prob = r
+        except Exception:
+            if isinstance(r, (list, tuple)) and len(r) >= 2:
+                bbox, etext = r[0], r[1]
+                prob = 0
+            else:
+                continue
+        t = (etext or '').strip()
+        if not t:
+            continue
+        texts.append(t)
+        logger.info(f"区域词条: '{t}' prob={prob:.2f} bbox={bbox}")
+        if search_term in t:
+            region_count += 1
+    logger.info(f"区域识别完整文本: {' '.join(texts)}")
+    logger.info(f"区域识别找到{region_count}个'{search_term}'")
+    logger.info(f"最终结果: 找到{region_count}个'{search_term}'")
+    return region_count
 
 def search_for_location(location_name, max_retries=3):
     """在搜索框中搜索指定位置"""
@@ -1029,8 +988,9 @@ def search_for_location(location_name, max_retries=3):
         
         # 10. 验证搜索结果
         result_count = verify_search_results(location_name)
-        if result_count >= 3:
-            logger.info(f"搜索成功，找到{result_count}个'{location_name}'")
+        # 该区域只要出现一次即判定成功
+        if result_count >= 1:
+            logger.info(f"搜索成功，找到{result_count}个'{location_name}'（区域仅需≥1）")
             search_success = True
         else:
             logger.warning(f"搜索结果不足，仅找到{result_count}个'{location_name}'，需要重试")
