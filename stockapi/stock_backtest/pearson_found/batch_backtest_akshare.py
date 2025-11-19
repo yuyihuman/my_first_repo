@@ -35,8 +35,8 @@ def parse_args():
         help="传递给 pearson_analyzer_gpu_3.py 的 --latest_date（历史数据上限，仅对对比股票生效）"
     )
     parser.add_argument(
-        "--comparison_date_count", type=int, default=1000,
-        help="传递给 pearson_analyzer_gpu_3.py 的 --comparison_date_count（保留 latest_date 及之前最近 N 个交易日，仅对对比股票生效，默认 1000）"
+        "--comparison_date_count", type=int, default=1800,
+        help="传递给 pearson_analyzer_gpu_3.py 的 --comparison_date_count（保留 latest_date 及之前最近 N 个交易日，仅对对比股票生效，默认 1800）"
     )
 
     # 批量控制参数
