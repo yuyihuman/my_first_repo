@@ -4455,7 +4455,7 @@ if __name__ == "__main__":
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
-    parser.add_argument('--threshold', type=float, default=0.85, help='相关系数阈值 (默认: 0.85)')
+    parser.add_argument('--threshold', type=float, default=0.9, help='相关系数阈值 (默认: 0.9)')
     parser.add_argument('--comparison_mode', type=str, default='top10',
                        help="对比模式: 通用 'topXXX'（如 top156）、hs300、zz500、custom、self_only、all（默认: top10）")
     parser.add_argument('--comparison_stocks', nargs='*', 
