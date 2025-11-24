@@ -342,14 +342,22 @@ function createPriceIndexAreaChart(data, description) {
                         text: '时间'
                     },
                     ticks: {
-                        maxTicksLimit: 20,
-                        callback: function(value, index, values) {
-                            // 只显示部分标签以避免拥挤
-                            if (index % Math.ceil(values.length / 15) === 0) {
-                                return this.getLabelForValue(value);
+                        autoSkip: false,
+                        callback: function(value) {
+                            // 根据日期字符串(YYYY-MM)每三个月显示一次标签
+                            const label = this.getLabelForValue(value);
+                            if (typeof label === 'string' && label.includes('-')) {
+                                const parts = label.split('-');
+                                const month = parseInt(parts[1], 10);
+                                // 显示 1、4、7、10 月（每三个月）
+                                if (!isNaN(month) && ((month - 1) % 3 === 0)) {
+                                    return label;
+                                }
                             }
                             return '';
-                        }
+                        },
+                        maxRotation: 0,
+                        minRotation: 0
                     }
                 },
                 y: {
