@@ -30,7 +30,7 @@ def calculate_monthly_stats(data_files_dir):
     latest_date = None  # 记录最新的具体日期
     
     # 指定要处理的文件列表
-    target_files = ['jdxc', 'sjxc', 'tz', 'wjc']
+    target_files = ['jdxc', 'sjxc', 'tz', 'wjc', "at"]
     
     # 遍历指定的数据文件
     for filename in target_files:

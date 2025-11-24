@@ -1083,7 +1083,7 @@ if __name__ == "__main__":
     device_info = get_device_info()
     
     # 定义要搜索的位置列表
-    locations = ["嘉定新城","松江新城","徐家汇","五角场","唐镇","安亭","中信泰富又一城","上海康城","中远两湾城","金地世家"]
+    locations = ["嘉定新城","松江新城","徐家汇","五角场","唐镇","安亭","中信泰富又一城","金地世家"]
     locations = [location.replace('\u200b', '') for location in locations]
     # 处理位置列表
     process_location_list(locations)
