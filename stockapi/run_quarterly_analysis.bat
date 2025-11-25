@@ -14,9 +14,7 @@ python stock_base_info\download_financial_data.py
 python stock_base_info\check_data_structure.py
 python stock_base_info\financial_data_structure_reader.py
 python stock_base_info\check_and_update_names.py
-python macro_data_fetch\true_quarterly_analysis.py
-python macro_data_fetch\commodity_price_index.py
-python macro_data_fetch\pmi_data_fetcher.py
+
 
 echo 正在复制股票数据到回测目录...
 if exist "stock_base_info\all_stocks_data" (
@@ -51,3 +49,7 @@ if exist "stock_base_info\logs\financial_data_structure.log" (
 )
 
 echo 数据复制完成！
+
+python macro_data_fetch\true_quarterly_analysis.py
+python macro_data_fetch\commodity_price_index.py
+python macro_data_fetch\pmi_data_fetcher.py

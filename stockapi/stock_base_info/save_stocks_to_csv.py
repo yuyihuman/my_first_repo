@@ -87,7 +87,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
     # 1. 获取日线数据
     safe_log(f"📈 [1/4] 开始获取日线数据...")
     try:
-        daily_data = xtdata.get_market_data([], [full_code], period='1d', start_time='19900101', dividend_type='front')
+        daily_data = xtdata.get_market_data([], [full_code], period='1d', start_time='19900101', dividend_type='none')
         
         if daily_data and isinstance(daily_data, dict):
             try:
@@ -205,7 +205,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
     # 2. 获取1分钟数据
     safe_log(f"📊 [2/4] 开始获取1分钟数据...")
     try:
-        minute_data = xtdata.get_market_data([], [full_code], period='1m', start_time='19900101', dividend_type='front')
+        minute_data = xtdata.get_market_data([], [full_code], period='1m', start_time='19900101', dividend_type='none')
         
         if minute_data and isinstance(minute_data, dict):
             try:
@@ -275,7 +275,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
     # 3. 获取5分钟数据
     safe_log(f"📊 [3/4] 开始获取5分钟数据...")
     try:
-        minute_5_data = xtdata.get_market_data([], [full_code], period='5m', start_time='19900101', dividend_type='front')
+        minute_5_data = xtdata.get_market_data([], [full_code], period='5m', start_time='19900101', dividend_type='none')
         
         if minute_5_data and isinstance(minute_5_data, dict):
             try:
@@ -345,7 +345,7 @@ def save_stock_data_to_csv(stock_code, stock_name, base_folder="all_stocks_data"
     # 4. 获取30分钟数据
     safe_log(f"📊 [4/4] 开始获取30分钟数据...")
     try:
-        minute_30_data = xtdata.get_market_data([], [full_code], period='30m', start_time='19900101', dividend_type='front')
+        minute_30_data = xtdata.get_market_data([], [full_code], period='30m', start_time='19900101', dividend_type='none')
         
         if minute_30_data and isinstance(minute_30_data, dict):
             try:

@@ -13,6 +13,7 @@ import pandas as pd
 import shutil
 from datetime import datetime, timedelta
 from xtquant import xtdata
+from pathlib import Path
 
 # 缓存配置
 # 获取脚本所在目录
@@ -935,7 +936,6 @@ def get_total_shares_batch(stock_codes):
         if isinstance(cached_data, pd.DataFrame):
             # 若缓存为DataFrame，尝试恢复为字典形式：{code: total_shares}
             shares_data = {}
-            # 尝试常见列名映射
             code_col = 'code' if 'code' in cached_data.columns else ('stock_code' if 'stock_code' in cached_data.columns else None)
             value_col = 'total_shares' if 'total_shares' in cached_data.columns else ('value' if 'value' in cached_data.columns else None)
             if code_col and value_col:
@@ -943,7 +943,7 @@ def get_total_shares_batch(stock_codes):
                     try:
                         converted = safe_convert_to_float(row[value_col])
                         if converted is not None and converted > 0:
-                            shares_data[str(row[code_col])] = converted
+                            shares_data[str(row[code_col])] = float(converted)
                     except Exception:
                         continue
             else:
@@ -951,6 +951,7 @@ def get_total_shares_batch(stock_codes):
         else:
             shares_data = dict(cached_data)
 
+        logger.info(f"现有 shares_data 缓存条数: {len([c for c, v in shares_data.items() if v])}")
         # 找出缺失的股票代码
         missing_codes = [c for c in stock_codes if c not in shares_data or not shares_data.get(c)]
         if missing_codes:
@@ -966,18 +967,69 @@ def get_total_shares_batch(stock_codes):
                             total_shares_value = row['value']
                             converted = safe_convert_to_float(total_shares_value)
                             if converted is not None and converted > 0:
-                                total_shares = converted
+                                total_shares = float(converted)
                             break
                     if total_shares and total_shares > 0:
                         shares_data[stock_code] = total_shares
-                except Exception:
+                    else:
+                        logger.debug(f"{stock_code} 总股本获取为空或<=0")
+                except Exception as e:
+                    logger.debug(f"{stock_code} 获取总股本异常: {str(e)[:80]}")
                     continue
                 finally:
                     if i % 20 == 0:
                         logger.info(f"补齐进度: {i}/{len(missing_codes)}")
                     time.sleep(0.05)
+
+            # 若仍有缺失，使用行情快照作为兜底：总股本 ≈ 总市值 / 最新价
+            still_missing = [c for c in missing_codes if c not in shares_data or not shares_data.get(c)]
+            if still_missing:
+                try:
+                    spot_df = ak.stock_zh_a_spot_em()
+                    # 建立 6位代码 -> (总市值, 最新价) 映射
+                    code_col_candidates = ['代码', 'code', '股票代码']
+                    price_col_candidates = ['最新价', '最新', 'price']
+                    mktcap_col_candidates = ['总市值', '总市值(元)', 'market_cap']
+
+                    def pick_col(df, cands):
+                        for c in cands:
+                            if c in df.columns:
+                                return c
+                        return None
+
+                    code_col = pick_col(spot_df, code_col_candidates)
+                    price_col = pick_col(spot_df, price_col_candidates)
+                    mkt_col = pick_col(spot_df, mktcap_col_candidates)
+
+                    if code_col and price_col and mkt_col:
+                        spot_map = {}
+                        for _, r in spot_df.iterrows():
+                            try:
+                                six = str(r[code_col]).strip()
+                                price = float(r[price_col])
+                                mkt = float(r[mkt_col])
+                                if six and price > 0 and mkt > 0:
+                                    spot_map[six] = mkt / price
+                            except Exception:
+                                continue
+
+                        filled = 0
+                        for sc in still_missing:
+                            six = sc.split('.')[0]
+                            v = spot_map.get(six)
+                            if isinstance(v, float) and v > 0:
+                                shares_data[sc] = v
+                                filled += 1
+                        logger.info(f"兜底(spot)补齐 shares_data: {filled}/{len(still_missing)}")
+                    else:
+                        logger.warning("行情快照兜底失败：缺少必要列，未能补齐 shares_data")
+                except Exception as e:
+                    logger.warning(f"行情快照兜底异常: {str(e)[:100]}")
             # 保存合并后的数据回缓存
             save_cache(shares_data, 'shares_data')
+            logger.info(f"补齐后 shares_data 条数: {len([c for c, v in shares_data.items() if v])}")
+        else:
+            logger.info("shares_data 缓存已覆盖所有目标股票，无需补齐")
         return shares_data
     
     logger = logging.getLogger(__name__)
@@ -996,7 +1048,7 @@ def get_total_shares_batch(stock_codes):
             symbol = stock_code.split('.')[0]  # 去掉后缀，只保留6位数字
             stock_info = ak.stock_individual_info_em(symbol=symbol)
             
-            # 查找总股本信息
+            # 查找总股本信息（支持'总股本'或包含单位的写法，如'总股本(万股)'）
             total_shares = None
             for _, row in stock_info.iterrows():
                 item_name = str(row['item'])
@@ -1004,7 +1056,7 @@ def get_total_shares_batch(stock_codes):
                     total_shares_value = row['value']
                     converted = safe_convert_to_float(total_shares_value)
                     if converted is not None and converted > 0:
-                        total_shares = converted
+                        total_shares = float(converted)
                     break
             
             if total_shares is not None and total_shares > 0:
@@ -1027,9 +1079,212 @@ def get_total_shares_batch(stock_codes):
     logger.info(f"✅ 总股本获取完成: 成功 {success_count}, 失败 {failed_count}")
     if failed_examples:
         logger.warning(f"失败示例: {failed_examples}")
-    
+
     # 保存到缓存
     save_cache(shares_data, 'shares_data')
+    # 若成功为 0 或失败远大于成功，尝试兜底一次：通过行情快照估算总股本
+    if success_count == 0 or failed_count > success_count * 3:
+        try:
+            logger.info("开始使用行情快照兜底补齐总股本: 总股本 ≈ 总市值 / 最新价")
+            spot_df = ak.stock_zh_a_spot_em()
+            code_col_candidates = ['代码', 'code', '股票代码']
+            price_col_candidates = ['最新价', '最新', 'price']
+            mktcap_col_candidates = ['总市值', '总市值(元)', 'market_cap']
+
+            def pick_col(df, cands):
+                for c in cands:
+                    if c in df.columns:
+                        return c
+                return None
+
+            code_col = pick_col(spot_df, code_col_candidates)
+            price_col = pick_col(spot_df, price_col_candidates)
+            mkt_col = pick_col(spot_df, mktcap_col_candidates)
+
+            if not (code_col and price_col and mkt_col):
+                logger.warning("行情快照兜底失败：缺少必要列")
+            else:
+                spot_map = {}
+                for _, r in spot_df.iterrows():
+                    try:
+                        six = str(r[code_col]).strip()
+                        price = float(r[price_col])
+                        mkt = float(r[mkt_col])
+                        if six and price > 0 and mkt > 0:
+                            spot_map[six] = mkt / price
+                    except Exception:
+                        continue
+                filled = 0
+                for sc in stock_codes:
+                    if sc not in shares_data or not shares_data.get(sc):
+                        six = sc.split('.')[0]
+                        v = spot_map.get(six)
+                        if isinstance(v, float) and v > 0:
+                            shares_data[sc] = v
+                            filled += 1
+                logger.info(f"兜底(spot)补齐 shares_data: {filled}/{len(stock_codes)}")
+                save_cache(shares_data, 'shares_data')
+        except Exception as e:
+            logger.warning(f"行情快照兜底异常: {str(e)[:100]}")
+    return shares_data
+
+
+def get_total_shares_batch_local(stock_codes):
+    """
+    本地读取 Capital.csv 的最新 total_capital 作为总股本，支持缓存与兜底。
+    优先从日志定位 financial_data 根路径，再读取 `<code>/Capital.csv`。
+    """
+    logger = logging.getLogger(__name__)
+
+    def detect_financial_data_root_from_log():
+        default_log_path = r"c:\Users\17701\github\my_first_repo\stockapi\stock_base_info\logs\financial_data_structure.log"
+        try:
+            if os.path.exists(default_log_path):
+                with open(default_log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                marker = os.path.join('stock_base_info', 'financial_data')
+                idx = content.find(marker)
+                if idx != -1:
+                    start = content.rfind('\n', 0, idx)
+                    if start == -1:
+                        start = max(content.rfind(' ', 0, idx), 0)
+                    end = content.find('\n', idx)
+                    if end == -1:
+                        end = len(content)
+                    snippet = content[start:end].strip()
+                    cand_start = snippet.lower().find('c:')
+                    if cand_start != -1:
+                        cand_end = snippet.lower().find(marker.lower())
+                        if cand_end != -1:
+                            root = snippet[cand_start:cand_end + len(marker)]
+                            root = root.replace('/', os.sep).replace('\\', os.sep)
+                            if os.path.isdir(root):
+                                return root
+            return r"c:\Users\17701\github\my_first_repo\stockapi\stock_base_info\financial_data"
+        except Exception:
+            return r"c:\Users\17701\github\my_first_repo\stockapi\stock_base_info\financial_data"
+
+    def read_total_shares_from_capital_csv(code, root_dir):
+        try:
+            csv_path = Path(root_dir) / code / 'Capital.csv'
+            if not csv_path.exists():
+                return None
+            df = pd.read_csv(csv_path, encoding='utf-8', engine='python')
+            if df is None or df.empty:
+                return None
+            time_col = 'm_timetag' if 'm_timetag' in df.columns else ('m_quarter' if 'm_quarter' in df.columns else None)
+            total_col = None
+            for cand in ['total_capital', 'total', 'Total', 'TOTAL_CAPITAL']:
+                if cand in df.columns:
+                    total_col = cand
+                    break
+            if not total_col:
+                for col in df.columns:
+                    if str(col).strip().lower() == 'total_capital':
+                        total_col = col
+                        break
+            if not total_col:
+                return None
+            if time_col:
+                def to_dt(x):
+                    try:
+                        return pd.to_datetime(str(x))
+                    except Exception:
+                        return pd.NaT
+                df['_dt_'] = df[time_col].apply(to_dt)
+                df = df.sort_values('_dt_', ascending=True)
+                last_row = df.dropna(subset=['_dt_']).tail(1)
+                if last_row.empty:
+                    last_row = df.tail(1)
+            else:
+                last_row = df.tail(1)
+            val = safe_convert_to_float(last_row.iloc[0][total_col])
+            return val if (isinstance(val, float) and val > 0) else None
+        except Exception:
+            return None
+
+    # 先读缓存
+    cached_data = load_cache('shares_data')
+    shares_data = {}
+    if cached_data is not None:
+        if isinstance(cached_data, pd.DataFrame):
+            shares_data = {}
+            code_col = 'code' if 'code' in cached_data.columns else ('stock_code' if 'stock_code' in cached_data.columns else None)
+            value_col = 'total_shares' if 'total_shares' in cached_data.columns else ('value' if 'value' in cached_data.columns else None)
+            if code_col and value_col:
+                for _, row in cached_data.iterrows():
+                    try:
+                        converted = safe_convert_to_float(row[value_col])
+                        if converted is not None and converted > 0:
+                            shares_data[str(row[code_col])] = float(converted)
+                    except Exception:
+                        continue
+        else:
+            shares_data = dict(cached_data)
+        logger.info(f"现有 shares_data 缓存条数: {len([c for c, v in shares_data.items() if v])}")
+
+    # 找出缺失股票并用本地 CSV 补齐
+    missing_codes = [c for c in stock_codes if c not in shares_data or not shares_data.get(c)]
+    if missing_codes:
+        root_dir = detect_financial_data_root_from_log()
+        logger.info(f"📄 从日志定位 financial_data 路径: {root_dir}")
+        filled = 0
+        for i, stock_code in enumerate(missing_codes, 1):
+            val = read_total_shares_from_capital_csv(stock_code, root_dir)
+            if isinstance(val, float) and val > 0:
+                shares_data[stock_code] = val
+                filled += 1
+            if i % 50 == 0:
+                logger.info(f"本地 CSV 补齐进度: {i}/{len(missing_codes)}")
+        logger.info(f"✅ 本地 CSV 补齐 shares_data: {filled}/{len(missing_codes)}")
+
+        # 对仍然缺失的股票兜底使用 akshare
+        still_missing = [c for c in missing_codes if c not in shares_data or not shares_data.get(c)]
+        if still_missing:
+            logger.info(f"🔎 本地读取失败，兜底 akshare，目标 {len(still_missing)} 只")
+            for i, stock_code in enumerate(still_missing, 1):
+                try:
+                    symbol = stock_code.split('.')[0]
+                    stock_info = ak.stock_individual_info_em(symbol=symbol)
+                    total_shares = None
+                    for _, row in stock_info.iterrows():
+                        item_name = str(row['item'])
+                        if '总股本' in item_name:
+                            converted = safe_convert_to_float(row['value'])
+                            if converted is not None and converted > 0:
+                                total_shares = float(converted)
+                            break
+                    if total_shares and total_shares > 0:
+                        shares_data[stock_code] = total_shares
+                    else:
+                        logger.debug(f"{stock_code} akshare 总股本为空或<=0")
+                except Exception as e:
+                    logger.debug(f"{stock_code} akshare 异常: {str(e)[:80]}")
+                finally:
+                    if i % 20 == 0:
+                        logger.info(f"akshare 兜底进度: {i}/{len(still_missing)}")
+                    time.sleep(0.05)
+
+    save_cache(shares_data, 'shares_data')
+    logger.info(f"补齐后 shares_data 条数: {len([c for c, v in shares_data.items() if v])}")
+    return shares_data
+
+def refresh_shares_cache(stock_codes=None):
+    """
+    刷新并补齐 shares_data 缓存（总股本），默认覆盖沪深300过滤列表。
+
+    Args:
+        stock_codes: 可选，股票代码列表（带 .SZ/.SH 后缀）。不传则使用 get_csi300_filtered_stocks()
+
+    Returns:
+        dict: 刷新后的 shares_data 映射
+    """
+    logger = logging.getLogger(__name__)
+    if stock_codes is None:
+        stock_codes = get_csi300_filtered_stocks()
+    logger.info(f"开始刷新 shares_data 缓存，目标股票数: {len(stock_codes)}")
+    shares_data = get_total_shares_batch_local(stock_codes)
+    logger.info(f"刷新完成，shares_data 条数: {len([c for c, v in shares_data.items() if v])}")
     return shares_data
 
 def safe_convert_to_float(value):
@@ -1131,7 +1386,7 @@ def analyze_all_stocks_true_quarterly(start_year=2010):
     all_daily_data = get_all_stocks_daily_data(all_stock_codes, start_date_str, end_date_str)
     
     # 批量获取所有股票的总股本信息
-    shares_data = get_total_shares_batch(all_stock_codes)
+    shares_data = get_total_shares_batch_local(all_stock_codes)
     
     # 基于日线数据和总股本数据计算每个季度的市值总和
     quarterly_market_caps = calculate_quarterly_market_cap_optimized(results, all_daily_data, shares_data, quarterly_stats)

@@ -644,11 +644,12 @@ def save_results_to_file(results, output_file, count_threshold=100, eval_days=15
             # 删除：按年度且实际计算数量≥阈值的持股天数统计（所选持股天数）
             # 该输出块及其统计已按需求移除，保留后续“按年度统计总结”不变。
 
-            # 按年度统计总结
+            # 按年度统计总结（增加总涨跌比例）
             f.write("\n----- 按年度统计 -----\n")
             from collections import defaultdict as _dd
             import re
             year_stats = _dd(lambda: {'filtered': 0, 'high_performance': 0})
+            year_ud_stats = _dd(lambda: {'up': 0, 'down': 0})
             for date, stats in results['date_stats'].items():
                 # 尝试解析年份
                 year_val = None
@@ -661,15 +662,41 @@ def save_results_to_file(results, output_file, count_threshold=100, eval_days=15
                     year_val = int(m.group(1)) if m else '未知'
                 year_stats[year_val]['filtered'] += stats.get('filtered', 0)
                 year_stats[year_val]['high_performance'] += stats.get('high_performance', 0)
+            # 统计年度总涨跌（基于details的 change_percent）
+            for detail in results['details']:
+                # 解析年份
+                year_val = None
+                try:
+                    year_val = pd.to_datetime(str(detail.get('date')), errors='coerce').year
+                except Exception:
+                    year_val = None
+                if year_val is None:
+                    m = re.search(r'(\d{4})', str(detail.get('date')))
+                    year_val = int(m.group(1)) if m else '未知'
+                # 统计涨跌，仅统计非N/A，且忽略持平
+                if detail.get('change_percent') != 'N/A':
+                    try:
+                        change_value = float(str(detail.get('change_percent')).strip('%'))
+                        if change_value > 0:
+                            year_ud_stats[year_val]['up'] += 1
+                        elif change_value < 0:
+                            year_ud_stats[year_val]['down'] += 1
+                    except Exception:
+                        pass
             # 输出年度统计，按年份排序（未知放在最后）
             def _year_sort_key(y):
                 return (9999 if isinstance(y, str) else int(y))
-            f.write("年份\t符合条件记录数\t高性能记录数\t高性能占比\n")
+            f.write("年份\t符合条件记录数\t高性能记录数\t高性能占比\t上涨占比\t下跌占比\n")
             for year in sorted(year_stats.keys(), key=_year_sort_key):
                 fil = year_stats[year]['filtered']
                 hp = year_stats[year]['high_performance']
                 ratio = (hp / fil * 100) if fil > 0 else 0.0
-                f.write(f"{year}\t{fil}\t{hp}\t{ratio:.2f}%\n")
+                up_cnt = year_ud_stats[year]['up']
+                down_cnt = year_ud_stats[year]['down']
+                ud_den = up_cnt + down_cnt
+                up_ratio = (up_cnt / ud_den * 100) if ud_den > 0 else 0.0
+                down_ratio = (down_cnt / ud_den * 100) if ud_den > 0 else 0.0
+                f.write(f"{year}\t{fil}\t{hp}\t{ratio:.2f}%\t{up_ratio:.2f}%\t{down_ratio:.2f}%\n")
         
         logging.info(f"结果已保存到文件: {output_file}")
         return True
@@ -899,11 +926,12 @@ def print_results(results):
             ratio = stats['high_performance'] / stats['filtered'] * 100
             logging.info(f"{date}\t{stats['filtered']}\t{stats['high_performance']}\t{ratio:.2f}%")
 
-    # 按年度统计（完整列表）
+    # 按年度统计（完整列表，增加总涨跌比例）
     logging.info("\n----- 按年度统计 -----")
     from collections import defaultdict as _dd
     import re
     year_stats = _dd(lambda: {'filtered': 0, 'high_performance': 0})
+    year_ud_stats = _dd(lambda: {'up': 0, 'down': 0})
     for date, stats in results['date_stats'].items():
         year_val = None
         try:
@@ -915,14 +943,38 @@ def print_results(results):
             year_val = int(m.group(1)) if m else '未知'
         year_stats[year_val]['filtered'] += stats.get('filtered', 0)
         year_stats[year_val]['high_performance'] += stats.get('high_performance', 0)
+    # 统计年度总涨跌（基于details的 change_percent）
+    for detail in results['details']:
+        year_val = None
+        try:
+            year_val = pd.to_datetime(str(detail.get('date')), errors='coerce').year
+        except Exception:
+            year_val = None
+        if year_val is None:
+            m = re.search(r'(\d{4})', str(detail.get('date')))
+            year_val = int(m.group(1)) if m else '未知'
+        if detail.get('change_percent') != 'N/A':
+            try:
+                change_value = float(str(detail.get('change_percent')).strip('%'))
+                if change_value > 0:
+                    year_ud_stats[year_val]['up'] += 1
+                elif change_value < 0:
+                    year_ud_stats[year_val]['down'] += 1
+            except Exception:
+                pass
     def _year_sort_key(y):
         return (9999 if isinstance(y, str) else int(y))
-    logging.info("年份\t符合条件记录数\t高性能记录数\t高性能占比")
+    logging.info("年份\t符合条件记录数\t高性能记录数\t高性能占比\t上涨占比\t下跌占比")
     for year in sorted(year_stats.keys(), key=_year_sort_key):
         fil = year_stats[year]['filtered']
         hp = year_stats[year]['high_performance']
         ratio = (hp / fil * 100) if fil > 0 else 0.0
-        logging.info(f"{year}\t{fil}\t{hp}\t{ratio:.2f}%")
+        up_cnt = year_ud_stats[year]['up']
+        down_cnt = year_ud_stats[year]['down']
+        ud_den = up_cnt + down_cnt
+        up_ratio = (up_cnt / ud_den * 100) if ud_den > 0 else 0.0
+        down_ratio = (down_cnt / ud_den * 100) if ud_den > 0 else 0.0
+        logging.info(f"{year}\t{fil}\t{hp}\t{ratio:.2f}%\t{up_ratio:.2f}%\t{down_ratio:.2f}%")
     
     logging.info("\n----- 高性能记录详情 (前10条) -----")
     logging.info("股票代码\t日期\t\t实际计算数量\t高性能指标数/总指标数\t最佳指标\t买入日期\t卖出天数\t交易建议\t买入价\t卖出价\t涨跌幅\t最大涨幅\t最大跌幅")
@@ -936,7 +988,7 @@ def main():
                         help='CSV文件路径')
     parser.add_argument('--min-count', type=int, default=30,
                         help='最小相关数量阈值 (默认: 30')
-    parser.add_argument('--high-percentage', type=float, default=70.0,
+    parser.add_argument('--high-percentage', type=float, default=65.0,
                         help='高百分比阈值 (默认: 65.0)')
     parser.add_argument('--detail-threshold', type=int, default=95,
                         help='“实际计算数量≥N统计”使用的独立阈值 (默认: 95)')
