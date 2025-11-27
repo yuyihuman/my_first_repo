@@ -750,6 +750,9 @@
             const labels = data.map(item => item.月份);
             const m1Data = data.map(item => item.货币_狭义货币M1_同比);
             const hs300Data = data.map(item => item.沪深300指数);
+            const hs300FitData = data.map(item => item.沪深300指数_线性拟合);
+            const hs300UpperBandData = data.map(item => item['沪深300指数_+90%']);
+            const hs300LowerBandData = data.map(item => item['沪深300指数_-90%']);
             
             // 定义重要时间节点
             const timePoints = ['2002.2', '2005.5', '2008.12', '2012.1', '2015.3', '2019.1', '2021.11', '2024.9'];
@@ -846,6 +849,42 @@
                             tension: 0.1,
                             spanGaps: true,
                             yAxisID: 'y1'
+                        },
+                        {
+                            label: '沪深300指数_线性拟合',
+                            data: hs300FitData,
+                            borderColor: 'rgba(255, 159, 64, 1)',
+                            backgroundColor: 'rgba(255, 159, 64, 0.15)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0,
+                            spanGaps: true,
+                            yAxisID: 'y1',
+                            borderDash: [6, 4]
+                        },
+                        {
+                            label: '沪深300指数_+90%',
+                            data: hs300UpperBandData,
+                            borderColor: 'rgba(255, 159, 64, 0.9)',
+                            backgroundColor: 'rgba(255, 159, 64, 0.08)',
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            tension: 0,
+                            spanGaps: true,
+                            yAxisID: 'y1',
+                            borderDash: [4, 4]
+                        },
+                        {
+                            label: '沪深300指数_-90%',
+                            data: hs300LowerBandData,
+                            borderColor: 'rgba(255, 159, 64, 0.9)',
+                            backgroundColor: 'rgba(255, 159, 64, 0.08)',
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            tension: 0,
+                            spanGaps: true,
+                            yAxisID: 'y1',
+                            borderDash: [4, 4]
                         }
                     ]
                 },

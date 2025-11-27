@@ -401,6 +401,78 @@ def fetch_macro_china_money_supply():
             print(f"获取沪深300指数数据失败: {e}")
             hs300_dict = {}
         
+        # 计算沪深300指数的线性拟合（最小二乘法）并生成每月对应的拟合值
+        hs300_fit_dict = {}
+        hs300_band_upper_dict = {}
+        hs300_band_lower_dict = {}
+        try:
+            # 提取可用的(月份, 指数)并按时间排序
+            def _parse_month_key(k):
+                try:
+                    if '.' in k:
+                        y, m = k.split('.')
+                        return int(y), int(m)
+                    elif '-' in k:
+                        y, m = k.split('-')
+                        return int(y), int(m)
+                except Exception:
+                    pass
+                return (0, 0)
+
+            hs300_items = [(k, v.get('沪深300指数')) for k, v in hs300_dict.items() if v.get('沪深300指数') is not None]
+            hs300_items.sort(key=lambda x: _parse_month_key(x[0]))
+
+            if len(hs300_items) >= 2:
+                # 构造X（时间索引）与Y（指数值）
+                X = list(range(len(hs300_items)))
+                Y = [val for _, val in hs300_items]
+
+                # 计算均值
+                mean_x = sum(X) / len(X)
+                mean_y = sum(Y) / len(Y)
+
+                # 计算斜率b与截距a（最小二乘法）
+                numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(X, Y))
+                denominator = sum((x - mean_x) ** 2 for x in X) if sum((x - mean_x) ** 2 for x in X) != 0 else 1e-9
+                b = numerator / denominator
+                a = mean_y - b * mean_x
+
+                # 生成每月拟合值字典，并收集残差
+                residuals_abs = []
+                for idx, (month_key, price) in enumerate(hs300_items):
+                    fitted = a + b * idx
+                    hs300_fit_dict[month_key] = round(float(fitted), 2)
+                    try:
+                        residuals_abs.append(abs(float(price) - float(fitted)))
+                    except Exception:
+                        pass
+
+                # 计算使约90%点位位于上下带之间的对称距离（绝对残差的90分位）
+                if len(residuals_abs) >= 1:
+                    residuals_abs_sorted = sorted(residuals_abs)
+                    # 使用分位数索引法，选择0.90分位附近的元素
+                    p = 0.90
+                    idx_q = int(round((len(residuals_abs_sorted) - 1) * p))
+                    d = float(residuals_abs_sorted[max(0, min(len(residuals_abs_sorted) - 1, idx_q))])
+                    # 生成上/下平行带（与拟合线平行，距离相同）
+                    for idx, (month_key, _) in enumerate(hs300_items):
+                        fitted = a + b * idx
+                        hs300_band_upper_dict[month_key] = round(float(fitted + d), 2)
+                        hs300_band_lower_dict[month_key] = round(float(fitted - d), 2)
+                else:
+                    hs300_band_upper_dict = {}
+                    hs300_band_lower_dict = {}
+            else:
+                # 数据不足时不生成拟合
+                hs300_fit_dict = {}
+                hs300_band_upper_dict = {}
+                hs300_band_lower_dict = {}
+        except Exception as e:
+            print(f"计算沪深300指数线性拟合失败: {e}")
+            hs300_fit_dict = {}
+            hs300_band_upper_dict = {}
+            hs300_band_lower_dict = {}
+
         # 获取中证商品期货指数数据
         ccidx_dict = get_ccidx_futures_index()
         
@@ -811,6 +883,11 @@ def fetch_macro_china_money_supply():
                 if formatted_date in hs300_dict:
                     item['沪深300指数'] = hs300_dict[formatted_date]['沪深300指数']
                     item['沪深300指数_同比'] = hs300_dict[formatted_date]['沪深300指数_同比']
+                    # 添加线性拟合值（如果存在）
+                    item['沪深300指数_线性拟合'] = hs300_fit_dict.get(formatted_date)
+                    # 添加±90%平行带（如果存在）
+                    item['沪深300指数_+90%'] = hs300_band_upper_dict.get(formatted_date)
+                    item['沪深300指数_-90%'] = hs300_band_lower_dict.get(formatted_date)
                 else:
                     # 尝试其他可能的日期格式
                     found = False
@@ -820,12 +897,18 @@ def fetch_macro_china_money_supply():
                             if formatted_date.split('.')[0] == key.split('.')[0] and formatted_date.split('.')[1].lstrip('0') == key.split('.')[1].lstrip('0'):
                                 item['沪深300指数'] = hs300_dict[key]['沪深300指数']
                                 item['沪深300指数_同比'] = hs300_dict[key]['沪深300指数_同比']
+                                item['沪深300指数_线性拟合'] = hs300_fit_dict.get(key)
+                                item['沪深300指数_+90%'] = hs300_band_upper_dict.get(key)
+                                item['沪深300指数_-90%'] = hs300_band_lower_dict.get(key)
                                 found = True
                                 break
-                    
+
                     if not found:
                         item['沪深300指数'] = None
                         item['沪深300指数_同比'] = None
+                        item['沪深300指数_线性拟合'] = None
+                        item['沪深300指数_+90%'] = None
+                        item['沪深300指数_-90%'] = None
                 
                 # 添加中证商品期货价格指数数据（如果存在）
                 if formatted_date in ccidx_dict:
@@ -1124,6 +1207,11 @@ def fetch_macro_china_money_supply():
                             # 添加沪深300指数数据
                             item['沪深300指数'] = hs300_dict[hs300_month]['沪深300指数']
                             item['沪深300指数_同比'] = hs300_dict[hs300_month]['沪深300指数_同比']
+                            # 添加线性拟合值（如果存在）
+                            item['沪深300指数_线性拟合'] = hs300_fit_dict.get(hs300_month)
+                            # 添加±90%平行带（如果存在）
+                            item['沪深300指数_+90%'] = hs300_band_upper_dict.get(hs300_month)
+                            item['沪深300指数_-90%'] = hs300_band_lower_dict.get(hs300_month)
                             
                             # 添加中证商品期货价格指数数据（如果存在）
                             if hs300_month in ccidx_dict:
@@ -1372,6 +1460,15 @@ def fetch_macro_china_money_supply():
                 item['新出口订单指数(%)'] = None
                 item['工业生产者购进价格指数(2011年1月=100)'] = None
                 item['燃料、动力类购进价格指数(2011年1月=100)'] = None
+
+        # 兜底：确保所有记录都包含拟合与上下带键（即使为None）
+        for item in data:
+            if '沪深300指数_线性拟合' not in item:
+                item['沪深300指数_线性拟合'] = None
+            if '沪深300指数_+90%' not in item:
+                item['沪深300指数_+90%'] = None
+            if '沪深300指数_-90%' not in item:
+                item['沪深300指数_-90%'] = None
 
         # 按时间正序排列数据
         def parse_date_key(date_str):
