@@ -857,8 +857,9 @@ class GPUBatchPearsonAnalyzer:
         self.end_timer('gpu_step2_tensor_creation')
         self.logger.info(f"  📊 [子步骤2/5] 创建GPU历史数据张量 - 完成")
         
-        # 监控数据张量创建后的GPU显存
-        self.monitor_gpu_memory("张量创建完成")
+        # 监控数据张量创建后的GPU显存（仅在debug模式）
+        if self.debug:
+            self.monitor_gpu_memory("张量创建完成")
         
         # 子步骤3/5: 批量相关系数计算
         self.start_timer('gpu_step3_correlation_calculation')
@@ -905,8 +906,8 @@ class GPUBatchPearsonAnalyzer:
                 batch_corr = self._compute_correlation_matrix(current_batch, historical_tensor)
                 batch_correlations.append(batch_corr)
             
-            # 监控每个批次后的GPU显存
-            if batch_idx % max(1, total_batches // 5) == 0:  # 每20%进度监控一次
+            # 监控每个批次后的GPU显存（仅在debug模式）
+            if self.debug and batch_idx % max(1, total_batches // 5) == 0:  # 每20%进度监控一次
                 self.monitor_gpu_memory(f"批次{batch_idx + 1}完成")
         
         self.end_timer('gpu_step3_correlation_calculation')
@@ -930,8 +931,9 @@ class GPUBatchPearsonAnalyzer:
         self.end_timer('gpu_step4_batch_merging')
         self.logger.info(f"  🔗 [子步骤4/5] 合并批次结果 - 完成")
         
-        # 监控相关系数计算完成后的GPU显存
-        self.monitor_gpu_memory("相关系数计算完成")
+        # 监控相关系数计算完成后的GPU显存（仅在debug模式）
+        if self.debug:
+            self.monitor_gpu_memory("相关系数计算完成")
         
         self.logger.info(f"批量GPU相关性计算完成，结果形状: {all_correlations.shape}")
         
@@ -1642,8 +1644,8 @@ class GPUBatchPearsonAnalyzer:
             self.end_timer('gpu_step3_result_aggregation')
             self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
             
-            # 监控每个批次后的GPU显存
-            if batch_idx % max(1, total_batches // 5) == 0:  # 每20%进度监控一次
+            # 监控每个批次后的GPU显存（仅在debug模式）
+            if self.debug and batch_idx % max(1, total_batches // 5) == 0:  # 每20%进度监控一次
                 self.monitor_gpu_memory(f"GPU批次{batch_idx + 1}完成")
         
         # 合并所有批次的结果（仍在GPU上）- 支持多股票
@@ -2220,19 +2222,50 @@ class GPUBatchPearsonAnalyzer:
         high_corr_indices_tensor = torch.nonzero(first_eval_high_corr_mask, as_tuple=False).view(-1)
         high_corr_indices = high_corr_indices_tensor.tolist()
         
-        self.logger.info("🔍" + "=" * 80)
-        self.logger.info(f"🔍 DEBUG模式 - 批次 {batch_index + 1}/{total_batches} 第一个评测日期详细信息")
-        self.logger.info("🔍" + "=" * 80)
-        self.logger.info(f"🔍 评测日期: {first_eval_date.strftime('%Y-%m-%d')}")
-        self.logger.info(f"🔍 评测数据窗口: {first_eval_date - pd.Timedelta(days=self.window_size-1)} 到 {first_eval_date}")
-        self.logger.info(f"🔍 超过阈值的对比期间数量: {len(high_corr_indices)}")
+        self.logger.debug("🔍" + "=" * 80)
+        self.logger.debug(f"🔍 DEBUG模式 - 批次 {batch_index + 1}/{total_batches} 第一个评测日期详细信息")
+        self.logger.debug("🔍" + "=" * 80)
+        self.logger.debug(f"🔍 评测日期: {first_eval_date.strftime('%Y-%m-%d')}")
+        # 日历区间（仅参考）：按评测日期回溯 window_size-1 天
+        calendar_start = first_eval_date - pd.Timedelta(days=self.window_size - 1)
+        self.logger.debug(
+            f"🔍 评测数据窗口(日历): {calendar_start} 到 {first_eval_date} （窗口长度={self.window_size})"
+        )
+
+        # 交易区间（真实用于计算的窗口）：优先使用目标股票的日期索引来解析
+        try:
+            if hasattr(self, 'data') and isinstance(self.data.index, pd.DatetimeIndex) and not self.data.empty:
+                eval_window_df = self.data[self.data.index <= first_eval_date].tail(self.window_size)
+                eval_window_idx = eval_window_df.index
+                actual_trade_days = len(eval_window_idx)
+                actual_start = eval_window_idx[0] if actual_trade_days > 0 else calendar_start
+                actual_end = eval_window_idx[-1] if actual_trade_days > 0 else first_eval_date
+                self.logger.debug(
+                    f"🔍 评测数据窗口(交易日): {actual_start} 到 {actual_end} （交易日数={actual_trade_days}, 窗口长度={self.window_size})"
+                )
+                if actual_trade_days != self.window_size or actual_end != first_eval_date:
+                    self.logger.warning(
+                        f"🔍 评测交易窗口与评测日未完全对齐：交易日数={actual_trade_days}, 窗口末日={actual_end}"
+                    )
+            else:
+                # 无可用索引信息：回退为张量长度提示，避免误导
+                trade_days_count = int(first_eval_data.shape[0])
+                self.logger.debug(
+                    f"🔍 评测数据窗口(交易日): 无法直接解析日期索引，按张量长度报告 交易日数={trade_days_count}, 窗口长度={self.window_size}"
+                )
+        except Exception:
+            trade_days_count = int(first_eval_data.shape[0])
+            self.logger.debug(
+                f"🔍 评测数据窗口(交易日): 解析失败，按张量长度报告 交易日数={trade_days_count}, 窗口长度={self.window_size}"
+            )
+        self.logger.debug(f"🔍 超过阈值的对比期间数量: {len(high_corr_indices)}")
 
         # 无条件打印：首评测单位的完整窗口原始输入数据（不受阈值影响）
         try:
-            self.logger.info("🔍 首评测单位完整窗口数据（不受阈值影响）:")
+            self.logger.debug("🔍 首评测单位完整窗口数据（不受阈值影响）:")
             eval_fields = ['open', 'close', 'volume']
             for f_idx, f_name in enumerate(eval_fields):
-                self.logger.info(f"🔍   {f_name}: {first_eval_data[:, f_idx].tolist()}")
+                self.logger.debug(f"🔍   {f_name}: {first_eval_data[:, f_idx].tolist()}")
         except Exception:
             pass
 
@@ -2241,7 +2274,7 @@ class GPUBatchPearsonAnalyzer:
             nonzero_mask = first_eval_correlations > 0
             max_corr = first_eval_correlations.max().item()
             mean_corr = first_eval_correlations[nonzero_mask].mean().item() if nonzero_mask.any() else 0.0
-            self.logger.info(f"🔍 最终结果汇总: 最高相关={max_corr:.6f}, 非零均值={mean_corr:.6f}")
+            self.logger.debug(f"🔍 最终结果汇总: 最高相关={max_corr:.6f}, 非零均值={mean_corr:.6f}")
         except Exception:
             pass
 
@@ -2252,13 +2285,13 @@ class GPUBatchPearsonAnalyzer:
             correlation_top = first_eval_correlations[top_idx_all].item()
             historical_data_top = historical_tensor[top_idx_all].detach().cpu()  # [window_size, 3]
 
-            self.logger.info("🔍 不受阈值影响的首个历史期间（按最小索引）:")
-            self.logger.info(f"🔍   历史期间 {top_idx_all}: {period_info_top['start_date']} 到 {period_info_top['end_date']}")
-            self.logger.info(f"🔍   来源股票: {period_info_top['stock_code']}")
-            self.logger.info(f"🔍   平均相关系数: {correlation_top:.6f}")
+            self.logger.debug("🔍 不受阈值影响的首个历史期间（按最小索引）:")
+            self.logger.debug(f"🔍   历史期间 {top_idx_all}: {period_info_top['start_date']} 到 {period_info_top['end_date']}")
+            self.logger.debug(f"🔍   来源股票: {period_info_top['stock_code']}")
+            self.logger.debug(f"🔍   平均相关系数: {correlation_top:.6f}")
 
             fields = ['open', 'close', 'volume']
-            self.logger.info(f"🔍   源数据列对比 (前3天和后3天):")
+            self.logger.debug(f"🔍   源数据列对比 (前3天和后3天):")
             for field_idx, field in enumerate(fields):
                 eval_field_data = first_eval_data[:, field_idx]
                 hist_field_data = historical_data_top[:, field_idx]
@@ -2268,17 +2301,17 @@ class GPUBatchPearsonAnalyzer:
                 denom = (x.norm() * y.norm()).clamp(min=1e-8)
                 field_correlation = (x.dot(y) / denom).item()
 
-                self.logger.info(f"🔍     {field} (相关系数: {field_correlation:.6f}):")
-                self.logger.info(f"🔍       评测数据前3天: {eval_field_data[:3].tolist()}")
-                self.logger.info(f"🔍       历史数据前3天: {hist_field_data[:3].tolist()}")
-                self.logger.info(f"🔍       评测数据后3天: {eval_field_data[-3:].tolist()}")
-                self.logger.info(f"🔍       历史数据后3天: {hist_field_data[-3:].tolist()}")
+                self.logger.debug(f"🔍     {field} (相关系数: {field_correlation:.6f}):")
+                self.logger.debug(f"🔍       评测数据前3天: {eval_field_data[:3].tolist()}")
+                self.logger.debug(f"🔍       历史数据前3天: {hist_field_data[:3].tolist()}")
+                self.logger.debug(f"🔍       评测数据后3天: {eval_field_data[-3:].tolist()}")
+                self.logger.debug(f"🔍       历史数据后3天: {hist_field_data[-3:].tolist()}")
 
             # 打印完整窗口数据以便复现
-            self.logger.info("🔍   完整窗口数据 (首个期间):")
+            self.logger.debug("🔍   完整窗口数据 (首个期间):")
             for field_idx, field in enumerate(fields):
-                self.logger.info(f"🔍     {field} - 评测完整窗口: {first_eval_data[:, field_idx].tolist()}")
-                self.logger.info(f"🔍     {field} - 历史完整窗口: {historical_data_top[:, field_idx].tolist()}")
+                self.logger.debug(f"🔍     {field} - 评测完整窗口: {first_eval_data[:, field_idx].tolist()}")
+                self.logger.debug(f"🔍     {field} - 历史完整窗口: {historical_data_top[:, field_idx].tolist()}")
         except Exception:
             pass
 
@@ -2311,13 +2344,13 @@ class GPUBatchPearsonAnalyzer:
                 best_info = period_info_list[best_idx]
                 hist_best_field = hist_fields[best_idx]
 
-                self.logger.info(f"🔍 字段 {field_name} 最大相关期间（按字段相关最大）:")
-                self.logger.info(f"🔍   历史期间 {best_idx}: {best_info['start_date']} 到 {best_info['end_date']}")
-                self.logger.info(f"🔍   来源股票: {best_info['stock_code']}")
-                self.logger.info(f"🔍   字段相关系数: {best_corr:.6f}")
+                self.logger.debug(f"🔍 字段 {field_name} 最大相关期间（按字段相关最大）:")
+                self.logger.debug(f"🔍   历史期间 {best_idx}: {best_info['start_date']} 到 {best_info['end_date']}")
+                self.logger.debug(f"🔍   来源股票: {best_info['stock_code']}")
+                self.logger.debug(f"🔍   字段相关系数: {best_corr:.6f}")
                 try:
                     avg_corr_period = float(first_eval_correlations[best_idx].item())
-                    self.logger.info(f"🔍   该期间平均相关系数(全字段): {avg_corr_period:.6f}")
+                    self.logger.debug(f"🔍   该期间平均相关系数(全字段): {avg_corr_period:.6f}")
                 except Exception:
                     pass
 
@@ -2325,7 +2358,7 @@ class GPUBatchPearsonAnalyzer:
                 fields_all = ['open', 'close', 'volume']
                 hist_all_fields = historical_tensor[best_idx].detach().cpu()  # [window_size, 3]
 
-                self.logger.info(f"🔍   源数据列对比 (前3天和后3天):")
+                self.logger.debug(f"🔍   源数据列对比 (前3天和后3天):")
                 for f_idx, f_name in enumerate(fields_all):
                     eval_field_data = first_eval_data[:, f_idx]
                     hist_field_data = hist_all_fields[:, f_idx]
@@ -2335,43 +2368,43 @@ class GPUBatchPearsonAnalyzer:
                     denom_xy = (x.norm() * y.norm()).clamp(min=1e-8)
                     field_corr = (x.dot(y) / denom_xy).item()
 
-                    self.logger.info(f"🔍     {f_name} (相关系数: {field_corr:.6f}):")
-                    self.logger.info(f"🔍       评测数据前3天: {eval_field_data[:3].tolist()}")
-                    self.logger.info(f"🔍       历史数据前3天: {hist_field_data[:3].tolist()}")
-                    self.logger.info(f"🔍       评测数据后3天: {eval_field_data[-3:].tolist()}")
-                    self.logger.info(f"🔍       历史数据后3天: {hist_field_data[-3:].tolist()}")
+                    self.logger.debug(f"🔍     {f_name} (相关系数: {field_corr:.6f}):")
+                    self.logger.debug(f"🔍       评测数据前3天: {eval_field_data[:3].tolist()}")
+                    self.logger.debug(f"🔍       历史数据前3天: {hist_field_data[:3].tolist()}")
+                    self.logger.debug(f"🔍       评测数据后3天: {eval_field_data[-3:].tolist()}")
+                    self.logger.debug(f"🔍       历史数据后3天: {hist_field_data[-3:].tolist()}")
 
                 # 打印完整窗口数据以便复现（所有字段）
-                self.logger.info("🔍   完整窗口数据 (该期间):")
+                self.logger.debug("🔍   完整窗口数据 (该期间):")
                 for f_idx, f_name in enumerate(fields_all):
-                    self.logger.info(f"🔍     {f_name} - 评测完整窗口: {first_eval_data[:, f_idx].tolist()}")
-                    self.logger.info(f"🔍     {f_name} - 历史完整窗口: {hist_all_fields[:, f_idx].tolist()}")
+                    self.logger.debug(f"🔍     {f_name} - 评测完整窗口: {first_eval_data[:, f_idx].tolist()}")
+                    self.logger.debug(f"🔍     {f_name} - 历史完整窗口: {hist_all_fields[:, f_idx].tolist()}")
         except Exception:
             pass
 
         if len(high_corr_indices) > 0:
-            self.logger.info("🔍 超过阈值的对比日期和相关系数:")
-            
+            self.logger.debug("🔍 超过阈值的对比日期和相关系数:")
+
             # 按相关系数降序排列（torch实现）
             corr_values = first_eval_correlations[high_corr_indices_tensor]
             sorted_order = torch.argsort(corr_values, descending=True)
             sorted_indices = [high_corr_indices[i] for i in sorted_order.tolist()]
-            
-            for rank, hist_idx in enumerate(sorted_indices[:10], 1):  # 只显示前10个
+
+            for rank, hist_idx in enumerate(sorted_indices, 1):  # 打印所有超过阈值的期间
                 period_info = period_info_list[hist_idx]
                 correlation = first_eval_correlations[hist_idx].item()
-                
-                self.logger.info(f"🔍   #{rank} 历史期间 {hist_idx}: {period_info['start_date']} 到 {period_info['end_date']}")
-                self.logger.info(f"🔍       来源股票: {period_info['stock_code']}")
-                self.logger.info(f"🔍       平均相关系数: {correlation:.6f}")
-                
+
+                self.logger.debug(f"🔍   #{rank} 历史期间 {hist_idx}: {period_info['start_date']} 到 {period_info['end_date']}")
+                self.logger.debug(f"🔍       来源股票: {period_info['stock_code']}")
+                self.logger.debug(f"🔍       平均相关系数: {correlation:.6f}")
+
                 # 获取对应的历史数据
                 historical_data = historical_tensor[hist_idx].detach().cpu()  # [window_size, 3]
-                
-                # 打印源数据列的详细对比（仅3列）
+
+                # 打印源数据列完整对比（open/close/volume 全窗口）
                 fields = ['open', 'close', 'volume']
-                self.logger.info(f"🔍       源数据列对比 (前3天和后3天):")
-                
+                self.logger.debug(f"🔍       源数据列对比 (完整数据):")
+
                 for field_idx, field in enumerate(fields):
                     eval_field_data = first_eval_data[:, field_idx]
                     hist_field_data = historical_data[:, field_idx]
@@ -2382,30 +2415,16 @@ class GPUBatchPearsonAnalyzer:
                     denom = (x.norm() * y.norm()).clamp(min=1e-8)
                     field_correlation = (x.dot(y) / denom).item()
 
-                    self.logger.info(f"🔍         {field} (相关系数: {field_correlation:.6f}):")
-                    self.logger.info(f"🔍           评测数据前3天: {eval_field_data[:3].tolist()}")
-                    self.logger.info(f"🔍           历史数据前3天: {hist_field_data[:3].tolist()}")
-                    self.logger.info(f"🔍           评测数据后3天: {eval_field_data[-3:].tolist()}")
-                    self.logger.info(f"🔍           历史数据后3天: {hist_field_data[-3:].tolist()}")
+                    self.logger.debug(f"🔍         {field} (相关系数: {field_correlation:.6f}):")
+                    self.logger.debug(f"🔍           评测完整数据: {eval_field_data.tolist()}")
+                    self.logger.debug(f"🔍           历史完整数据: {hist_field_data.tolist()}")
 
-                # 额外：对排名第一的期间打印完整窗口数据，避免日志过载仅限Top1
-                if rank == 1:
-                    self.logger.info("🔍       完整窗口数据 (Top1 期间):")
-                    for field_idx, field in enumerate(fields):
-                        eval_field_data = first_eval_data[:, field_idx]
-                        hist_field_data = historical_data[:, field_idx]
-                        self.logger.info(f"🔍         {field} - 评测完整窗口: {eval_field_data.tolist()}")
-                        self.logger.info(f"🔍         {field} - 历史完整窗口: {hist_field_data.tolist()}")
-                
-                self.logger.info("🔍" + "-" * 60)
-            
-            if len(high_corr_indices) > 10:
-                self.logger.info(f"🔍   ... 还有 {len(high_corr_indices) - 10} 个超过阈值的期间")
+                self.logger.debug("🔍" + "-" * 60)
         else:
-            self.logger.info("🔍 没有找到超过阈值的对比期间")
+            self.logger.debug("🔍 没有找到超过阈值的对比期间")
         
         # 打印评测数据的统计信息
-        self.logger.info("🔍 评测数据统计信息:")
+        self.logger.debug("🔍 评测数据统计信息:")
         # 与计算保持一致，仅保留三个字段
         fields = ['open', 'close', 'volume']
         for field_idx, field in enumerate(fields):
@@ -2414,9 +2433,8 @@ class GPUBatchPearsonAnalyzer:
             std_v = field_data.std(unbiased=False).item()
             min_v = field_data.min().item()
             max_v = field_data.max().item()
-            self.logger.info(f"🔍   {field}: 均值={mean_v:.4f}, 标准差={std_v:.4f}, 最小值={min_v:.4f}, 最大值={max_v:.4f}")
-        
-        self.logger.info("🔍" + "=" * 80)
+            self.logger.debug(f"🔍   {field}: 均值={mean_v:.4f}, 标准差={std_v:.4f}, 最小值={min_v:.4f}, 最大值={max_v:.4f}")
+        self.logger.debug("🔍" + "=" * 80)
     
     def calculate_future_performance_stats(self, data, high_correlation_periods):
         """
@@ -2867,8 +2885,9 @@ class GPUBatchPearsonAnalyzer:
         
         self.logger.info("=" * 80)
         
-        # 初始GPU显存监控
-        self.monitor_gpu_memory("分析开始")
+        # 初始GPU显存监控（仅在debug模式）
+        if self.debug:
+            self.monitor_gpu_memory("分析开始")
         
         # 📚 第1阶段：数据加载 - 开始
         self.logger.info("📚 [阶段1/4] 数据加载 - 开始")
@@ -2901,8 +2920,9 @@ class GPUBatchPearsonAnalyzer:
             self.logger.error("批量评测数据准备失败")
             return None
         
-        # 监控数据准备后的GPU显存
-        self.monitor_gpu_memory("数据准备完成")
+        # 监控数据准备后的GPU显存（仅在debug模式）
+        if self.debug:
+            self.monitor_gpu_memory("数据准备完成")
         
         # 💾 基于实际历史期间数据量进行GPU内存预估
         self.logger.info("💾 基于实际数据量进行GPU内存预估...")
@@ -2967,7 +2987,9 @@ class GPUBatchPearsonAnalyzer:
         
         # 🚀 第3阶段：GPU计算与结果处理 - 开始
         self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 开始")
-        self.monitor_gpu_memory("GPU计算开始")
+        # 监控GPU计算开始（仅在debug模式）
+        if self.debug:
+            self.monitor_gpu_memory("GPU计算开始")
         
         # 构建与评测单元一一对应的stock_codes列表
         if self.is_multi_stock:
@@ -2981,7 +3003,9 @@ class GPUBatchPearsonAnalyzer:
             evaluation_unit_stock_codes = [self.stock_code] * len(valid_dates)
         
         batch_correlations = self.calculate_batch_gpu_correlation_optimized(batch_recent_data, self.historical_periods_data, valid_dates, evaluation_unit_stock_codes, valid_mask=valid_mask)
-        self.monitor_gpu_memory("GPU计算完成")
+        # 监控GPU计算完成（仅在debug模式）
+        if self.debug:
+            self.monitor_gpu_memory("GPU计算完成")
         self.logger.info("🚀 [阶段3/4] GPU计算与结果处理 - 完成")
         
         if not batch_correlations:
@@ -3011,8 +3035,9 @@ class GPUBatchPearsonAnalyzer:
         # 输出性能总结
         self._log_performance_summary()
         
-        # 最终GPU显存监控
-        self.monitor_gpu_memory("分析完成")
+        # 最终GPU显存监控（仅在debug模式）
+        if self.debug:
+            self.monitor_gpu_memory("分析完成")
         self.logger.info("📊 [阶段4/4] 最终处理 - 完成")
         
         # 输出分析总结
@@ -3298,7 +3323,8 @@ class GPUBatchPearsonAnalyzer:
             elif usage_rate > 0.9:
                 self.logger.error(f"❌ GPU显存使用率过高: {usage_rate*100:.1f}%，可能导致内存溢出")
         else:
-            self.logger.info(f"🔍 CPU模式，跳过GPU显存监控 [{stage_name}]")
+            # 非GPU设备下的监控提示仅在debug模式输出，避免正常运行日志噪音
+            self.logger.debug(f"🔍 CPU模式，跳过GPU显存监控 [{stage_name}]")
     
     def estimate_memory_requirement(self, evaluation_days, num_historical_periods, window_size, num_fields=3):
         """
@@ -3627,8 +3653,9 @@ class GPUBatchPearsonAnalyzer:
                 except Exception:
                     batch_valid_mask = None
                 
-                # 监控GPU内存
-                self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算开始")
+                # 监控GPU内存（仅在debug模式）
+                if self.debug:
+                    self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算开始")
                 
                 # 🚀 一次性GPU计算整个批次
                 self.logger.info(f"🚀 执行GPU批次 {batch_idx + 1}/{total_batches}：处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
@@ -3636,11 +3663,12 @@ class GPUBatchPearsonAnalyzer:
                 batch_start_wall = time.time()
                 self.logger.info(f"📦 处理 {len(set(batch_stock_indices))} 只股票，{current_batch_units} 个计算单元")
                 
-                # 输出详细的计算单元信息
-                self.logger.debug("📋 计算单元详细信息:")
-                for i, (stock_idx, date_idx, date) in enumerate(zip(batch_stock_indices, batch_date_indices, batch_dates_list)):
-                    stock_code = stock_codes[stock_idx] if self.is_multi_stock else self.stock_code
-                    self.logger.debug(f"   单元 {i+1}: 股票代码={stock_code}, 评测日期={date}")
+                # 输出详细的计算单元信息（仅在debug模式）
+                if self.debug:
+                    self.logger.debug("📋 计算单元详细信息:")
+                    for i, (stock_idx, date_idx, date) in enumerate(zip(batch_stock_indices, batch_date_indices, batch_dates_list)):
+                        stock_code = stock_codes[stock_idx] if self.is_multi_stock else self.stock_code
+                        self.logger.debug(f"   单元 {i+1}: 股票代码={stock_code}, 评测日期={date}")
                 
                 # 第1步：历史数据准备和筛选
                 self.start_timer('gpu_step1_data_preparation')
@@ -3664,7 +3692,8 @@ class GPUBatchPearsonAnalyzer:
                 )
                 self.end_timer('gpu_step3_integrated_correlation_processing')
                 
-                self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算完成")
+                if self.debug:
+                    self.monitor_gpu_memory(f"批次 {batch_idx + 1} GPU计算完成")
                 # 获取高相关性记录总数
                 total_high_correlations = batch_correlations['batch_results']['summary']['total_high_correlations']
                 elapsed_wall = time.time() - batch_start_wall
@@ -3673,64 +3702,76 @@ class GPUBatchPearsonAnalyzer:
                 # 合并批次结果
                 self.start_timer('post_batch_merging_cpu')
                 if batch_correlations:
-                    self.logger.debug(f"🔄 [批次合并] 开始合并第{batch_idx + 1}批结果")
+                    if self.debug:
+                        self.logger.debug(f"🔄 [批次合并] 开始合并第{batch_idx + 1}批结果")
                     
                     # 处理detailed_results的合并（多股票模式下是字典，需要特殊处理）
                     batch_detailed = batch_correlations['batch_results']['detailed_results']
                     merged_detailed = merged_results['batch_results']['detailed_results']
                     
-                    self.logger.debug(f"🔄 [批次合并] 批次detailed_results类型: {type(batch_detailed)}")
-                    self.logger.debug(f"🔄 [批次合并] 合并目标detailed_results类型: {type(merged_detailed)}")
+                    if self.debug:
+                        self.logger.debug(f"🔄 [批次合并] 批次detailed_results类型: {type(batch_detailed)}")
+                        self.logger.debug(f"🔄 [批次合并] 合并目标detailed_results类型: {type(merged_detailed)}")
                     
                     if isinstance(batch_detailed, dict):
-                        self.logger.debug(f"🔄 [批次合并] 批次detailed_results包含股票: {list(batch_detailed.keys())}")
-                        for stock_code, stock_data_list in batch_detailed.items():
-                            self.logger.debug(f"🔄 [批次合并]   - 股票{stock_code}: {len(stock_data_list)}个结果")
+                        if self.debug:
+                            self.logger.debug(f"🔄 [批次合并] 批次detailed_results包含股票: {list(batch_detailed.keys())}")
+                            for stock_code, stock_data_list in batch_detailed.items():
+                                self.logger.debug(f"🔄 [批次合并]   - 股票{stock_code}: {len(stock_data_list)}个结果")
                     elif isinstance(batch_detailed, list):
-                        self.logger.debug(f"🔄 [批次合并] 批次detailed_results列表长度: {len(batch_detailed)}")
+                        if self.debug:
+                            self.logger.debug(f"🔄 [批次合并] 批次detailed_results列表长度: {len(batch_detailed)}")
                     
                     if isinstance(batch_detailed, dict) and isinstance(merged_detailed, dict):
                         # 多股票模式：detailed_results是字典，按股票代码合并
-                        self.logger.debug(f"🔄 [批次合并] 多股票模式字典合并")
+                        if self.debug:
+                            self.logger.debug(f"🔄 [批次合并] 多股票模式字典合并")
                         for stock_code, stock_data_list in batch_detailed.items():
                             # 如果股票代码已存在，扩展其结果列表；否则创建新的键
                             if stock_code not in merged_detailed:
                                 merged_detailed[stock_code] = []
-                                self.logger.debug(f"🔄 [批次合并]   - 为股票{stock_code}创建新键")
+                                if self.debug:
+                                    self.logger.debug(f"🔄 [批次合并]   - 为股票{stock_code}创建新键")
                             
                             before_len = len(merged_detailed[stock_code])
                             merged_detailed[stock_code].extend(stock_data_list)
                             after_len = len(merged_detailed[stock_code])
-                            self.logger.debug(f"🔄 [批次合并]   - 股票{stock_code}结果扩展: {before_len} -> {after_len} (+{len(stock_data_list)})")
+                            if self.debug:
+                                self.logger.debug(f"🔄 [批次合并]   - 股票{stock_code}结果扩展: {before_len} -> {after_len} (+{len(stock_data_list)})")
                     elif isinstance(batch_detailed, list) and isinstance(merged_detailed, list):
                         # 单股票模式：detailed_results是列表，直接扩展
-                        self.logger.debug(f"🔄 [批次合并] 单股票模式列表合并")
+                        if self.debug:
+                            self.logger.debug(f"🔄 [批次合并] 单股票模式列表合并")
                         before_len = len(merged_detailed)
                         merged_detailed.extend(batch_detailed)
                         after_len = len(merged_detailed)
-                        self.logger.debug(f"🔄 [批次合并] 列表扩展: {before_len} -> {after_len} (+{len(batch_detailed)})")
+                        if self.debug:
+                            self.logger.debug(f"🔄 [批次合并] 列表扩展: {before_len} -> {after_len} (+{len(batch_detailed)})")
                     else:
                         self.logger.error(f"🔄 [批次合并] 类型不匹配: batch_detailed={type(batch_detailed)}, merged_detailed={type(merged_detailed)}")
                     
-                    # 更新日志输出以适应不同格式
+                    # 更新日志输出以适应不同格式（仅在debug模式）
                     detailed_results = merged_results['batch_results']['detailed_results']
-                    if isinstance(detailed_results, dict):
-                        total_results = sum(len(stock_results) for stock_results in detailed_results.values())
-                        self.logger.debug(f"🔍 批次 {batch_idx + 1} 合并后detailed_results包含 {len(detailed_results)} 个股票，总计 {total_results} 个结果")
-                        for stock_code, stock_results in detailed_results.items():
-                            self.logger.debug(f"🔍   - {stock_code}: {len(stock_results)}个结果")
-                    else:
-                        self.logger.debug(f"🔍 批次 {batch_idx + 1} 合并后detailed_results长度: {len(detailed_results)}")
+                    if self.debug:
+                        if isinstance(detailed_results, dict):
+                            total_results = sum(len(stock_results) for stock_results in detailed_results.values())
+                            self.logger.debug(f"🔍 批次 {batch_idx + 1} 合并后detailed_results包含 {len(detailed_results)} 个股票，总计 {total_results} 个结果")
+                            for stock_code, stock_results in detailed_results.items():
+                                self.logger.debug(f"🔍   - {stock_code}: {len(stock_results)}个结果")
+                        else:
+                            self.logger.debug(f"🔍 批次 {batch_idx + 1} 合并后detailed_results长度: {len(detailed_results)}")
                     
                     # 累加统计数据
                     batch_summary = batch_correlations['batch_results']['summary']
-                    self.logger.debug(f"🔄 [批次合并] 累加统计数据 - 批次高相关性期间: {batch_summary['total_high_correlations']}")
+                    if self.debug:
+                        self.logger.debug(f"🔄 [批次合并] 累加统计数据 - 批次高相关性期间: {batch_summary['total_high_correlations']}")
                     merged_results['batch_results']['summary']['total_high_correlations'] += batch_summary['total_high_correlations']
                     merged_results['batch_results']['summary']['max_high_correlations_per_day'] = max(
                         merged_results['batch_results']['summary']['max_high_correlations_per_day'],
                         batch_summary['max_high_correlations_per_day']
                     )
-                    self.logger.debug(f"🔄 [批次合并] 累加后总高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
+                    if self.debug:
+                        self.logger.debug(f"🔄 [批次合并] 累加后总高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
                 else:
                     self.logger.warning(f"🔄 [批次合并] 第{batch_idx + 1}批没有返回结果")
                 self.end_timer('post_batch_merging_cpu')
@@ -3746,7 +3787,8 @@ class GPUBatchPearsonAnalyzer:
                 non_gpu_elapsed = max(0.0, total_elapsed - elapsed_wall)
                 self.end_timer('batch_total_time')
                 self.logger.info(f"⏱️ 批次 {batch_idx + 1} 总耗时: {total_elapsed:.3f}秒 | 非GPU阶段: {non_gpu_elapsed:.3f}秒")
-                self.logger.debug(f"✅ 批次 {batch_idx + 1} 处理完成，已处理 {current_batch_units} 个计算单元")
+                if self.debug:
+                    self.logger.debug(f"✅ 批次 {batch_idx + 1} 处理完成，已处理 {current_batch_units} 个计算单元")
         else:
             # 单股票模式的原有逻辑
             for batch_idx in range(total_batches):
@@ -3776,16 +3818,18 @@ class GPUBatchPearsonAnalyzer:
                         # 原始单股票格式 [evaluation_days, window_size, 3]
                         batch_recent_subset = batch_recent_data[start_idx:end_idx]
                 
-                # 监控GPU内存
-                self.monitor_gpu_memory(f"批次 {batch_idx + 1} 开始")
+                # 监控GPU内存（仅在debug模式）
+                if self.debug:
+                    self.monitor_gpu_memory(f"批次 {batch_idx + 1} 开始")
                 
                 # 🚀 GPU计算当前批次
                 self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 开始")
                 
-                # 输出详细的计算单元信息（单股票模式）
-                self.logger.debug("📋 计算单元详细信息:")
-                for i, date in enumerate(batch_dates):
-                    self.logger.debug(f"   单元 {i+1}: 股票代码={self.stock_code}, 评测日期={date}")
+                # 输出详细的计算单元信息（单股票模式，仅在debug）
+                if self.debug:
+                    self.logger.debug("📋 计算单元详细信息:")
+                    for i, date in enumerate(batch_dates):
+                        self.logger.debug(f"   单元 {i+1}: 股票代码={self.stock_code}, 评测日期={date}")
                 
                 # 构建与评测单元一一对应的股票代码列表，并构造掩码子集
                 self.start_timer('batch_units_preparation')
@@ -3806,7 +3850,8 @@ class GPUBatchPearsonAnalyzer:
                 batch_correlations = self.calculate_batch_gpu_correlation_optimized(
                     batch_recent_subset, historical_periods_data, batch_dates, stock_codes=batch_evaluation_unit_stock_codes, valid_mask=batch_valid_mask
                 )
-                self.monitor_gpu_memory(f"批次 {batch_idx + 1} 完成")
+                if self.debug:
+                    self.monitor_gpu_memory(f"批次 {batch_idx + 1} 完成")
                 self.logger.info(f"🚀 [批次 {batch_idx + 1}] GPU计算与结果处理 - 完成")
                 total_elapsed = time.time() - batch_total_start_wall
                 self.end_timer('batch_total_time')

@@ -12,6 +12,41 @@ from collections import defaultdict
 import pandas as pd
 from data_loader import StockDataLoader
 import unicodedata
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+from matplotlib import font_manager
+import shutil
+
+CN_FONT_AVAILABLE = False
+
+def _configure_chinese_font():
+    """配置Matplotlib中文字体，避免中文字符缺失警告。"""
+    global CN_FONT_AVAILABLE
+    try:
+        candidates = [
+            'Microsoft YaHei',      # 微软雅黑（Windows常见）
+            'SimHei',               # 黑体（Windows常见）
+            'Noto Sans CJK SC',     # 思源黑体（常见开源中文字体）
+            'Arial Unicode MS'      # 覆盖面较广（不一定安装）
+        ]
+        available_names = {f.name for f in font_manager.fontManager.ttflist}
+        chosen = None
+        for cand in candidates:
+            if cand in available_names:
+                chosen = cand
+                break
+        # 设置字体与负号显示
+        mpl.rcParams['axes.unicode_minus'] = False
+        if chosen:
+            mpl.rcParams['font.sans-serif'] = [chosen] + list(mpl.rcParams.get('font.sans-serif', []))
+            CN_FONT_AVAILABLE = True
+            logging.info(f"已配置中文字体: {chosen}")
+        else:
+            CN_FONT_AVAILABLE = False
+            logging.warning("未检测到可用中文字体，将使用英文标签以避免警告")
+    except Exception as e:
+        CN_FONT_AVAILABLE = False
+        logging.warning(f"中文字体配置失败: {e}")
 
 def analyze_csv_data(file_path, min_correlation_count=10):
     """分析CSV数据，找出高性能指标（适配新CSV表头，使用实际计算数量）"""
@@ -372,7 +407,133 @@ def _format_table_with_originals(headers, rows, original_lines, csv_file_path, a
         lines.append(line)
     return '\n'.join(lines) + '\n'
 
-def save_results_to_file(results, output_file, count_threshold=100, eval_days=15, selected_day=5, selected_days=None):
+def _purge_year_kline_dirs(logs_dir):
+    """删除 logs 目录下以年份命名的子文件夹（以及 '未知'），避免历史图混淆"""
+    try:
+        if not os.path.isdir(logs_dir):
+            return
+        removed = []
+        for name in os.listdir(logs_dir):
+            path = os.path.join(logs_dir, name)
+            if os.path.isdir(path) and (re.fullmatch(r"\d{4}", name) or name == "未知"):
+                shutil.rmtree(path, ignore_errors=True)
+                removed.append(name)
+        if removed:
+            logging.info(f"已清理年度子目录: {', '.join(removed)}")
+        else:
+            logging.info("年度子目录无可清理项")
+    except Exception as e:
+        logging.exception(f"清理年度子目录失败: {e}")
+
+def _plot_kline_10_days(stock_code, buy_date_str, output_root_dir):
+    """绘制从买入日起往后10个交易日的K线图，并保存到 logs/<year>/<date>_<code>.png"""
+    try:
+        # 载入日线数据
+        loader = StockDataLoader()
+        df = loader.load_stock_data(stock_code, 'daily')
+        if df is None or df.empty:
+            logging.warning(f"无法绘制K线，数据为空: {stock_code}")
+            return None
+
+        # 解析日期并定位买入索引（若当日无数据则用最近前一交易日）
+        buy_dt = pd.to_datetime(str(buy_date_str), errors='coerce')
+        if pd.isna(buy_dt):
+            logging.warning(f"无法解析买入日期，跳过绘图: {stock_code} {buy_date_str}")
+            return None
+        if buy_dt not in df.index:
+            prior = df.index[df.index <= buy_dt]
+            if len(prior) == 0:
+                logging.warning(f"买入日前无历史数据，跳过绘图: {stock_code} {buy_date_str}")
+                return None
+            buy_idx = df.index.get_loc(prior[-1])
+        else:
+            buy_idx = df.index.get_loc(buy_dt)
+
+        # 窗口范围：买入日起向后10个交易日（含买入日），不足则截断
+        window_days = 10
+        end_idx = min(buy_idx + window_days - 1, len(df) - 1)
+        window = df.iloc[buy_idx:end_idx + 1].copy()
+        if window.empty:
+            logging.warning(f"K线窗口为空，跳过绘图: {stock_code} {buy_date_str}")
+            return None
+
+        # 准备输出目录
+        year_val = buy_dt.year if not pd.isna(buy_dt) else '未知'
+        output_dir = os.path.join(output_root_dir, str(year_val))
+        os.makedirs(output_dir, exist_ok=True)
+        date_fmt = pd.to_datetime(buy_date_str).strftime('%Y-%m-%d')
+        out_name = f"{date_fmt}_{stock_code}.png"
+        out_path = os.path.join(output_dir, out_name)
+
+        # 使用matplotlib绘制简易K线（蜡烛图）
+        # 要求窗口包含列：open, high, low, close
+        required_cols = {'open', 'high', 'low', 'close'}
+        if not required_cols.issubset(set(map(str.lower, window.columns))):
+            # 尝试大小写兼容
+            cols_lower = {c.lower(): c for c in window.columns}
+            try:
+                o = window[cols_lower['open']]
+                h = window[cols_lower['high']]
+                l = window[cols_lower['low']]
+                c = window[cols_lower['close']]
+            except Exception:
+                logging.warning(f"数据列缺失，无法绘制K线: {stock_code}")
+                return None
+        else:
+            # 直接使用小写列名
+            cols_lower = {c.lower(): c for c in window.columns}
+            o = window[cols_lower['open']]
+            h = window[cols_lower['high']]
+            l = window[cols_lower['low']]
+            c = window[cols_lower['close']]
+
+        # 生成X轴刻度（0..N-1），避免时区问题
+        x = list(range(len(window)))
+
+        plt.figure(figsize=(10, 4))
+        ax = plt.gca()
+        for i in x:
+            color = '#d64f45' if c.iloc[i] >= o.iloc[i] else '#3f91d0'
+            # 最高/最低影线
+            ax.plot([i, i], [l.iloc[i], h.iloc[i]], color=color, linewidth=1)
+            # 蜡烛体
+            rect_bottom = min(o.iloc[i], c.iloc[i])
+            rect_height = abs(c.iloc[i] - o.iloc[i])
+            ax.add_patch(plt.Rectangle((i - 0.3, rect_bottom), 0.6, rect_height if rect_height > 0 else 0.02, color=color))
+
+        ax.set_xlim(-0.5, len(window) - 0.5)
+        # 给Y轴预留一些空间
+        y_min = float(l.min())
+        y_max = float(h.max())
+        y_pad = (y_max - y_min) * 0.05 if y_max > y_min else 1.0
+        ax.set_ylim(y_min - y_pad, y_max + y_pad)
+        if CN_FONT_AVAILABLE:
+            ax.set_title(f"{stock_code} {pd.to_datetime(buy_date_str).strftime('%Y-%m-%d')} 起10日K线")
+            ax.set_xlabel("交易日序号")
+            ax.set_ylabel("价格")
+        else:
+            ax.set_title(f"{stock_code} {pd.to_datetime(buy_date_str).strftime('%Y-%m-%d')} 10-day K line")
+            ax.set_xlabel("Index")
+            ax.set_ylabel("Price")
+        ax.grid(True, linestyle='--', alpha=0.3)
+
+        # 标注买入日为第0根
+        ax_text = "买入日" if CN_FONT_AVAILABLE else "Buy"
+        ax.text(0, h.iloc[0] + y_pad * 0.5, ax_text, fontsize=9, color='black')
+
+        plt.tight_layout()
+        try:
+            plt.savefig(out_path, dpi=120)
+            logging.info(f"K线图已保存: {out_path}")
+        finally:
+            plt.close()
+
+        return out_path
+    except Exception as e:
+        logging.exception(f"绘制K线图失败: {stock_code} {buy_date_str}, 错误: {e}")
+        return None
+
+def save_results_to_file(results, output_file, eval_days=15, selected_day=5, selected_days=None):
     """将结果保存到文件"""
     try:
         # 确保输出目录存在
@@ -416,7 +577,7 @@ def save_results_to_file(results, output_file, count_threshold=100, eval_days=15
                     ratio = stats['high_performance'] / stats['filtered'] * 100
                     f.write(f"{date}\t{stats['filtered']}\t{stats['high_performance']}\t{ratio:.2f}%\n")
             
-            f.write("\n----- 高性能记录详情 -----\n")
+            # 删除：整体“高性能记录详情 (前10条)”块，改为按年度分发详情
             details_rows = []
             details_headers = [
                 "股票代码", "日期", "实际计算数量", "高性能指标数/总指标数", "最佳指标",
@@ -452,11 +613,7 @@ def save_results_to_file(results, output_file, count_threshold=100, eval_days=15
                 for d in days_list
             }
             
-            # 相关数量大于阈值的统计（统计所选持股天数列表：收盘卖出一类）
-            high_corr_stats = {
-                f"{d}_close": {'up': 0, 'down': 0, 'flat': 0, 'na': 0, 'total': 0}
-                for d in days_list
-            }
+            # 删除：与“实际计算数量≥N阈值”相关的明细统计
 
             # 原“按区间位置分组统计”功能已删除
             
@@ -515,28 +672,21 @@ def save_results_to_file(results, output_file, count_threshold=100, eval_days=15
                     if change_value > 0:
                         up_count += 1
                         days_stats[days_key]['up'] += 1
-                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
-                            high_corr_stats[days_key]['up'] += 1
-                            high_corr_stats[days_key]['total'] += 1
+                        # 删除：基于独立阈值的分类统计
                     elif change_value < 0:
                         down_count += 1
                         days_stats[days_key]['down'] += 1
-                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
-                            high_corr_stats[days_key]['down'] += 1
-                            high_corr_stats[days_key]['total'] += 1
+                        # 删除：基于独立阈值的分类统计
                     else:
                         flat_count += 1
                         days_stats[days_key]['flat'] += 1
-                        if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
-                            high_corr_stats[days_key]['flat'] += 1
-                            high_corr_stats[days_key]['total'] += 1
+                        # 删除：基于独立阈值的分类统计
                     days_stats[days_key]['total'] += 1
                 else:
                     # 无法计算数量
                     na_count += 1
                     days_stats[days_key]['na'] += 1
-                    if detail.get('actual_calc_count', detail.get('correlation_count', 0)) >= count_threshold:
-                        high_corr_stats[days_key]['na'] += 1
+                    # 删除：基于独立阈值的分类统计
             
             # 添加涨跌统计
             total_valid = up_count + down_count + flat_count
@@ -551,13 +701,7 @@ def save_results_to_file(results, output_file, count_threshold=100, eval_days=15
                 f.write(f"持平记录数: {flat_count} (0.00%)\n")
             f.write(f"无法计算记录数: {na_count}\n")
             
-            # 输出高性能记录详情表格，且在每条记录前打印原始CSV行
-            details_original_lines = []
-            # 保持与details_rows一致的顺序，收集对应的原始CSV记录
-            # 原始CSV行也按持股时间的排序保持一致
-            for detail in sorted(results['details'], key=_holding_sort_key):
-                details_original_lines.append(','.join(detail.get('original_row', [])) if detail.get('original_row') else detail.get('original_csv_line', ''))
-            f.write(_format_table_with_originals(details_headers, details_rows, details_original_lines, results.get('csv_file_path', ''), details_aligns))
+            # 删除：整体详情输出，改为在“年度段落”后按日期输出详情
 
             # 添加按持股天数的涨跌统计（所选持股天数）
             f.write(f"\n----- 按持股天数的涨跌统计（所选持股天数） -----\n")
@@ -640,6 +784,69 @@ def save_results_to_file(results, output_file, count_threshold=100, eval_days=15
                         f.write(f"  上涨记录数: {stats['up']} (0.00%)\n")
                         f.write(f"  下跌记录数: {stats['down']} (0.00%)\n")
                         f.write(f"  持平记录数: {stats['flat']} (0.00%)\n")
+
+                # 在每个“年度段落”后输出该年度的详情（按日期排序）
+                try:
+                    def _detail_year(d):
+                        try:
+                            return pd.to_datetime(str(d.get('date')), errors='coerce').year
+                        except Exception:
+                            return None
+                    def _date_sort_key(d):
+                        ts = pd.to_datetime(str(d.get('date')), errors='coerce')
+                        return ts if pd.notna(ts) else str(d.get('date'))
+
+                    year_details = [
+                        d for d in results['details']
+                        if _detail_year(d) == (year if not isinstance(year, str) else None) and _is_selected_detail(d)
+                    ]
+                    # 若年为'未知'，包含无法解析年份的记录
+                    if isinstance(year, str):
+                        year_details = [
+                            d for d in results['details']
+                            if _detail_year(d) is None and _is_selected_detail(d)
+                        ]
+
+                    year_details_sorted = sorted(year_details, key=_date_sort_key)
+                    if year_details_sorted:
+                        f.write("\n----- 年度详情（按日期排序） -----\n")
+                        rows_y = []
+                        orig_lines_y = []
+                        # 准备logs根目录（与setup_logging一致）
+                        script_dir = os.path.dirname(os.path.abspath(__file__))
+                        logs_root_dir = os.path.join(script_dir, 'logs')
+                        for detail in year_details_sorted:
+                            sell_days = int(detail['sell_days'])
+                            sell_time_info = "收盘卖出"
+                            sell_desc = f"买入{detail['stock_code']}，{detail['sell_days']}日后"
+                            if sell_time_info:
+                                sell_desc += f"{sell_time_info}"
+                            rows_y.append([
+                                detail['stock_code'],
+                                detail['date'],
+                                str(detail.get('actual_calc_count', detail.get('correlation_count', 0))),
+                                f"{detail['high_performance_count']}/{detail['valid_metrics_count']}",
+                                detail['max_percentage_metric'],
+                                detail['buy_date'],
+                                f"{detail['sell_days']}日后",
+                                sell_desc,
+                                str(detail['buy_price']),
+                                str(detail['sell_price']),
+                                detail['change_percent'],
+                                str(detail.get('max_up_percent', 'N/A')),
+                                str(detail.get('max_down_percent', 'N/A'))
+                            ])
+                            orig_lines_y.append(','.join(detail.get('original_row', [])) if detail.get('original_row') else detail.get('original_csv_line', ''))
+
+        # 生成并保存10日K线图（保存到 logs/<year>/date_code.png）
+                            try:
+                                _plot_kline_10_days(detail['stock_code'], detail['date'], logs_root_dir)
+                            except Exception:
+                                pass
+                        f.write(_format_table_with_originals(details_headers, rows_y, orig_lines_y, results.get('csv_file_path', ''), details_aligns))
+                except Exception:
+                    # 年度详情输出不影响主流程
+                    pass
 
             # 删除：按年度且实际计算数量≥阈值的持股天数统计（所选持股天数）
             # 该输出块及其统计已按需求移除，保留后续“按年度统计总结”不变。
@@ -990,8 +1197,6 @@ def main():
                         help='最小相关数量阈值 (默认: 30')
     parser.add_argument('--high-percentage', type=float, default=65.0,
                         help='高百分比阈值 (默认: 65.0)')
-    parser.add_argument('--detail-threshold', type=int, default=95,
-                        help='“实际计算数量≥N统计”使用的独立阈值 (默认: 95)')
     parser.add_argument('--output', type=str, default='',
                         help='结果输出文件路径 (默认: results_YYYYMMDD_HHMMSS.txt)')
     parser.add_argument('--eval-days', type=int, default=15,
@@ -1012,6 +1217,12 @@ def main():
 
     logger, log_file = setup_logging(log_dir=logs_dir)
     logger.info("分析开始")
+
+    # 每次运行前清理 logs 下的年度子目录（K线图输出位置），避免混淆
+    _purge_year_kline_dirs(logs_dir)
+
+    # 配置中文字体，避免保存图像时的中文字符缺失警告
+    _configure_chinese_font()
     
     # 如果未指定输出文件，生成默认文件名
     if not args.output:
@@ -1021,7 +1232,6 @@ def main():
     logger.info(f"分析文件: {args.file}")
     logger.info(f"最小相关数量阈值: {args.min_count}")
     logger.info(f"高百分比阈值: {args.high_percentage}%")
-    logger.info(f"明细统计阈值: {args.detail_threshold}")
     logger.info(f"结果输出文件: {args.output}")
     logger.info(f"评测日期数: {args.eval_days} (含当日)")
     # 解析 --days 参数，支持逗号与中文逗号
@@ -1056,7 +1266,6 @@ def main():
         ok = save_results_to_file(
             results,
             args.output,
-            count_threshold=args.detail_threshold,
             eval_days=args.eval_days,
             selected_day=selected_days_list[0],
             selected_days=selected_days_list

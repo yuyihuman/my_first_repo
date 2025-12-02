@@ -361,30 +361,34 @@ def main():
         except Exception:
             extra_after = pd.DataFrame()
 
-        # 源窗口切片：从评测窗口终点向前取同样长度，或直接按评测窗口的起止日期
-        if eval_end_date is not None:
-            try:
-                src_eval_slice = src_df_full.loc[eval_start_date:eval_end_date]
-            except Exception:
+        # 源窗口切片：以“窗口结束日期”为锚点，向前取与历史窗口同样长度
+        # 这样可避免按起止日期切片时因停牌/缺失导致长度不稳定的问题
+        try:
+            if not isinstance(src_df_full.index, pd.DatetimeIndex):
                 src_df_full.index = pd.to_datetime(src_df_full.index)
-                src_eval_slice = src_df_full.loc[eval_start_date:eval_end_date]
+        except Exception:
+            pass
+
+        if eval_end_date is not None:
+            # 评测窗口明确给出结束日期：取该日期及之前的最后 window_len 条
+            try:
+                src_up_to_end = src_df_full.loc[:eval_end_date]
+            except Exception:
+                # 若 loc 切片失败，尝试转换日期字符串
+                src_up_to_end = src_df_full.loc[:pd.to_datetime(eval_end_date)]
+            src_eval_slice = src_up_to_end.tail(window_len)
         else:
-            # 若缺少评测窗口结束日期，则以评测开始日期作为窗口末尾，向前取 window_len
-            src_df_full.index = pd.to_datetime(src_df_full.index)
-            # 找到评测开始日期在索引中的位置
-            if eval_start_date in src_df_full.index.strftime('%Y-%m-%d'):
-                # 定位该日期的索引位置
-                idx_pos = src_df_full.index.strftime('%Y-%m-%d').tolist().index(eval_start_date)
-                start_pos = max(0, idx_pos - window_len + 1)
-                src_eval_slice = src_df_full.iloc[start_pos:idx_pos + 1]
-            else:
-                # 若找不到，直接取最后 window_len 条作为评测窗口
-                src_eval_slice = src_df_full.iloc[-window_len:]
+            # 无结束日期：以开始日期作为窗口末尾，向前取 window_len 条
+            try:
+                src_up_to_start = src_df_full.loc[:eval_start_date]
+            except Exception:
+                src_up_to_start = src_df_full.loc[:pd.to_datetime(eval_start_date)]
+            src_eval_slice = src_up_to_start.tail(window_len)
 
         # 对齐长度：若评测窗口与历史窗口长度不一致，尽量截断为相同长度
+        # 按计划长度对齐：正常情况下两者应为 window_len
         min_len = min(len(src_eval_slice), window_len)
         src_eval_slice = src_eval_slice.tail(min_len)
-        # 历史对比用于对齐的主体（与源同长度）
         hist_aligned = hist_slice.tail(min_len)
         # 历史面板用于绘图的切片（附加后续10日）
         hist_plot_slice = pd.concat([hist_aligned, extra_after]) if not extra_after.empty else hist_aligned
