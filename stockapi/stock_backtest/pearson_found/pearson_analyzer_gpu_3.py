@@ -77,7 +77,13 @@ def _process_stock_historical_data_worker(args):
                 end_date = period_data.index[-1]
                 
                 # 直接提取并预处理数据
-                historical_values = period_data[fields].values
+                # 构造三通道: close-open 差, close, volume
+                diff_values = (period_data['close'].values - period_data['open'].values)
+                historical_values = np.stack([
+                    diff_values,
+                    period_data['close'].values,
+                    period_data['volume'].values
+                ], axis=1)
                 
                 # 存储预处理后的数据
                 historical_data.append((historical_values, start_date, end_date, stock_code))
@@ -697,7 +703,7 @@ class GPUBatchPearsonAnalyzer:
         self.start_timer('batch_data_preparation')
         
         # 仅保留三个有效字段以降低计算与显存压力
-        fields = ['open', 'close', 'volume']
+        fields = ['close_minus_open', 'close', 'volume']
         
         if self.is_multi_stock:
             # 多股票模式：保留全部评测日期，使用掩码标记无效窗口
@@ -718,7 +724,12 @@ class GPUBatchPearsonAnalyzer:
                     recent_data = stock_data[stock_data.index <= eval_date].tail(self.window_size)
 
                     if len(recent_data) == self.window_size and recent_data.index[-1] == eval_date:
-                        data_values = recent_data[fields].values  # [window_size, 3]
+                        diff_values = (recent_data['close'].values - recent_data['open'].values)
+                        data_values = np.stack([
+                            diff_values,
+                            recent_data['close'].values,
+                            recent_data['volume'].values
+                        ], axis=1)  # [window_size, 3]
                         stock_windows.append(data_values)
                         stock_mask.append(True)
                     else:
@@ -1087,7 +1098,7 @@ class GPUBatchPearsonAnalyzer:
         
         correlations_np = correlations_tensor.cpu().numpy()
         # 统一仅保留三个字段
-        fields = ['open', 'close', 'volume']
+        fields = ['close_minus_open', 'close', 'volume']
         
         if target_stock_codes is None:
             target_stock_codes = self.stock_codes
@@ -2101,7 +2112,7 @@ class GPUBatchPearsonAnalyzer:
         # 无条件打印：首评测单位的完整窗口原始输入数据（不受阈值影响）
         try:
             self.logger.debug("🔍 首评测单位完整窗口数据（不受阈值影响）:")
-            eval_fields = ['open', 'close', 'volume']
+            eval_fields = ['close_minus_open', 'close', 'volume']
             for f_idx, f_name in enumerate(eval_fields):
                 self.logger.debug(f"🔍   {f_name}: {first_eval_data[:, f_idx].tolist()}")
         except Exception:
@@ -2128,7 +2139,7 @@ class GPUBatchPearsonAnalyzer:
             self.logger.debug(f"🔍   来源股票: {period_info_top['stock_code']}")
             self.logger.debug(f"🔍   平均相关系数: {correlation_top:.6f}")
 
-            fields = ['open', 'close', 'volume']
+            fields = ['close_minus_open', 'close', 'volume']
             self.logger.debug(f"🔍   源数据列对比 (前3天和后3天):")
             for field_idx, field in enumerate(fields):
                 eval_field_data = first_eval_data[:, field_idx]
@@ -2153,9 +2164,9 @@ class GPUBatchPearsonAnalyzer:
         except Exception:
             pass
 
-        # 无条件打印：各字段（open/close/volume）相关性最大对应的历史期间（输出细节与“首个期间”一致）
+        # 无条件打印：各字段相关性最大对应的历史期间（输出细节与“首个期间”一致）
         try:
-            field_indices = {'open': 0, 'close': 1, 'volume': 2}
+            field_indices = {'close_minus_open': 0, 'close': 1, 'volume': 2}
             for field_name, field_idx in field_indices.items():
                 eval_field = first_eval_data[:, field_idx]
                 # 取出所有历史期间该字段的数据 [num_historical_periods, window_size]
@@ -2193,7 +2204,7 @@ class GPUBatchPearsonAnalyzer:
                     pass
 
                 # 与“首个期间”保持一致：对所有字段进行对比与完整窗口打印
-                fields_all = ['open', 'close', 'volume']
+                fields_all = ['close_minus_open', 'close', 'volume']
                 hist_all_fields = historical_tensor[best_idx].detach().cpu()  # [window_size, 3]
 
                 self.logger.debug(f"🔍   源数据列对比 (前3天和后3天):")
@@ -2240,7 +2251,7 @@ class GPUBatchPearsonAnalyzer:
                 historical_data = historical_tensor[hist_idx].detach().cpu()  # [window_size, 3]
 
                 # 打印源数据列完整对比（open/close/volume 全窗口）
-                fields = ['open', 'close', 'volume']
+                fields = ['close_minus_open', 'close', 'volume']
                 self.logger.debug(f"🔍       源数据列对比 (完整数据):")
 
                 for field_idx, field in enumerate(fields):
@@ -2264,7 +2275,7 @@ class GPUBatchPearsonAnalyzer:
         # 打印评测数据的统计信息
         self.logger.debug("🔍 评测数据统计信息:")
         # 与计算保持一致，仅保留三个字段
-        fields = ['open', 'close', 'volume']
+        fields = ['close_minus_open', 'close', 'volume']
         for field_idx, field in enumerate(fields):
             field_data = first_eval_data[:, field_idx]
             mean_v = field_data.mean().item()
@@ -2972,7 +2983,7 @@ class GPUBatchPearsonAnalyzer:
         processed_stocks = 0
         
         # 定义需要的字段（仅保留3列）
-        fields = ['open', 'close', 'volume']
+        fields = ['close_minus_open', 'close', 'volume']
         
         for stock_code, stock_data in self.loaded_stocks_data.items():
             # 使用所有可用数据，不进行日期截断
@@ -2995,8 +3006,13 @@ class GPUBatchPearsonAnalyzer:
                     start_date = period_data.index[0]
                     end_date = period_data.index[-1]
                     
-                    # 直接提取并预处理数据（3列）
-                    historical_values = period_data[fields].values
+                    # 直接提取并预处理数据（3列）: close-open 差, close, volume
+                    diff_values = (period_data['close'].values - period_data['open'].values)
+                    historical_values = np.stack([
+                        diff_values,
+                        period_data['close'].values,
+                        period_data['volume'].values
+                    ], axis=1)
                     
                     # 存储预处理后的数据
                     historical_data.append((historical_values, start_date, end_date, stock_code))
@@ -3021,7 +3037,7 @@ class GPUBatchPearsonAnalyzer:
             return []
         
         # 定义需要的字段（仅保留3列）
-        fields = ['open', 'close', 'volume']
+        fields = ['close_minus_open', 'close', 'volume']
         
         # 准备多进程任务参数
         tasks = []
@@ -3104,8 +3120,13 @@ class GPUBatchPearsonAnalyzer:
                 start_date = period_data.index[0]
                 end_date = period_data.index[-1]
                 
-                # 直接提取并预处理数据（3列）
-                historical_values = period_data[fields].values
+                # 直接提取并预处理数据（3列）: close-open 差, close, volume
+                diff_values = (period_data['close'].values - period_data['open'].values)
+                historical_values = np.stack([
+                    diff_values,
+                    period_data['close'].values,
+                    period_data['volume'].values
+                ], axis=1)
                 
                 # 存储预处理后的数据
                 historical_data.append((historical_values, start_date, end_date, self.stock_code))
@@ -4338,7 +4359,7 @@ if __name__ == "__main__":
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
-    parser.add_argument('--threshold', type=float, default=0.9, help='相关系数阈值 (默认: 0.9)')
+    parser.add_argument('--threshold', type=float, default=0.80, help='相关系数阈值 (默认: 0.80)')
     parser.add_argument('--comparison_mode', type=str, default='top10',
                        help="对比模式: 通用 'topXXX'（如 top156）、hs300、zz500、custom、self_only、all（默认: top10）")
     parser.add_argument('--comparison_stocks', nargs='*', 
