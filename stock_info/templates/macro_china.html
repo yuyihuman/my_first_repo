@@ -822,6 +822,36 @@
                     drawTime: 'beforeDatasetsDraw'
                 };
             }
+            let fitAnnualGrowth = null;
+            let fitGrowthIndex = -1;
+            for (let i = hs300FitData.length - 1; i >= 12; i--) {
+                const curr = hs300FitData[i];
+                const prev = hs300FitData[i - 12];
+                if (curr !== null && prev !== null && prev !== 0) {
+                    fitAnnualGrowth = ((curr - prev) / prev) * 100;
+                    fitGrowthIndex = i;
+                    break;
+                }
+            }
+            if (fitAnnualGrowth !== null) {
+                annotations['fitAnnualGrowthLabel'] = {
+                    type: 'label',
+                    xValue: labels[fitGrowthIndex],
+                    yValue: 'max',
+                    content: `拟合年化增长率：${fitAnnualGrowth.toFixed(2)}%`,
+                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                    borderColor: 'rgba(255, 159, 64, 1)',
+                    borderWidth: 1,
+                    font: { 
+                        size: 12, 
+                        weight: 'bold' 
+                    },
+                    position: 'start',
+                    yAdjust: -25,
+                    drawTime: 'beforeDatasetsDraw',
+                    yScaleID: 'y1'
+                };
+            }
             
             new Chart(ctx, {
                 type: 'line',
@@ -898,7 +928,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'M1同比增幅与沪深300指数对比',
+                            text: fitAnnualGrowth !== null ? `M1同比增幅与沪深300指数对比（拟合年化增长率：${fitAnnualGrowth.toFixed(2)}%）` : 'M1同比增幅与沪深300指数对比',
                             font: {
                                 size: 16
                             }
