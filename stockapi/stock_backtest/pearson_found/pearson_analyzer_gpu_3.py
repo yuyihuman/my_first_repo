@@ -1115,8 +1115,9 @@ class GPUBatchPearsonAnalyzer:
             self.logger.info(f"处理股票 {stock_code} ({stock_idx + 1}/{num_stocks})")
             # 提取当前股票的相关性数据 [evaluation_days, num_historical_periods, 3]
             stock_correlations = correlations_np[stock_idx]
-            # 计算平均相关系数 [evaluation_days, num_historical_periods]（最后一维为3，直接取均值）
-            avg_correlations = stock_correlations.mean(axis=2)
+            # 计算加权相关系数 [evaluation_days, num_historical_periods]
+            weights_np = np.array([0.4, 0.35, 0.25], dtype=float)
+            avg_correlations = np.tensordot(stock_correlations, weights_np, axes=([2], [0]))
             # 过滤掉相关性为1.0的结果（自相关）
             self_correlation_threshold = 0.9999
             self_correlation_mask = avg_correlations >= self_correlation_threshold
@@ -1439,8 +1440,9 @@ class GPUBatchPearsonAnalyzer:
             
             # GPU端计算平均相关系数和筛选（3字段版本：open/close/volume）
             self.start_timer('gpu_step3_correlation_filtering', parent_timer='gpu_step3_integrated_correlation_processing')
-            # 直接在字段维度求均值（最后一维为3）
-            batch_avg_correlations = batch_correlations.mean(dim=3)  # [num_stocks, batch_size, num_historical_periods]
+            # 在字段维度按权重求和
+            weights = torch.tensor([0.4, 0.35, 0.25], dtype=torch.float32, device=self.device)
+            batch_avg_correlations = (batch_correlations * weights.view(1, 1, 1, 3)).sum(dim=3)
             
             # GPU端过滤自相关（相关性 >= 0.9999）
             self_corr_mask = batch_avg_correlations >= self_correlation_threshold

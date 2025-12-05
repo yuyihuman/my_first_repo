@@ -27,6 +27,7 @@ python plot_kline_from_log.py \
 import os
 import re
 import argparse
+import shutil
 from datetime import datetime
 from typing import List, Optional, Tuple, Dict
 
@@ -49,7 +50,9 @@ mpl.rcParams['axes.unicode_minus'] = False
 # 日志解析的正则模式
 RE_TARGET_STOCKS = re.compile(r"目标股票:\s*\[(.*?)\]")
 RE_PROCESS_STOCK = re.compile(r"处理股票\s*\d+\s*:\s*(\d+)")
-RE_EVAL_WINDOW = re.compile(r"评测数据窗口:\s*([0-9\-: ]+) 到 ([0-9\-: ]+)")
+RE_EVAL_WINDOW = re.compile(r"评测数据窗口.*?:\s*([0-9\-: ]+) 到 ([0-9\-: ]+)")
+RE_EVAL_DATE_RANGE = re.compile(r"评测日期范围:\s*([0-9\-: ]+) 到 ([0-9\-: ]+)")
+RE_EVAL_DATE_SINGLE = re.compile(r"评测日期:\s*([0-9\-: ]+)")
 RE_PERIOD_DEBUG = re.compile(
     r"期间#(?P<idx>\d+): 股票:(?P<stock>\d+), 期间:(?P<start>[0-9\-: ]+)~(?P<end>[0-9\-: ]+), 相关系数:(?P<corr>[0-9\.]+)"
 )
@@ -78,6 +81,15 @@ def parse_log(log_path: str) -> Tuple[Optional[str], Optional[str], List[Dict]]:
     if eval_window_match:
         eval_start = eval_window_match.group(1).strip()
         eval_end = eval_window_match.group(2).strip()
+    else:
+        range_match = RE_EVAL_DATE_RANGE.search(content)
+        if range_match:
+            eval_start = range_match.group(2).strip()
+            eval_end = range_match.group(2).strip()
+        else:
+            single_match = RE_EVAL_DATE_SINGLE.search(content)
+            if single_match:
+                eval_start = single_match.group(1).strip()
 
     # 从结构化日志自动确定源股票：
     # 优先使用“📝 [详细结果构建] 处理股票X: CODE”，否则回退到“目标股票: [...]”首个。
@@ -291,9 +303,14 @@ def main():
     # eval_end 在日志中存在，但我们直接按索引切片更稳妥；若解析到则使用
     eval_end_date = None
     # 从日志再取一次 end
-    eval_window_match = RE_EVAL_WINDOW.search(open(log_path, 'r', encoding='utf-8-sig').read())
+    log_text = open(log_path, 'r', encoding='utf-8-sig').read()
+    eval_window_match = RE_EVAL_WINDOW.search(log_text)
     if eval_window_match:
         eval_end_date = _to_date_str(eval_window_match.group(2).strip())
+    else:
+        range_match = RE_EVAL_DATE_RANGE.search(log_text)
+        if range_match:
+            eval_end_date = _to_date_str(range_match.group(2).strip())
 
     if not periods:
         raise ValueError('日志中未解析到任何高相关期间记录。')
@@ -301,7 +318,18 @@ def main():
     # 输出目录
     if out_dir is None:
         out_dir = os.path.join(os.path.dirname(log_path), 'kline_plots')
-    os.makedirs(out_dir, exist_ok=True)
+    if os.path.exists(out_dir):
+        for name in os.listdir(out_dir):
+            p = os.path.join(out_dir, name)
+            try:
+                if os.path.isfile(p) or os.path.islink(p):
+                    os.unlink(p)
+                else:
+                    shutil.rmtree(p)
+            except Exception:
+                pass
+    else:
+        os.makedirs(out_dir, exist_ok=True)
 
     # 加载器
     loader = StockDataLoader()
