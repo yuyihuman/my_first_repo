@@ -1116,7 +1116,7 @@ class GPUBatchPearsonAnalyzer:
             # 提取当前股票的相关性数据 [evaluation_days, num_historical_periods, 3]
             stock_correlations = correlations_np[stock_idx]
             # 计算加权相关系数 [evaluation_days, num_historical_periods]
-            weights_np = np.array([0.4, 0.35, 0.25], dtype=float)
+            weights_np = np.array([0.5, 0.0, 0.5], dtype=float)
             avg_correlations = np.tensordot(stock_correlations, weights_np, axes=([2], [0]))
             # 过滤掉相关性为1.0的结果（自相关）
             self_correlation_threshold = 0.9999
@@ -1441,7 +1441,7 @@ class GPUBatchPearsonAnalyzer:
             # GPU端计算平均相关系数和筛选（3字段版本：open/close/volume）
             self.start_timer('gpu_step3_correlation_filtering', parent_timer='gpu_step3_integrated_correlation_processing')
             # 在字段维度按权重求和
-            weights = torch.tensor([0.4, 0.35, 0.25], dtype=torch.float32, device=self.device)
+            weights = torch.tensor([0.5, 0.0, 0.5], dtype=torch.float32, device=self.device)
             batch_avg_correlations = (batch_correlations * weights.view(1, 1, 1, 3)).sum(dim=3)
             
             # GPU端过滤自相关（相关性 >= 0.9999）
@@ -4361,7 +4361,7 @@ if __name__ == "__main__":
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
-    parser.add_argument('--threshold', type=float, default=0.80, help='相关系数阈值 (默认: 0.80)')
+    parser.add_argument('--threshold', type=float, default=0.90, help='相关系数阈值 (默认: 0.90)')
     parser.add_argument('--comparison_mode', type=str, default='top10',
                        help="对比模式: 通用 'topXXX'（如 top156）、hs300、zz500、custom、self_only、all（默认: top10）")
     parser.add_argument('--comparison_stocks', nargs='*', 
