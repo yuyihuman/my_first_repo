@@ -105,6 +105,7 @@ def _process_stock_historical_data_worker(args):
 
 class GPUBatchPearsonAnalyzer:
     def __init__(self, stock_code, log_dir='logs', window_size=15, threshold=0.85, 
+                 threshold_close_minus_open=None, threshold_close=None, threshold_volume=None,
                  evaluation_days=1, debug=False, comparison_stocks=None, 
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
@@ -160,6 +161,9 @@ class GPUBatchPearsonAnalyzer:
         
         self.window_size = window_size
         self.threshold = threshold
+        self.threshold_close_minus_open = threshold_close_minus_open
+        self.threshold_close = threshold_close
+        self.threshold_volume = threshold_volume
         self.evaluation_days = evaluation_days  # 新增：评测日期数量
         self.evaluation_batch_size = evaluation_batch_size  # 每批次处理的评测日期数量
         self.debug = debug
@@ -1042,18 +1046,28 @@ class GPUBatchPearsonAnalyzer:
                 if eval_idx < avg_correlations_filtered.shape[0]:
                     eval_correlations = avg_correlations_filtered[eval_idx]  # 该评测日期的相关性列表
                     
-                    # 找到高相关性期间
+                    # 找到高相关性期间（使用传入的掩码，确保与GPU筛选逻辑一致）
                     high_corr_periods = []
-                    for hist_idx, correlation in enumerate(eval_correlations):
-                        if correlation >= self.threshold and hist_idx < len(period_info_list):
+                    if high_corr_mask is not None and eval_idx < high_corr_mask.shape[0]:
+                        mask_row = high_corr_mask[eval_idx]
+                        true_indices = [int(i) for i, v in enumerate(mask_row) if v]
+                    else:
+                        # 若未提供掩码，则按总阈值（当设置时）筛选；未设置时视为全部通过
+                        if self.threshold is not None:
+                            true_indices = [int(i) for i, c in enumerate(eval_correlations) if c >= float(self.threshold)]
+                        else:
+                            true_indices = list(range(min(len(eval_correlations), len(period_info_list))))
+
+                    for hist_idx in true_indices:
+                        if hist_idx < len(period_info_list):
                             period_data = period_info_list[hist_idx]
-                            
+                            correlation = eval_correlations[hist_idx]
                             high_corr_periods.append({
                                 'start_date': period_data['start_date'],
                                 'end_date': period_data['end_date'],
                                 'avg_correlation': float(correlation),
                                 'stock_code': period_data['stock_code'],
-                                'target_stock_code': stock_code,  # 添加目标股票代码
+                                'target_stock_code': stock_code,
                                 'source': 'gpu_batch'
                             })
                     
@@ -1116,7 +1130,7 @@ class GPUBatchPearsonAnalyzer:
             # 提取当前股票的相关性数据 [evaluation_days, num_historical_periods, 3]
             stock_correlations = correlations_np[stock_idx]
             # 计算加权相关系数 [evaluation_days, num_historical_periods]
-            weights_np = np.array([0.5, 0.0, 0.5], dtype=float)
+            weights_np = np.array([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=float)
             avg_correlations = np.tensordot(stock_correlations, weights_np, axes=([2], [0]))
             # 过滤掉相关性为1.0的结果（自相关）
             self_correlation_threshold = 0.9999
@@ -1130,7 +1144,23 @@ class GPUBatchPearsonAnalyzer:
             avg_correlations_filtered = avg_correlations.copy()
             avg_correlations_filtered[self_correlation_mask] = 0.0
             # 找出高相关性期间（使用过滤后的相关系数）
-            high_corr_mask = avg_correlations_filtered > self.threshold
+            if self.threshold is not None:
+                high_corr_mask = avg_correlations_filtered > float(self.threshold)
+            else:
+                high_corr_mask = np.ones_like(avg_correlations_filtered, dtype=bool)
+            # 额外应用字段级阈值（若提供）
+            field_thresholds_np = [self.threshold_close_minus_open, self.threshold_close, self.threshold_volume]
+            for f_idx, f_thr in enumerate(field_thresholds_np):
+                if f_thr is not None:
+                    high_corr_mask = high_corr_mask & (stock_correlations[:, :, f_idx] > float(f_thr))
+            # 字段级自相关过滤：任一字段相关系数达到自相关阈值则排除
+            field_self_mask = (
+                (stock_correlations[:, :, 0] >= self_correlation_threshold)
+                | (stock_correlations[:, :, 1] >= self_correlation_threshold)
+                | (stock_correlations[:, :, 2] >= self_correlation_threshold)
+            )
+            avg_correlations_filtered[field_self_mask] = 0.0
+            high_corr_mask = high_corr_mask & (~field_self_mask)
             # 处理当前股票的详细结果
             stock_detailed_results = self._process_single_stock_results(
                 stock_correlations, avg_correlations_filtered, high_corr_mask,
@@ -1409,7 +1439,12 @@ class GPUBatchPearsonAnalyzer:
         all_high_corr_counts = []  # 每个元素: [num_stocks, batch_size]
         
         # 创建阈值张量（在GPU上）
-        threshold_tensor = torch.tensor(self.threshold, device=self.device, dtype=torch.float32)
+        threshold_tensor = None
+        if self.threshold is not None:
+            try:
+                threshold_tensor = torch.tensor(float(self.threshold), device=self.device, dtype=torch.float32)
+            except Exception:
+                threshold_tensor = None
         self_correlation_threshold = torch.tensor(0.9999, device=self.device, dtype=torch.float32)
         # 🔧 Debug：记录筛选阈值配置
         if self.debug:
@@ -1441,7 +1476,7 @@ class GPUBatchPearsonAnalyzer:
             # GPU端计算平均相关系数和筛选（3字段版本：open/close/volume）
             self.start_timer('gpu_step3_correlation_filtering', parent_timer='gpu_step3_integrated_correlation_processing')
             # 在字段维度按权重求和
-            weights = torch.tensor([0.5, 0.0, 0.5], dtype=torch.float32, device=self.device)
+            weights = torch.tensor([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=torch.float32, device=self.device)
             batch_avg_correlations = (batch_correlations * weights.view(1, 1, 1, 3)).sum(dim=3)
             
             # GPU端过滤自相关（相关性 >= 0.9999）
@@ -1450,7 +1485,25 @@ class GPUBatchPearsonAnalyzer:
             batch_avg_correlations_filtered[self_corr_mask] = 0.0
             
             # GPU端计算高相关性掩码
-            batch_high_corr_mask = batch_avg_correlations_filtered > threshold_tensor
+            batch_high_corr_mask = (
+                batch_avg_correlations_filtered > threshold_tensor
+            ) if threshold_tensor is not None else torch.ones_like(batch_avg_correlations_filtered, dtype=torch.bool)
+            # 额外应用字段级阈值（若提供）
+            field_thresholds = [self.threshold_close_minus_open, self.threshold_close, self.threshold_volume]
+            for f_idx, f_thr in enumerate(field_thresholds):
+                if f_thr is not None:
+                    f_thr_t = torch.tensor(float(f_thr), device=self.device, dtype=torch.float32)
+                    f_mask = batch_correlations[..., f_idx] > f_thr_t
+                    batch_high_corr_mask = batch_high_corr_mask & f_mask
+
+            # 字段级自相关过滤：任一字段相关系数达到自相关阈值则排除
+            field_self_mask = (
+                (batch_correlations[..., 0] >= self_correlation_threshold)
+                | (batch_correlations[..., 1] >= self_correlation_threshold)
+                | (batch_correlations[..., 2] >= self_correlation_threshold)
+            )
+            batch_avg_correlations_filtered[field_self_mask] = 0.0
+            batch_high_corr_mask = batch_high_corr_mask & (~field_self_mask)
 
             # 应用评测掩码：将无效窗口的平均相关与掩码置零
             if current_mask is not None:
@@ -4300,7 +4353,9 @@ class GPUBatchPearsonAnalyzer:
 
 
 def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evaluation_days=1, 
-                                         window_size=15, threshold=0.85, comparison_mode='default', 
+                                         window_size=15, threshold=None, 
+                                         threshold_close_minus_open=None, threshold_close=None, threshold_volume=None,
+                                         comparison_mode='default', 
                                          comparison_stocks=None, debug=False, csv_filename=None, 
                                          use_gpu=True, batch_size=1000, latest_date=None,
                                          comparison_date_count=1000, num_processes=None, evaluation_batch_size=100):
@@ -4336,6 +4391,9 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         stock_code=stock_code,
         window_size=window_size,
         threshold=threshold,
+        threshold_close_minus_open=threshold_close_minus_open,
+        threshold_close=threshold_close,
+        threshold_volume=threshold_volume,
         evaluation_days=evaluation_days,
         debug=debug,
         comparison_stocks=comparison_stocks,
@@ -4361,7 +4419,10 @@ if __name__ == "__main__":
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
-    parser.add_argument('--threshold', type=float, default=0.90, help='相关系数阈值 (默认: 0.90)')
+    parser.add_argument('--threshold', type=float, default=None, help='总相关系数阈值 (默认: None)')
+    parser.add_argument('--threshold_close_minus_open', type=float, default=0.9, help='字段 close_minus_open 的阈值 (默认: 0.9)')
+    parser.add_argument('--threshold_close', type=float, default=None, help='字段 close 的阈值 (默认: None)')
+    parser.add_argument('--threshold_volume', type=float, default=0.8, help='字段 volume 的阈值 (默认: 0.8)')
     parser.add_argument('--comparison_mode', type=str, default='top10',
                        help="对比模式: 通用 'topXXX'（如 top156）、hs300、zz500、custom、self_only、all（默认: top10）")
     parser.add_argument('--comparison_stocks', nargs='*', 
@@ -4424,6 +4485,9 @@ if __name__ == "__main__":
         evaluation_days=args.evaluation_days,
         window_size=args.window_size,
         threshold=args.threshold,
+        threshold_close_minus_open=args.threshold_close_minus_open,
+        threshold_close=args.threshold_close,
+        threshold_volume=args.threshold_volume,
         comparison_mode=args.comparison_mode,
         comparison_stocks=args.comparison_stocks,
         debug=args.debug,
