@@ -79,13 +79,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
         def unique_target(dirpath, filename):
             base = os.path.basename(filename)
-            target = os.path.join(dirpath, base)
-            root, ext = os.path.splitext(base)
-            i = 1
-            while os.path.exists(target):
-                target = os.path.join(dirpath, f"{root}({i}){ext}")
-                i += 1
-            return target
+            return os.path.join(dirpath, base)
+
+        files_to_save = []
+        conflicts = []
 
         for part in parts:
             if not part or part.startswith(b"--"):
@@ -133,11 +130,53 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 if not filename:
                     filename = f"upload_{int(time.time()*1000)}"
                 target = unique_target(save_dir, filename)
-                with open(target, 'wb') as out:
-                    out.write(body)
-        self.send_response(303)
-        self.send_header('Location', self.path)
+                if os.path.exists(target):
+                    conflicts.append(filename)
+                else:
+                    files_to_save.append((target, body))
+
+        if conflicts:
+            msg = "文件已存在: " + ", ".join([html.escape(x) for x in conflicts])
+            page = f"""
+<!DOCTYPE html>
+<html><head><meta charset='utf-8'><title>Conflict</title></head>
+<body>
+<h3>{msg}</h3>
+<p><a href='{html.escape(self.path)}'>返回目录</a></p>
+</body></html>
+""".encode('utf-8')
+            self.send_response(409)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+            return
+
+        saved = []
+        for target, body in files_to_save:
+            with open(target, 'wb') as out:
+                out.write(body)
+            saved.append(os.path.basename(target))
+
+        host = self.headers.get('Host', '')
+        base = self.path
+        if not base.endswith('/'):
+            base = base + '/'
+        urls = []
+        for name in saved:
+            urls.append(f"http://{host}{base}{urllib.parse.quote(name)}")
+        page = ("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Uploaded</title></head><body>" +
+                ("<h3>Uploaded:</h3><ul>" + "".join([f"<li><a href='" + u + "'>" + html.escape(u) + "</a></li>" for u in urls]) + "</ul>") +
+                f"<p><a href='{html.escape(self.path)}'>返回目录</a></p>" +
+                "</body></html>").encode('utf-8')
+
+        self.send_response(201)
+        if urls:
+            self.send_header('Location', urls[0])
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(page)))
         self.end_headers()
+        self.wfile.write(page)
 
 def get_ip_address():
     try:
