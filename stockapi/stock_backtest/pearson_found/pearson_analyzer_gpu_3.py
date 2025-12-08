@@ -1223,6 +1223,46 @@ class GPUBatchPearsonAnalyzer:
         self.end_timer('integrated_result_processing')
         return final_result
 
+    def _append_correlation_histogram(self, batch_correlations, batch_idx):
+        try:
+            fields = ['diff', 'close', 'volume']
+            static_path = os.path.join(os.path.dirname(self.csv_results_file), 'static.csv')
+            row = {'batch_index': int(batch_idx + 1)}
+            columns = ['batch_index']
+            for f_idx, field in enumerate(fields):
+                v = batch_correlations[..., f_idx].reshape(-1)
+                v = v[torch.isfinite(v)]
+                if v.numel() == 0:
+                    hist_rev = torch.zeros(20, dtype=torch.long, device=self.device)
+                else:
+                    v = v.clamp(-1.0, 1.0)
+                    h = torch.histc(v.float(), bins=20, min=-1.0, max=1.0)
+                    hist_rev = h.to(dtype=torch.long).flip(0)
+                for k in range(20):
+                    start = round(1.0 - k * 0.1, 1)
+                    end = round(start - 0.1, 1)
+                    col = f"{field}_{start}_to_{end}"
+                    columns.append(col)
+                    row[col] = int(hist_rev[k].item())
+            df_row = pd.DataFrame([row], columns=columns)
+            if not os.path.exists(static_path):
+                df_row.to_csv(static_path, index=False, encoding='utf-8-sig', mode='w')
+            else:
+                try:
+                    existing = pd.read_csv(static_path, nrows=1, encoding='utf-8-sig')
+                    if 'field' in existing.columns or set(existing.columns) != set(columns):
+                        df_row.to_csv(static_path, index=False, encoding='utf-8-sig', mode='w')
+                    else:
+                        df_row.to_csv(static_path, index=False, encoding='utf-8-sig', mode='a', header=False)
+                except Exception:
+                    df_row.to_csv(static_path, index=False, encoding='utf-8-sig', mode='w')
+        except Exception as e:
+            if hasattr(self, 'logger') and self.logger is not None:
+                try:
+                    self.logger.warning(f"统计输出失败: {str(e)}")
+                except Exception:
+                    pass
+
     def calculate_batch_gpu_correlation_optimized(self, batch_recent_data, historical_periods_data, evaluation_dates=None, stock_codes=None, valid_mask=None):
         """
         优化版批量GPU相关性计算 - 支持多目标股票同时处理
@@ -1547,6 +1587,13 @@ class GPUBatchPearsonAnalyzer:
             all_high_corr_counts.append(batch_high_corr_counts)
             self.end_timer('gpu_step3_result_aggregation')
             self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
+            try:
+                self._append_correlation_histogram(batch_correlations, batch_idx)
+            except Exception as e:
+                try:
+                    self.logger.warning(f"统计输出失败: {str(e)}")
+                except Exception:
+                    pass
             
             # 监控每个批次后的GPU显存（仅在debug模式）
             if self.debug and batch_idx % max(1, total_batches // 5) == 0:  # 每20%进度监控一次
@@ -4420,9 +4467,9 @@ if __name__ == "__main__":
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
     parser.add_argument('--threshold', type=float, default=None, help='总相关系数阈值 (默认: None)')
-    parser.add_argument('--threshold_close_minus_open', type=float, default=0.9, help='字段 close_minus_open 的阈值 (默认: 0.9)')
-    parser.add_argument('--threshold_close', type=float, default=None, help='字段 close 的阈值 (默认: None)')
-    parser.add_argument('--threshold_volume', type=float, default=0.8, help='字段 volume 的阈值 (默认: 0.8)')
+    parser.add_argument('--threshold_close_minus_open', type=float, default=0.65, help='字段 close_minus_open 的阈值 (默认: None)')
+    parser.add_argument('--threshold_close', type=float, default=0.9, help='字段 close 的阈值 (默认: None)')
+    parser.add_argument('--threshold_volume', type=float, default=0.80, help='字段 volume 的阈值 (默认: None)')
     parser.add_argument('--comparison_mode', type=str, default='top10',
                        help="对比模式: 通用 'topXXX'（如 top156）、hs300、zz500、custom、self_only、all（默认: top10）")
     parser.add_argument('--comparison_stocks', nargs='*', 

@@ -207,7 +207,14 @@ def get_stock_price_data(stock_code, date_str, sell_days, sell_mode=None):
 
             sell_idx = buy_idx + sell_days
             if sell_idx >= len(df):
-                sell_idx = len(df) - 1
+                return {
+                    'buy_price': 'N/A',
+                    'sell_price': 'N/A',
+                    'change_percent': 'N/A',
+                    'max_up_percent': 'N/A',
+                    'max_down_percent': 'N/A',
+                    'valid': False
+                }
 
             buy_price = float(df.iloc[buy_idx]['close'])
             if is_open_sell:
@@ -244,7 +251,8 @@ def get_stock_price_data(stock_code, date_str, sell_days, sell_mode=None):
                 'sell_price': f"{sell_price:.2f}",
                 'change_percent': f"{change_percent:.2f}%",
                 'max_up_percent': f"{max_up_percent:.2f}%",
-                'max_down_percent': (f"-{max_down_percent:.2f}%" if max_down_percent > 0 else "0.00%")
+                'max_down_percent': (f"-{max_down_percent:.2f}%" if max_down_percent > 0 else "0.00%"),
+                'valid': True
             }
 
         # 数据不可用：使用原模拟逻辑，但做一致性修正
@@ -284,7 +292,8 @@ def get_stock_price_data(stock_code, date_str, sell_days, sell_mode=None):
             'sell_price': f"{sell_price:.2f}",
             'change_percent': f"{change_percent:.2f}%",
             'max_up_percent': f"{max_up_percent:.2f}%",
-            'max_down_percent': (f"-{max_down_percent:.2f}%" if max_down_percent > 0 else "0.00%")
+            'max_down_percent': (f"-{max_down_percent:.2f}%" if max_down_percent > 0 else "0.00%"),
+            'valid': True
         }
     except Exception as e:
         logging.error(f"生成/计算股票价格数据时出错: {e}")
@@ -1058,7 +1067,8 @@ def analyze_csv(csv_file_path, min_correlation_count=10, high_percentage=80.0, s
                                 elif '上涨' in base_label:
                                     sell_mode = 'close'
                             price_data = get_stock_price_data(stock_code, buy_date, sell_days_offset, sell_mode=sell_mode)
-                            
+                            if not price_data or str(price_data.get('change_percent')) == 'N/A' or (price_data.get('valid') is False):
+                                continue
                             results['details'].append({
                                 'stock_code': stock_code,
                                 'date': eval_date,
@@ -1195,8 +1205,8 @@ def main():
                         help='CSV文件路径')
     parser.add_argument('--min-count', type=int, default=30,
                         help='最小相关数量阈值 (默认: 30')
-    parser.add_argument('--high-percentage', type=float, default=70.0,
-                        help='高百分比阈值 (默认: 70.0)')
+    parser.add_argument('--high-percentage', type=float, default=65.0,
+                        help='高百分比阈值 (默认: 65.0)')
     parser.add_argument('--output', type=str, default='',
                         help='结果输出文件路径 (默认: results_YYYYMMDD_HHMMSS.txt)')
     parser.add_argument('--eval-days', type=int, default=15,
