@@ -4694,7 +4694,7 @@ if __name__ == "__main__":
     parser.add_argument('--threshold_close_10', type=float, default=None, help='前10天 close 字段阈值 (默认: None)')
     parser.add_argument('--threshold_volume_10', type=float, default=None, help='前10天 volume 字段阈值 (默认: None)')
     parser.add_argument('--threshold_5', type=float, default=None, help='后5天总相关系数阈值 (默认: None)')
-    parser.add_argument('--threshold_close_minus_open_5', type=float, default=None, help='后5天 close_minus_open 字段阈值 (默认: None)')
+    parser.add_argument('--threshold_close_minus_open_5', type=float, default=0.99, help='后5天 close_minus_open 字段阈值 (默认: None)')
     parser.add_argument('--threshold_close_5', type=float, default=None, help='后5天 close 字段阈值 (默认: None)')
     parser.add_argument('--threshold_volume_5', type=float, default=None, help='后5天 volume 字段阈值 (默认: None)')
     parser.add_argument('--comparison_mode', type=str, default='top10',

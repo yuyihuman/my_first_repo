@@ -6,16 +6,13 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-def _parse_bin(col):
-    parts = col.split('_')
-    idx = col.find('_')
-    s = col[idx+1:]
-    a, b = s.split('_to_')
+def _parse_bin(label):
+    a, b = label.split('_to_')
     return float(a), float(b)
 
 def _field_columns(df, field):
     cols = [c for c in df.columns if c.startswith(f"{field}_")]
-    cols_sorted = sorted(cols, key=lambda c: _parse_bin(c)[0], reverse=True)
+    cols_sorted = sorted(cols, key=lambda c: _parse_bin(c[len(field)+1:])[0], reverse=True)
     return cols_sorted
 
 def _aggregate(df, field):
