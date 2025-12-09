@@ -104,15 +104,19 @@ def _process_stock_historical_data_worker(args):
 
 
 class GPUBatchPearsonAnalyzer:
-    def __init__(self, stock_code, log_dir='logs', window_size=15, threshold=0.85, 
-                 threshold_close_minus_open=None, threshold_close=None, threshold_volume=None,
+    def __init__(self, stock_code, log_dir='logs', window_size=15, threshold_10=0.85, 
+                 threshold_close_minus_open_10=None, threshold_close_10=None, threshold_volume_10=None,
                  evaluation_days=1, debug=False, comparison_stocks=None, 
                  comparison_mode='top10', backtest_date=None, 
                  csv_filename='evaluation_results.csv', use_gpu=True, 
                  batch_size=1000, gpu_memory_limit=0.8, latest_date=None,
                  comparison_date_count=1000, num_processes=None, evaluation_batch_size=100,
                  max_prediction_stats_count=100,
-                 up_threshold_pct=0.01):
+                 up_threshold_pct=0.01,
+                 threshold_5=None,
+                 threshold_close_minus_open_5=None,
+                 threshold_close_5=None,
+                 threshold_volume_5=None):
         """
         初始化GPU批量评测Pearson相关性分析器
         
@@ -160,10 +164,14 @@ class GPUBatchPearsonAnalyzer:
         self.csv_results_file = os.path.join(script_dir, csv_filename)
         
         self.window_size = window_size
-        self.threshold = threshold
-        self.threshold_close_minus_open = threshold_close_minus_open
-        self.threshold_close = threshold_close
-        self.threshold_volume = threshold_volume
+        self.threshold_10 = threshold_10
+        self.threshold_close_minus_open_10 = threshold_close_minus_open_10
+        self.threshold_close_10 = threshold_close_10
+        self.threshold_volume_10 = threshold_volume_10
+        self.threshold_5 = threshold_5
+        self.threshold_close_minus_open_5 = threshold_close_minus_open_5
+        self.threshold_close_5 = threshold_close_5
+        self.threshold_volume_5 = threshold_volume_5
         self.evaluation_days = evaluation_days  # 新增：评测日期数量
         self.evaluation_batch_size = evaluation_batch_size  # 每批次处理的评测日期数量
         self.debug = debug
@@ -268,7 +276,7 @@ class GPUBatchPearsonAnalyzer:
             self.logger.info(f"初始化GPU批量评测Pearson分析器，目标股票: {self.stock_codes} (多股票模式)")
         else:
             self.logger.info(f"初始化GPU批量评测Pearson分析器，目标股票: {self.stock_code}")
-        self.logger.info(f"窗口大小: {window_size}, 阈值: {threshold}, 评测日期数: {evaluation_days}")
+        self.logger.info(f"窗口大小: {window_size}, 阈值10天: {threshold_10}, 阈值5天: {threshold_5}, 评测日期数: {evaluation_days}")
         self.logger.info(f"GPU设备: {self.device}, 批处理大小: {batch_size}")
         self.logger.info(f"GPU内存限制: {gpu_memory_limit*100:.0f}%")
         self.logger.info(f"对比模式: {comparison_mode}, 对比股票数量: {len(self.comparison_stocks)}")
@@ -342,7 +350,7 @@ class GPUBatchPearsonAnalyzer:
             self.logger.info("📋 CSV文件不存在，开始创建新文件...")
             
             # 使用与单日脚本相同的表头格式
-            header = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
+            header = ['代码', 'window_size', '阈值(10天)', '阈值(5天)', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
                      '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨',
                      '10日内最大涨幅', '10日内平均最大涨幅', '10日内最大跌幅', '10日内平均最大跌幅']
             
@@ -371,7 +379,7 @@ class GPUBatchPearsonAnalyzer:
             # 文件已存在，检查文件状态，并在缺列时自愈
             try:
                 df = pd.read_csv(self.csv_results_file, encoding='utf-8-sig', dtype={'代码': str})
-                required_cols = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
+                required_cols = ['代码', 'window_size', '阈值(10天)', '阈值(5天)', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
                                  '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨',
                                  '10日内最大涨幅', '10日内平均最大涨幅', '10日内最大跌幅', '10日内平均最大跌幅']
                 missing = [c for c in required_cols if c not in df.columns]
@@ -402,7 +410,7 @@ class GPUBatchPearsonAnalyzer:
                         # 补齐缺失列，默认填充为0
                         existing_df['实际计算数量'] = 0
                         # 目标列顺序与新表头一致（包含新增上涨类别列）
-                        desired_columns = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
+                        desired_columns = ['代码', 'window_size', '阈值(10天)', '阈值(5天)', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
                                            '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨']
                         # 为缺失的新增列填充默认值
                         for col in desired_columns:
@@ -417,7 +425,7 @@ class GPUBatchPearsonAnalyzer:
                         self.logger.info("✅ 已为现有CSV补齐缺失列并更新表头")
                 else:
                     # 即使行数>0且已存在'实际计算数量'，也检查新增上涨列是否存在，不存在则自愈
-                    desired_columns = ['代码', 'window_size', '阈值', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
+                    desired_columns = ['代码', 'window_size', '阈值(10天)', '阈值(5天)', '评测日期', '对比股票数量', '相关数量', '实际计算数量',
                                        '下1日高开', '下1日上涨', '下2日上涨', '下3日上涨', '下4日上涨', '下5日上涨', '下6日上涨', '下7日上涨', '下8日上涨', '下9日上涨', '下10日上涨']
                     missing_cols = [col for col in desired_columns if col not in existing_df.columns]
                     if missing_cols:
@@ -843,7 +851,7 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"  ⚡ [子步骤3/5] 批量相关系数计算 - 开始")
         self.logger.info(f"输入张量形状: batch_recent_data={batch_recent_data.shape}, historical_tensor={historical_tensor.shape}")
         
-        self.logger.info(f"目标输出形状: [{num_stocks}, {evaluation_days}, {historical_tensor.shape[0]}, {historical_tensor.shape[-1]}]")
+        self.logger.info(f"目标输出形状: [{num_stocks}, {evaluation_days}, {historical_tensor.shape[0]}, 6]")
         
         batch_correlations = []
         
@@ -921,49 +929,34 @@ class GPUBatchPearsonAnalyzer:
         """
         batch_size, window_size, num_fields = recent_batch.shape
         num_historical_periods = historical_tensor.shape[0]
-        
-        if self.debug:
-            self.logger.debug(f"    [GPU计算] 开始相关系数矩阵计算 - _compute_correlation_matrix")
-            self.logger.debug(f"    输入形状: recent_batch={recent_batch.shape}, historical_tensor={historical_tensor.shape}")
-        
-        # 扩展维度进行广播计算
-        if self.debug:
-            self.logger.debug(f"    [GPU计算] 步骤1: 扩展维度进行广播")
-        recent_expanded = recent_batch.unsqueeze(1)  # [batch_size, 1, window_size, 3]
-        historical_expanded = historical_tensor.unsqueeze(0)  # [1, num_historical_periods, window_size, 3]
-        
-        # 计算均值
-        if self.debug:
-            self.logger.debug(f"    [GPU计算] 步骤2: 计算均值")
-        recent_mean = recent_expanded.mean(dim=2, keepdim=True)  # [batch_size, 1, 1, 3]
-        historical_mean = historical_expanded.mean(dim=2, keepdim=True)  # [1, num_historical_periods, 1, 3]
-        
-        # 中心化
-        if self.debug:
-            self.logger.debug(f"    [GPU计算] 步骤3: 数据中心化")
-        recent_centered = recent_expanded - recent_mean
-        historical_centered = historical_expanded - historical_mean
-        
-        # 计算协方差
-        if self.debug:
-            self.logger.debug(f"    [GPU计算] 步骤4: 计算协方差")
-        covariance = (recent_centered * historical_centered).sum(dim=2)  # [batch_size, num_historical_periods, 3]
-        
-        # 计算标准差
-        if self.debug:
-            self.logger.debug(f"    [GPU计算] 步骤5: 计算标准差")
-        recent_std = torch.sqrt((recent_centered ** 2).sum(dim=2))  # [batch_size, 1, 3]
-        historical_std = torch.sqrt((historical_centered ** 2).sum(dim=2))  # [1, num_historical_periods, 3]
-        
-        # 计算相关系数
-        if self.debug:
-            self.logger.debug(f"    [GPU计算] 步骤6: 计算最终相关系数")
-        correlation = covariance / (recent_std * historical_std + 1e-8)
-        
-        if self.debug:
-            self.logger.debug(f"    [GPU计算] 相关系数计算完成，输出形状: {correlation.shape}")
-        
-        return correlation
+        recent_expanded = recent_batch.unsqueeze(1)
+        historical_expanded = historical_tensor.unsqueeze(0)
+        first_len = min(10, window_size)
+        second_len = max(0, min(5, window_size - first_len))
+        rb1 = recent_expanded[:, :, :first_len, :]
+        hb1 = historical_expanded[:, :, :first_len, :]
+        recent_mean_1 = rb1.mean(dim=2, keepdim=True)
+        historical_mean_1 = hb1.mean(dim=2, keepdim=True)
+        rc1 = rb1 - recent_mean_1
+        hc1 = hb1 - historical_mean_1
+        cov1 = (rc1 * hc1).sum(dim=2)
+        std_r1 = torch.sqrt((rc1 ** 2).sum(dim=2))
+        std_h1 = torch.sqrt((hc1 ** 2).sum(dim=2))
+        corr1 = cov1 / (std_r1 * std_h1 + 1e-8)
+        if second_len > 0:
+            rb2 = recent_expanded[:, :, -second_len:, :]
+            hb2 = historical_expanded[:, :, -second_len:, :]
+            recent_mean_2 = rb2.mean(dim=2, keepdim=True)
+            historical_mean_2 = hb2.mean(dim=2, keepdim=True)
+            rc2 = rb2 - recent_mean_2
+            hc2 = hb2 - historical_mean_2
+            cov2 = (rc2 * hc2).sum(dim=2)
+            std_r2 = torch.sqrt((rc2 ** 2).sum(dim=2))
+            std_h2 = torch.sqrt((hc2 ** 2).sum(dim=2))
+            corr2 = cov2 / (std_r2 * std_h2 + 1e-8)
+            return torch.cat([corr1, corr2], dim=2)
+        else:
+            return corr1
 
     def _compute_correlation_matrix_multi_stock(self, recent_batch, historical_tensor):
         """
@@ -978,49 +971,34 @@ class GPUBatchPearsonAnalyzer:
         """
         num_stocks, batch_size, window_size, num_fields = recent_batch.shape
         num_historical_periods = historical_tensor.shape[0]
-        
-        if self.debug:
-            self.logger.debug(f"    [GPU多股票计算] 开始相关系数矩阵计算 - _compute_correlation_matrix_multi_stock")
-            self.logger.debug(f"    输入形状: recent_batch={recent_batch.shape}, historical_tensor={historical_tensor.shape}")
-        
-        # 扩展维度进行广播计算
-        if self.debug:
-            self.logger.debug(f"    [GPU多股票计算] 步骤1: 扩展维度进行广播")
-        recent_expanded = recent_batch.unsqueeze(2)  # [num_stocks, batch_size, 1, window_size, 3]
-        historical_expanded = historical_tensor.unsqueeze(0).unsqueeze(0)  # [1, 1, num_historical_periods, window_size, 3]
-        
-        # 计算均值
-        if self.debug:
-            self.logger.debug(f"    [GPU多股票计算] 步骤2: 计算均值")
-        recent_mean = recent_expanded.mean(dim=3, keepdim=True)  # [num_stocks, batch_size, 1, 1, 3]
-        historical_mean = historical_expanded.mean(dim=3, keepdim=True)  # [1, 1, num_historical_periods, 1, 3]
-        
-        # 中心化
-        if self.debug:
-            self.logger.debug(f"    [GPU多股票计算] 步骤3: 数据中心化")
-        recent_centered = recent_expanded - recent_mean
-        historical_centered = historical_expanded - historical_mean
-        
-        # 计算协方差
-        if self.debug:
-            self.logger.debug(f"    [GPU多股票计算] 步骤4: 计算协方差")
-        covariance = (recent_centered * historical_centered).sum(dim=3)  # [num_stocks, batch_size, num_historical_periods, 3]
-        
-        # 计算标准差
-        if self.debug:
-            self.logger.debug(f"    [GPU多股票计算] 步骤5: 计算标准差")
-        recent_std = torch.sqrt((recent_centered ** 2).sum(dim=3))  # [num_stocks, batch_size, 1, 3]
-        historical_std = torch.sqrt((historical_centered ** 2).sum(dim=3))  # [1, 1, num_historical_periods, 3]
-        
-        # 计算相关系数
-        if self.debug:
-            self.logger.debug(f"    [GPU多股票计算] 步骤6: 计算最终相关系数")
-        correlation = covariance / (recent_std * historical_std + 1e-8)
-        
-        if self.debug:
-            self.logger.debug(f"    [GPU多股票计算] 相关系数计算完成，输出形状: {correlation.shape}")
-        
-        return correlation
+        recent_expanded = recent_batch.unsqueeze(2)
+        historical_expanded = historical_tensor.unsqueeze(0).unsqueeze(0)
+        first_len = min(10, window_size)
+        second_len = max(0, min(5, window_size - first_len))
+        rb1 = recent_expanded[:, :, :, :first_len, :]
+        hb1 = historical_expanded[:, :, :, :first_len, :]
+        recent_mean_1 = rb1.mean(dim=3, keepdim=True)
+        historical_mean_1 = hb1.mean(dim=3, keepdim=True)
+        rc1 = rb1 - recent_mean_1
+        hc1 = hb1 - historical_mean_1
+        cov1 = (rc1 * hc1).sum(dim=3)
+        std_r1 = torch.sqrt((rc1 ** 2).sum(dim=3))
+        std_h1 = torch.sqrt((hc1 ** 2).sum(dim=3))
+        corr1 = cov1 / (std_r1 * std_h1 + 1e-8)
+        if second_len > 0:
+            rb2 = recent_expanded[:, :, :, -second_len:, :]
+            hb2 = historical_expanded[:, :, :, -second_len:, :]
+            recent_mean_2 = rb2.mean(dim=3, keepdim=True)
+            historical_mean_2 = hb2.mean(dim=3, keepdim=True)
+            rc2 = rb2 - recent_mean_2
+            hc2 = hb2 - historical_mean_2
+            cov2 = (rc2 * hc2).sum(dim=3)
+            std_r2 = torch.sqrt((rc2 ** 2).sum(dim=3))
+            std_h2 = torch.sqrt((hc2 ** 2).sum(dim=3))
+            corr2 = cov2 / (std_r2 * std_h2 + 1e-8)
+            return torch.cat([corr1, corr2], dim=3)
+        else:
+            return corr1
     
     def _process_single_stock_results(self, stock_correlations, avg_correlations_filtered, high_corr_mask,
                                      period_info_list, evaluation_dates, stock_code, fields):
@@ -1052,9 +1030,9 @@ class GPUBatchPearsonAnalyzer:
                         mask_row = high_corr_mask[eval_idx]
                         true_indices = [int(i) for i, v in enumerate(mask_row) if v]
                     else:
-                        # 若未提供掩码，则按总阈值（当设置时）筛选；未设置时视为全部通过
-                        if self.threshold is not None:
-                            true_indices = [int(i) for i, c in enumerate(eval_correlations) if c >= float(self.threshold)]
+                        # 若未提供掩码，则按10天总阈值（当设置时）筛选；未设置时视为全部通过
+                        if self.threshold_10 is not None:
+                            true_indices = [int(i) for i, c in enumerate(eval_correlations) if c >= float(self.threshold_10)]
                         else:
                             true_indices = list(range(min(len(eval_correlations), len(period_info_list))))
 
@@ -1062,14 +1040,35 @@ class GPUBatchPearsonAnalyzer:
                         if hist_idx < len(period_info_list):
                             period_data = period_info_list[hist_idx]
                             correlation = eval_correlations[hist_idx]
-                            high_corr_periods.append({
-                                'start_date': period_data['start_date'],
-                                'end_date': period_data['end_date'],
-                                'avg_correlation': float(correlation),
-                                'stock_code': period_data['stock_code'],
-                                'target_stock_code': stock_code,
-                                'source': 'gpu_batch'
-                            })
+                            if stock_correlations.shape[-1] >= 6:
+                                seg10 = stock_correlations[eval_idx, hist_idx, :3]
+                                seg5 = stock_correlations[eval_idx, hist_idx, 3:6]
+                                w = np.array([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=float)
+                                avg10 = float(np.dot(seg10, w))
+                                avg5 = float(np.dot(seg5, w))
+                                high_corr_periods.append({
+                                    'start_date': period_data['start_date'],
+                                    'end_date': period_data['end_date'],
+                                    'avg_correlation': float(avg10),
+                                    'avg_corr_10': float(avg10),
+                                    'avg_corr_5': float(avg5),
+                                    'corr_10_fields': [float(seg10[0]), float(seg10[1]), float(seg10[2])],
+                                    'corr_5_fields': [float(seg5[0]), float(seg5[1]), float(seg5[2])],
+                                    'stock_code': period_data['stock_code'],
+                                    'target_stock_code': stock_code,
+                                    'source': 'gpu_batch'
+                                })
+                            else:
+                                high_corr_periods.append({
+                                    'start_date': period_data['start_date'],
+                                    'end_date': period_data['end_date'],
+                                    'avg_correlation': float(correlation),
+                                    'avg_corr_10': float(correlation),
+                                    'avg_corr_5': None,
+                                    'stock_code': period_data['stock_code'],
+                                    'target_stock_code': stock_code,
+                                    'source': 'gpu_batch'
+                                })
                     
                     # 计算该评测日期的预测统计（如果有数据的话）
                     stats = {}
@@ -1129,38 +1128,66 @@ class GPUBatchPearsonAnalyzer:
             self.logger.info(f"处理股票 {stock_code} ({stock_idx + 1}/{num_stocks})")
             # 提取当前股票的相关性数据 [evaluation_days, num_historical_periods, 3]
             stock_correlations = correlations_np[stock_idx]
-            # 计算加权相关系数 [evaluation_days, num_historical_periods]
-            weights_np = np.array([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=float)
-            avg_correlations = np.tensordot(stock_correlations, weights_np, axes=([2], [0]))
-            # 过滤掉相关性为1.0的结果（自相关）
-            self_correlation_threshold = 0.9999
-            self_correlation_mask = avg_correlations >= self_correlation_threshold
-            # 统计被过滤的自相关数量
-            filtered_count = self_correlation_mask.sum()
-            total_filtered_self += int(filtered_count)
-            if filtered_count > 0:
-                self.logger.info(f"股票 {stock_code}: 过滤掉 {filtered_count} 个自相关结果（相关性 >= {self_correlation_threshold}）")
-            # 将自相关的位置设置为0，使其不会被选为高相关性期间
-            avg_correlations_filtered = avg_correlations.copy()
-            avg_correlations_filtered[self_correlation_mask] = 0.0
-            # 找出高相关性期间（使用过滤后的相关系数）
-            if self.threshold is not None:
-                high_corr_mask = avg_correlations_filtered > float(self.threshold)
+            num_f = stock_correlations.shape[-1]
+            if num_f >= 6:
+                weights_np = np.array([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=float)
+                avg_10 = np.tensordot(stock_correlations[:, :, :3], weights_np, axes=([2], [0]))
+                avg_5 = np.tensordot(stock_correlations[:, :, 3:], weights_np, axes=([2], [0]))
+                self_correlation_threshold = 0.9999
+                self_mask = (avg_10 >= self_correlation_threshold) | (avg_5 >= self_correlation_threshold)
+                filtered_count = self_mask.sum()
+                total_filtered_self += int(filtered_count)
+                if filtered_count > 0:
+                    self.logger.info(f"股票 {stock_code}: 过滤掉 {filtered_count} 个自相关结果（双段）")
+                avg_correlations_filtered = avg_10.copy()
+                avg_correlations_filtered[self_mask] = 0.0
+                mask_10 = (avg_correlations_filtered > float(self.threshold_10)) if self.threshold_10 is not None else np.ones_like(avg_correlations_filtered, dtype=bool)
+                mask_5 = (avg_5 > float(self.threshold_5)) if self.threshold_5 is not None else np.ones_like(avg_5, dtype=bool)
+                high_corr_mask = mask_10 & mask_5
+                ft10 = [self.threshold_close_minus_open_10, self.threshold_close_10, self.threshold_volume_10]
+                ft5 = [self.threshold_close_minus_open_5, self.threshold_close_5, self.threshold_volume_5]
+                for f_idx, f_thr in enumerate(ft10):
+                    if f_thr is not None:
+                        high_corr_mask = high_corr_mask & (stock_correlations[:, :, f_idx] > float(f_thr))
+                for f_idx, f_thr in enumerate(ft5):
+                    if f_thr is not None:
+                        high_corr_mask = high_corr_mask & (stock_correlations[:, :, 3 + f_idx] > float(f_thr))
+                field_self_mask = (
+                    (stock_correlations[:, :, 0] >= self_correlation_threshold)
+                    | (stock_correlations[:, :, 1] >= self_correlation_threshold)
+                    | (stock_correlations[:, :, 2] >= self_correlation_threshold)
+                    | (stock_correlations[:, :, 3] >= self_correlation_threshold)
+                    | (stock_correlations[:, :, 4] >= self_correlation_threshold)
+                    | (stock_correlations[:, :, 5] >= self_correlation_threshold)
+                )
+                avg_correlations_filtered[field_self_mask] = 0.0
+                high_corr_mask = high_corr_mask & (~field_self_mask)
             else:
-                high_corr_mask = np.ones_like(avg_correlations_filtered, dtype=bool)
-            # 额外应用字段级阈值（若提供）
-            field_thresholds_np = [self.threshold_close_minus_open, self.threshold_close, self.threshold_volume]
-            for f_idx, f_thr in enumerate(field_thresholds_np):
-                if f_thr is not None:
-                    high_corr_mask = high_corr_mask & (stock_correlations[:, :, f_idx] > float(f_thr))
-            # 字段级自相关过滤：任一字段相关系数达到自相关阈值则排除
-            field_self_mask = (
-                (stock_correlations[:, :, 0] >= self_correlation_threshold)
-                | (stock_correlations[:, :, 1] >= self_correlation_threshold)
-                | (stock_correlations[:, :, 2] >= self_correlation_threshold)
-            )
-            avg_correlations_filtered[field_self_mask] = 0.0
-            high_corr_mask = high_corr_mask & (~field_self_mask)
+                weights_np = np.array([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=float)
+                avg_correlations = np.tensordot(stock_correlations, weights_np, axes=([2], [0]))
+                self_correlation_threshold = 0.9999
+                self_correlation_mask = avg_correlations >= self_correlation_threshold
+                filtered_count = self_correlation_mask.sum()
+                total_filtered_self += int(filtered_count)
+                if filtered_count > 0:
+                    self.logger.info(f"股票 {stock_code}: 过滤掉 {filtered_count} 个自相关结果（相关性 >= {self_correlation_threshold}）")
+                avg_correlations_filtered = avg_correlations.copy()
+                avg_correlations_filtered[self_correlation_mask] = 0.0
+                if self.threshold_10 is not None:
+                    high_corr_mask = avg_correlations_filtered > float(self.threshold_10)
+                else:
+                    high_corr_mask = np.ones_like(avg_correlations_filtered, dtype=bool)
+                field_thresholds_np = [self.threshold_close_minus_open_10, self.threshold_close_10, self.threshold_volume_10]
+                for f_idx, f_thr in enumerate(field_thresholds_np):
+                    if f_thr is not None:
+                        high_corr_mask = high_corr_mask & (stock_correlations[:, :, f_idx] > float(f_thr))
+                field_self_mask = (
+                    (stock_correlations[:, :, 0] >= self_correlation_threshold)
+                    | (stock_correlations[:, :, 1] >= self_correlation_threshold)
+                    | (stock_correlations[:, :, 2] >= self_correlation_threshold)
+                )
+                avg_correlations_filtered[field_self_mask] = 0.0
+                high_corr_mask = high_corr_mask & (~field_self_mask)
             # 处理当前股票的详细结果
             stock_detailed_results = self._process_single_stock_results(
                 stock_correlations, avg_correlations_filtered, high_corr_mask,
@@ -1202,7 +1229,8 @@ class GPUBatchPearsonAnalyzer:
             'backtest_date': self.backtest_date,
             'evaluation_days': len(evaluation_dates) if evaluation_dates else evaluation_days,
             'window_size': self.window_size,
-            'threshold': self.threshold,
+            'threshold_10': self.threshold_10,
+            'threshold_5': self.threshold_5,
             'evaluation_dates': evaluation_dates if evaluation_dates else [],
             'batch_results': batch_results,
             'performance_stats': self._get_performance_stats(),
@@ -1229,21 +1257,22 @@ class GPUBatchPearsonAnalyzer:
             static_path = os.path.join(os.path.dirname(self.csv_results_file), 'static.csv')
             row = {'batch_index': int(batch_idx + 1)}
             columns = ['batch_index']
-            for f_idx, field in enumerate(fields):
-                v = batch_correlations[..., f_idx].reshape(-1)
-                v = v[torch.isfinite(v)]
-                if v.numel() == 0:
-                    hist_rev = torch.zeros(20, dtype=torch.long, device=self.device)
-                else:
-                    v = v.clamp(-1.0, 1.0)
-                    h = torch.histc(v.float(), bins=20, min=-1.0, max=1.0)
-                    hist_rev = h.to(dtype=torch.long).flip(0)
-                for k in range(20):
-                    start = round(1.0 - k * 0.1, 1)
-                    end = round(start - 0.1, 1)
-                    col = f"{field}_{start}_to_{end}"
-                    columns.append(col)
-                    row[col] = int(hist_rev[k].item())
+            for seg_start, seg_suffix in [(0, '10'), (3, '5')]:
+                for f_idx, field in enumerate(fields):
+                    v = batch_correlations[..., seg_start + f_idx].reshape(-1)
+                    v = v[torch.isfinite(v)]
+                    if v.numel() == 0:
+                        hist_rev = torch.zeros(20, dtype=torch.long, device=self.device)
+                    else:
+                        v = v.clamp(-1.0, 1.0)
+                        h = torch.histc(v.float(), bins=20, min=-1.0, max=1.0)
+                        hist_rev = h.to(dtype=torch.long).flip(0)
+                    for k in range(20):
+                        start = round(1.0 - k * 0.1, 1)
+                        end = round(start - 0.1, 1)
+                        col = f"{field}_{seg_suffix}_{start}_to_{end}"
+                        columns.append(col)
+                        row[col] = int(hist_rev[k].item())
             df_row = pd.DataFrame([row], columns=columns)
             if not os.path.exists(static_path):
                 df_row.to_csv(static_path, index=False, encoding='utf-8-sig', mode='w')
@@ -1479,19 +1508,19 @@ class GPUBatchPearsonAnalyzer:
         all_high_corr_counts = []  # 每个元素: [num_stocks, batch_size]
         
         # 创建阈值张量（在GPU上）
-        threshold_tensor = None
-        if self.threshold is not None:
+        thr_10 = None
+        if self.threshold_10 is not None:
             try:
-                threshold_tensor = torch.tensor(float(self.threshold), device=self.device, dtype=torch.float32)
+                thr_10 = torch.tensor(float(self.threshold_10), device=self.device, dtype=torch.float32)
             except Exception:
-                threshold_tensor = None
+                thr_10 = None
         self_correlation_threshold = torch.tensor(0.9999, device=self.device, dtype=torch.float32)
         # 🔧 Debug：记录筛选阈值配置
         if self.debug:
             try:
-                self.logger.debug(f"🔧 [筛选配置] 平均相关阈值: {float(self.threshold):.4f}, 自相关过滤阈值: 0.9999")
+                self.logger.debug(f"🔧 [筛选配置] 10天: avg={float(self.threshold_10) if self.threshold_10 is not None else 'None'}, fields={self.threshold_close_minus_open_10},{self.threshold_close_10},{self.threshold_volume_10}; 5天: avg={float(self.threshold_5) if self.threshold_5 is not None else 'None'}, fields={self.threshold_close_minus_open_5},{self.threshold_close_5},{self.threshold_volume_5}; 自相关过滤阈值: 0.9999")
             except Exception:
-                self.logger.debug(f"🔧 [筛选配置] 平均相关阈值: {self.threshold}, 自相关过滤阈值: 0.9999")
+                self.logger.debug(f"🔧 [筛选配置] 10天: avg={self.threshold_10}, fields={self.threshold_close_minus_open_10},{self.threshold_close_10},{self.threshold_volume_10}; 5天: avg={self.threshold_5}, fields={self.threshold_close_minus_open_5},{self.threshold_close_5},{self.threshold_volume_5}; 自相关过滤阈值: 0.9999")
         
         for batch_idx, i in enumerate(range(0, evaluation_days, batch_size)):
             end_idx = min(i + batch_size, evaluation_days)
@@ -1513,34 +1542,40 @@ class GPUBatchPearsonAnalyzer:
             self.end_timer('gpu_step3_correlation_matrix')
             # batch_correlations: [num_stocks, batch_size, num_historical_periods, 3]
             
-            # GPU端计算平均相关系数和筛选（3字段版本：open/close/volume）
             self.start_timer('gpu_step3_correlation_filtering', parent_timer='gpu_step3_integrated_correlation_processing')
-            # 在字段维度按权重求和
-            weights = torch.tensor([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=torch.float32, device=self.device)
-            batch_avg_correlations = (batch_correlations * weights.view(1, 1, 1, 3)).sum(dim=3)
-            
-            # GPU端过滤自相关（相关性 >= 0.9999）
-            self_corr_mask = batch_avg_correlations >= self_correlation_threshold
-            batch_avg_correlations_filtered = batch_avg_correlations.clone()
+            w3 = torch.tensor([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=torch.float32, device=self.device)
+            corr_10 = batch_correlations[..., :3]
+            corr_5 = batch_correlations[..., 3:]
+            avg_10 = (corr_10 * w3.view(1, 1, 1, 3)).sum(dim=3)
+            avg_5 = (corr_5 * w3.view(1, 1, 1, 3)).sum(dim=3)
+            self_corr_mask_10 = avg_10 >= self_correlation_threshold
+            self_corr_mask_5 = avg_5 >= self_correlation_threshold
+            self_corr_mask = self_corr_mask_10 | self_corr_mask_5
+            batch_avg_correlations_filtered = avg_10.clone()
             batch_avg_correlations_filtered[self_corr_mask] = 0.0
-            
-            # GPU端计算高相关性掩码
-            batch_high_corr_mask = (
-                batch_avg_correlations_filtered > threshold_tensor
-            ) if threshold_tensor is not None else torch.ones_like(batch_avg_correlations_filtered, dtype=torch.bool)
-            # 额外应用字段级阈值（若提供）
-            field_thresholds = [self.threshold_close_minus_open, self.threshold_close, self.threshold_volume]
-            for f_idx, f_thr in enumerate(field_thresholds):
+            thr_5 = torch.tensor(float(self.threshold_5), device=self.device, dtype=torch.float32) if self.threshold_5 is not None else None
+            mask_10 = (batch_avg_correlations_filtered > thr_10) if thr_10 is not None else torch.ones_like(batch_avg_correlations_filtered, dtype=torch.bool)
+            mask_5 = (avg_5 > thr_5) if thr_5 is not None else torch.ones_like(avg_5, dtype=torch.bool)
+            batch_high_corr_mask = mask_10 & mask_5
+            ft_10 = [self.threshold_close_minus_open_10, self.threshold_close_10, self.threshold_volume_10]
+            ft_5 = [self.threshold_close_minus_open_5, self.threshold_close_5, self.threshold_volume_5]
+            for f_idx, f_thr in enumerate(ft_10):
                 if f_thr is not None:
                     f_thr_t = torch.tensor(float(f_thr), device=self.device, dtype=torch.float32)
-                    f_mask = batch_correlations[..., f_idx] > f_thr_t
+                    f_mask = corr_10[..., f_idx] > f_thr_t
                     batch_high_corr_mask = batch_high_corr_mask & f_mask
-
-            # 字段级自相关过滤：任一字段相关系数达到自相关阈值则排除
+            for f_idx, f_thr in enumerate(ft_5):
+                if f_thr is not None:
+                    f_thr_t = torch.tensor(float(f_thr), device=self.device, dtype=torch.float32)
+                    f_mask = corr_5[..., f_idx] > f_thr_t
+                    batch_high_corr_mask = batch_high_corr_mask & f_mask
             field_self_mask = (
-                (batch_correlations[..., 0] >= self_correlation_threshold)
-                | (batch_correlations[..., 1] >= self_correlation_threshold)
-                | (batch_correlations[..., 2] >= self_correlation_threshold)
+                (corr_10[..., 0] >= self_correlation_threshold)
+                | (corr_10[..., 1] >= self_correlation_threshold)
+                | (corr_10[..., 2] >= self_correlation_threshold)
+                | (corr_5[..., 0] >= self_correlation_threshold)
+                | (corr_5[..., 1] >= self_correlation_threshold)
+                | (corr_5[..., 2] >= self_correlation_threshold)
             )
             batch_avg_correlations_filtered[field_self_mask] = 0.0
             batch_high_corr_mask = batch_high_corr_mask & (~field_self_mask)
@@ -1567,6 +1602,12 @@ class GPUBatchPearsonAnalyzer:
                     counts_np = batch_high_corr_counts.detach().cpu().numpy().ravel()
                     if counts_np.size > 0:
                         self.logger.debug(f"🔧 [筛选结果] 每评测单元高相关数量统计: min={counts_np.min()}, max={counts_np.max()}, mean={counts_np.mean():.2f}")
+                    counts_10 = mask_10.sum(dim=2).detach().cpu().numpy().ravel()
+                    counts_5 = mask_5.sum(dim=2).detach().cpu().numpy().ravel()
+                    if counts_10.size > 0:
+                        self.logger.debug(f"🔧 [筛选结果] 10天通过数量统计: min={counts_10.min()}, max={counts_10.max()}, mean={counts_10.mean():.2f}")
+                    if counts_5.size > 0:
+                        self.logger.debug(f"🔧 [筛选结果] 5天通过数量统计: min={counts_5.min()}, max={counts_5.max()}, mean={counts_5.mean():.2f}")
                 except Exception as e:
                     self.logger.debug(f"🔧 [筛选过程] 统计输出失败: {str(e)}")
             
@@ -1835,7 +1876,8 @@ class GPUBatchPearsonAnalyzer:
                 'backtest_date': self.backtest_date,
                 'evaluation_days': len(evaluation_dates) if evaluation_dates else evaluation_days,
                 'window_size': self.window_size,
-                'threshold': self.threshold,
+                'threshold_10': self.threshold_10,
+                'threshold_5': self.threshold_5,
                 'evaluation_dates': evaluation_dates if evaluation_dates else [],
                 'batch_results': batch_results,
                 'performance_stats': self._get_performance_stats(),
@@ -1848,7 +1890,8 @@ class GPUBatchPearsonAnalyzer:
                 'backtest_date': self.backtest_date,
                 'evaluation_days': len(evaluation_dates) if evaluation_dates else evaluation_days,
                 'window_size': self.window_size,
-                'threshold': self.threshold,
+                'threshold_10': self.threshold_10,
+                'threshold_5': self.threshold_5,
                 'evaluation_dates': evaluation_dates if evaluation_dates else [],
                 'batch_results': batch_results,
                 'performance_stats': self._get_performance_stats(),
@@ -1942,6 +1985,8 @@ class GPUBatchPearsonAnalyzer:
                             'start_date': period_data['start_date'],
                             'end_date': period_data['end_date'],
                             'avg_correlation': float(correlation),
+                            'avg_corr_10': float(correlation),
+                            'avg_corr_5': None,
                             'stock_code': period_data['stock_code'],
                             'source': 'gpu_optimized'
                         })
@@ -2242,21 +2287,36 @@ class GPUBatchPearsonAnalyzer:
             self.logger.debug(f"🔍   平均相关系数: {correlation_top:.6f}")
 
             fields = ['close_minus_open', 'close', 'volume']
-            self.logger.debug(f"🔍   源数据列对比 (前3天和后3天):")
+            self.logger.debug(f"🔍   源数据列对比 (10天与5天):")
+            first_len = min(10, self.window_size)
+            second_len = max(0, min(5, self.window_size - first_len))
             for field_idx, field in enumerate(fields):
                 eval_field_data = first_eval_data[:, field_idx]
                 hist_field_data = historical_data_top[:, field_idx]
 
-                x = eval_field_data - eval_field_data.mean()
-                y = hist_field_data - hist_field_data.mean()
-                denom = (x.norm() * y.norm()).clamp(min=1e-8)
-                field_correlation = (x.dot(y) / denom).item()
+                eval_10 = eval_field_data[:first_len]
+                hist_10 = hist_field_data[:first_len]
+                x10 = eval_10 - eval_10.mean()
+                y10 = hist_10 - hist_10.mean()
+                denom10 = (x10.norm() * y10.norm()).clamp(min=1e-8)
+                corr10 = (x10.dot(y10) / denom10).item()
 
-                self.logger.debug(f"🔍     {field} (相关系数: {field_correlation:.6f}):")
-                self.logger.debug(f"🔍       评测数据前3天: {eval_field_data[:3].tolist()}")
-                self.logger.debug(f"🔍       历史数据前3天: {hist_field_data[:3].tolist()}")
-                self.logger.debug(f"🔍       评测数据后3天: {eval_field_data[-3:].tolist()}")
-                self.logger.debug(f"🔍       历史数据后3天: {hist_field_data[-3:].tolist()}")
+                if second_len > 0:
+                    eval_5 = eval_field_data[-second_len:]
+                    hist_5 = hist_field_data[-second_len:]
+                    x5 = eval_5 - eval_5.mean()
+                    y5 = hist_5 - hist_5.mean()
+                    denom5 = (x5.norm() * y5.norm()).clamp(min=1e-8)
+                    corr5 = (x5.dot(y5) / denom5).item()
+                else:
+                    corr5 = float('nan')
+
+                self.logger.debug(f"🔍     {field} (10天相关: {corr10:.6f}, 5天相关: {corr5:.6f}):")
+                self.logger.debug(f"🔍       评测前10天: {eval_field_data[:first_len].tolist()}")
+                self.logger.debug(f"🔍       历史前10天: {hist_field_data[:first_len].tolist()}")
+                if second_len > 0:
+                    self.logger.debug(f"🔍       评测后5天: {eval_field_data[-second_len:].tolist()}")
+                    self.logger.debug(f"🔍       历史后5天: {hist_field_data[-second_len:].tolist()}")
 
             # 打印完整窗口数据以便复现
             self.logger.debug("🔍   完整窗口数据 (首个期间):")
@@ -2298,10 +2358,29 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.debug(f"🔍 字段 {field_name} 最大相关期间（按字段相关最大）:")
                 self.logger.debug(f"🔍   历史期间 {best_idx}: {best_info['start_date']} 到 {best_info['end_date']}")
                 self.logger.debug(f"🔍   来源股票: {best_info['stock_code']}")
-                self.logger.debug(f"🔍   字段相关系数: {best_corr:.6f}")
+                self.logger.debug(f"🔍   字段相关系数(全窗口): {best_corr:.6f}")
                 try:
-                    avg_corr_period = float(first_eval_correlations[best_idx].item())
-                    self.logger.debug(f"🔍   该期间平均相关系数(全字段): {avg_corr_period:.6f}")
+                    avg_corr_10 = 0.0
+                    avg_corr_5 = 0.0
+                    cnt5 = 0
+                    first_len = min(10, self.window_size)
+                    second_len = max(0, min(5, self.window_size - first_len))
+                    for f_i in range(3):
+                        eval_f = first_eval_data[:, f_i]
+                        hist_f = hist_all_fields[:, f_i]
+                        e10 = eval_f[:first_len]; h10 = hist_f[:first_len]
+                        x10 = e10 - e10.mean(); y10 = h10 - h10.mean()
+                        d10 = (x10.norm() * y10.norm()).clamp(min=1e-8)
+                        avg_corr_10 += (x10.dot(y10) / d10).item()
+                        if second_len > 0:
+                            e5 = eval_f[-second_len:]; h5 = hist_f[-second_len:]
+                            x5 = e5 - e5.mean(); y5 = h5 - h5.mean()
+                            d5 = (x5.norm() * y5.norm()).clamp(min=1e-8)
+                            avg_corr_5 += (x5.dot(y5) / d5).item()
+                            cnt5 += 1
+                    avg_corr_10 /= 3.0
+                    avg_corr_5 = (avg_corr_5 / cnt5) if cnt5 > 0 else float('nan')
+                    self.logger.debug(f"🔍   该期间平均相关系数(10天): {avg_corr_10:.6f}, (5天): {avg_corr_5:.6f}")
                 except Exception:
                     pass
 
@@ -2309,21 +2388,30 @@ class GPUBatchPearsonAnalyzer:
                 fields_all = ['close_minus_open', 'close', 'volume']
                 hist_all_fields = historical_tensor[best_idx].detach().cpu()  # [window_size, 3]
 
-                self.logger.debug(f"🔍   源数据列对比 (前3天和后3天):")
+                self.logger.debug(f"🔍   源数据列对比 (10天与5天):")
                 for f_idx, f_name in enumerate(fields_all):
                     eval_field_data = first_eval_data[:, f_idx]
                     hist_field_data = hist_all_fields[:, f_idx]
+                    first_len = min(10, self.window_size)
+                    second_len = max(0, min(5, self.window_size - first_len))
+                    e10 = eval_field_data[:first_len]; h10 = hist_field_data[:first_len]
+                    x10 = e10 - e10.mean(); y10 = h10 - h10.mean()
+                    d10 = (x10.norm() * y10.norm()).clamp(min=1e-8)
+                    c10 = (x10.dot(y10) / d10).item()
+                    if second_len > 0:
+                        e5 = eval_field_data[-second_len:]; h5 = hist_field_data[-second_len:]
+                        x5 = e5 - e5.mean(); y5 = h5 - h5.mean()
+                        d5 = (x5.norm() * y5.norm()).clamp(min=1e-8)
+                        c5 = (x5.dot(y5) / d5).item()
+                    else:
+                        c5 = float('nan')
 
-                    x = eval_field_data - eval_field_data.mean()
-                    y = hist_field_data - hist_field_data.mean()
-                    denom_xy = (x.norm() * y.norm()).clamp(min=1e-8)
-                    field_corr = (x.dot(y) / denom_xy).item()
-
-                    self.logger.debug(f"🔍     {f_name} (相关系数: {field_corr:.6f}):")
-                    self.logger.debug(f"🔍       评测数据前3天: {eval_field_data[:3].tolist()}")
-                    self.logger.debug(f"🔍       历史数据前3天: {hist_field_data[:3].tolist()}")
-                    self.logger.debug(f"🔍       评测数据后3天: {eval_field_data[-3:].tolist()}")
-                    self.logger.debug(f"🔍       历史数据后3天: {hist_field_data[-3:].tolist()}")
+                    self.logger.debug(f"🔍     {f_name} (10天相关: {c10:.6f}, 5天相关: {c5:.6f}):")
+                    self.logger.debug(f"🔍       评测前10天: {eval_field_data[:first_len].tolist()}")
+                    self.logger.debug(f"🔍       历史前10天: {hist_field_data[:first_len].tolist()}")
+                    if second_len > 0:
+                        self.logger.debug(f"🔍       评测后5天: {eval_field_data[-second_len:].tolist()}")
+                        self.logger.debug(f"🔍       历史后5天: {hist_field_data[-second_len:].tolist()}")
 
                 # 打印完整窗口数据以便复现（所有字段）
                 self.logger.debug("🔍   完整窗口数据 (该期间):")
@@ -2347,28 +2435,59 @@ class GPUBatchPearsonAnalyzer:
 
                 self.logger.debug(f"🔍   #{rank} 历史期间 {hist_idx}: {period_info['start_date']} 到 {period_info['end_date']}")
                 self.logger.debug(f"🔍       来源股票: {period_info['stock_code']}")
-                self.logger.debug(f"🔍       平均相关系数: {correlation:.6f}")
+                first_len = min(10, self.window_size)
+                second_len = max(0, min(5, self.window_size - first_len))
+                avg10 = 0.0
+                avg5 = 0.0
+                cnt5 = 0
+                fields = ['close_minus_open', 'close', 'volume']
+                hist_data = historical_tensor[hist_idx].detach().cpu()
+                for f_i, _ in enumerate(fields):
+                    e = first_eval_data[:, f_i]
+                    h = hist_data[:, f_i]
+                    e10 = e[:first_len]; h10 = h[:first_len]
+                    x10 = e10 - e10.mean(); y10 = h10 - h10.mean()
+                    d10 = (x10.norm() * y10.norm()).clamp(min=1e-8)
+                    avg10 += (x10.dot(y10) / d10).item()
+                    if second_len > 0:
+                        e5 = e[-second_len:]; h5 = h[-second_len:]
+                        x5 = e5 - e5.mean(); y5 = h5 - h5.mean()
+                        d5 = (x5.norm() * y5.norm()).clamp(min=1e-8)
+                        avg5 += (x5.dot(y5) / d5).item()
+                        cnt5 += 1
+                avg10 /= 3.0
+                avg5 = (avg5 / cnt5) if cnt5 > 0 else float('nan')
+                self.logger.debug(f"🔍       平均相关系数(10天): {avg10:.6f}, 平均相关系数(5天): {avg5:.6f}")
 
                 # 获取对应的历史数据
                 historical_data = historical_tensor[hist_idx].detach().cpu()  # [window_size, 3]
 
                 # 打印源数据列完整对比（open/close/volume 全窗口）
                 fields = ['close_minus_open', 'close', 'volume']
-                self.logger.debug(f"🔍       源数据列对比 (完整数据):")
+                self.logger.debug(f"🔍       源数据列对比 (10天与5天):")
 
                 for field_idx, field in enumerate(fields):
                     eval_field_data = first_eval_data[:, field_idx]
                     hist_field_data = historical_data[:, field_idx]
-
-                    # 使用torch计算字段级相关系数，统一计算路径
-                    x = eval_field_data - eval_field_data.mean()
-                    y = hist_field_data - hist_field_data.mean()
-                    denom = (x.norm() * y.norm()).clamp(min=1e-8)
-                    field_correlation = (x.dot(y) / denom).item()
-
-                    self.logger.debug(f"🔍         {field} (相关系数: {field_correlation:.6f}):")
-                    self.logger.debug(f"🔍           评测完整数据: {eval_field_data.tolist()}")
-                    self.logger.debug(f"🔍           历史完整数据: {hist_field_data.tolist()}")
+                    first_len = min(10, self.window_size)
+                    second_len = max(0, min(5, self.window_size - first_len))
+                    e10 = eval_field_data[:first_len]; h10 = hist_field_data[:first_len]
+                    x10 = e10 - e10.mean(); y10 = h10 - h10.mean()
+                    d10 = (x10.norm() * y10.norm()).clamp(min=1e-8)
+                    c10 = (x10.dot(y10) / d10).item()
+                    if second_len > 0:
+                        e5 = eval_field_data[-second_len:]; h5 = hist_field_data[-second_len:]
+                        x5 = e5 - e5.mean(); y5 = h5 - h5.mean()
+                        d5 = (x5.norm() * y5.norm()).clamp(min=1e-8)
+                        c5 = (x5.dot(y5) / d5).item()
+                    else:
+                        c5 = float('nan')
+                    self.logger.debug(f"🔍         {field} (10天相关: {c10:.6f}, 5天相关: {c5:.6f}):")
+                    self.logger.debug(f"🔍           评测前10天: {eval_field_data[:first_len].tolist()}")
+                    self.logger.debug(f"🔍           历史前10天: {hist_field_data[:first_len].tolist()}")
+                    if second_len > 0:
+                        self.logger.debug(f"🔍           评测后5天: {eval_field_data[-second_len:].tolist()}")
+                        self.logger.debug(f"🔍           历史后5天: {hist_field_data[-second_len:].tolist()}")
 
                 self.logger.debug("🔍" + "-" * 60)
         else:
@@ -2461,15 +2580,22 @@ class GPUBatchPearsonAnalyzer:
             period_close = source_data.iloc[end_idx]['close']
             # 以期间收盘价为基准的上涨阈值价格
             up_threshold_price = period_close * (1 + self.up_threshold_pct)
-            # 🔧 Debug：期间上下文（股票、日期、相关系数）
+            # 🔧 Debug：期间上下文（分段相关）
             if self.debug:
+                avg10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                avg5 = period.get('avg_corr_5', None)
                 try:
-                    self.logger.debug(
-                        f"🔧     - 期间#{i}: 股票:{source_stock_code}, 期间:{start_date}~{end_date}, 相关系数:{float(avg_correlation):.6f}"
-                    )
+                    if avg5 is not None:
+                        self.logger.debug(
+                            f"🔧     - 期间#{i}: 股票:{source_stock_code}, 期间:{start_date}~{end_date}, 相关(10天):{float(avg10):.6f}, 相关(5天):{float(avg5):.6f}"
+                        )
+                    else:
+                        self.logger.debug(
+                            f"🔧     - 期间#{i}: 股票:{source_stock_code}, 期间:{start_date}~{end_date}, 相关(10天):{float(avg10):.6f}"
+                        )
                 except Exception:
                     self.logger.debug(
-                        f"🔧     - 期间#{i}: 股票:{source_stock_code}, 期间:{start_date}~{end_date}, 相关系数:{avg_correlation}"
+                        f"🔧     - 期间#{i}: 股票:{source_stock_code}, 期间:{start_date}~{end_date}, 相关(10天):{avg10}, 相关(5天):{avg5}"
                     )
             
             # 检查下1个交易日
@@ -2490,16 +2616,28 @@ class GPUBatchPearsonAnalyzer:
                 # 🔧 Debug：下1日细节
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 次日: 开:{float(next_day_open):.4f}, 收:{float(next_day_close):.4f}, 高开:{bool(next_day_open > up_threshold_price)}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(next_day_close > up_threshold_price)}"
-                        )
+                        corr10 = avg10 if 'avg10' in locals() else period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = avg5 if 'avg5' in locals() else period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 次日: 开:{float(next_day_open):.4f}, 收:{float(next_day_close):.4f}, 高开:{bool(next_day_open > up_threshold_price)}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(next_day_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 次日: 开:{float(next_day_open):.4f}, 收:{float(next_day_close):.4f}, 高开:{bool(next_day_open > up_threshold_price)}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(next_day_close > up_threshold_price)}"
+                            )
                     except Exception:
                         self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 次日: 开:{next_day_open}, 收:{next_day_close}"
+                            f"🔧     - [{source_stock_code} {end_date}] 次日: 开:{next_day_open}, 收:{next_day_close}"
                         )
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 次日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    corr5 = period.get('avg_corr_5', None)
+                    if corr5 is not None:
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 次日数据不足，无法统计")
+                    else:
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 次日数据不足，无法统计")
 
             # 检查下2个交易日
             if end_idx + 2 < len(source_data):
@@ -2509,14 +2647,22 @@ class GPUBatchPearsonAnalyzer:
                     stats['next_2_day_up'] += 1
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第2日: 收:{float(day_2_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_2_close > up_threshold_price)}"
-                        )
+                        corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 第2日: 收:{float(day_2_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_2_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 第2日: 收:{float(day_2_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_2_close > up_threshold_price)}"
+                            )
                     except Exception:
-                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第2日: 收:{day_2_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date}] 第2日: 收:{day_2_close}")
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第2日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 第2日数据不足，无法统计")
 
             # 检查下3个交易日
             if end_idx + 3 < len(source_data):
@@ -2527,14 +2673,22 @@ class GPUBatchPearsonAnalyzer:
                     stats['next_3_day_up'] += 1
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第3日: 收:{float(day_3_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_3_close > up_threshold_price)}"
-                        )
+                        corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 第3日: 收:{float(day_3_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_3_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 第3日: 收:{float(day_3_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_3_close > up_threshold_price)}"
+                            )
                     except Exception:
-                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第3日: 收:{day_3_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date}] 第3日: 收:{day_3_close}")
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第3日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 第3日数据不足，无法统计")
 
             # 检查下4个交易日
             if end_idx + 4 < len(source_data):
@@ -2544,14 +2698,22 @@ class GPUBatchPearsonAnalyzer:
                     stats['next_4_day_up'] += 1
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第4日: 收:{float(day_4_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_4_close > up_threshold_price)}"
-                        )
+                        corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 第4日: 收:{float(day_4_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_4_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 第4日: 收:{float(day_4_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_4_close > up_threshold_price)}"
+                            )
                     except Exception:
-                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第4日: 收:{day_4_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date}] 第4日: 收:{day_4_close}")
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第4日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 第4日数据不足，无法统计")
 
             # 检查下5个交易日
             if end_idx + 5 < len(source_data):
@@ -2562,14 +2724,22 @@ class GPUBatchPearsonAnalyzer:
                     stats['next_5_day_up'] += 1
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第5日: 收:{float(day_5_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_5_close > up_threshold_price)}"
-                        )
+                        corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 第5日: 收:{float(day_5_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_5_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 第5日: 收:{float(day_5_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_5_close > up_threshold_price)}"
+                            )
                     except Exception:
-                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第5日: 收:{day_5_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date}] 第5日: 收:{day_5_close}")
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第5日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 第5日数据不足，无法统计")
 
             # 检查下6个交易日
             if end_idx + 6 < len(source_data):
@@ -2579,14 +2749,22 @@ class GPUBatchPearsonAnalyzer:
                     stats['next_6_day_up'] += 1
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第6日: 收:{float(day_6_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_6_close > up_threshold_price)}"
-                        )
+                        corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 第6日: 收:{float(day_6_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_6_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 第6日: 收:{float(day_6_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_6_close > up_threshold_price)}"
+                            )
                     except Exception:
-                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第6日: 收:{day_6_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date}] 第6日: 收:{day_6_close}")
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第6日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 第6日数据不足，无法统计")
 
             # 检查下7个交易日
             if end_idx + 7 < len(source_data):
@@ -2596,14 +2774,22 @@ class GPUBatchPearsonAnalyzer:
                     stats['next_7_day_up'] += 1
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第7日: 收:{float(day_7_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_7_close > up_threshold_price)}"
-                        )
+                        corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 第7日: 收:{float(day_7_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_7_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 第7日: 收:{float(day_7_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_7_close > up_threshold_price)}"
+                            )
                     except Exception:
-                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第7日: 收:{day_7_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date}] 第7日: 收:{day_7_close}")
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第7日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 第7日数据不足，无法统计")
 
             # 检查下8个交易日
             if end_idx + 8 < len(source_data):
@@ -2613,14 +2799,22 @@ class GPUBatchPearsonAnalyzer:
                     stats['next_8_day_up'] += 1
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第8日: 收:{float(day_8_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_8_close > up_threshold_price)}"
-                        )
+                        corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 第8日: 收:{float(day_8_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_8_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 第8日: 收:{float(day_8_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_8_close > up_threshold_price)}"
+                            )
                     except Exception:
-                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第8日: 收:{day_8_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date}] 第8日: 收:{day_8_close}")
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第8日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 第8日数据不足，无法统计")
 
             # 检查下9个交易日
             if end_idx + 9 < len(source_data):
@@ -2630,14 +2824,22 @@ class GPUBatchPearsonAnalyzer:
                     stats['next_9_day_up'] += 1
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第9日: 收:{float(day_9_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_9_close > up_threshold_price)}"
-                        )
+                        corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 第9日: 收:{float(day_9_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_9_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 第9日: 收:{float(day_9_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_9_close > up_threshold_price)}"
+                            )
                     except Exception:
-                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第9日: 收:{day_9_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date}] 第9日: 收:{day_9_close}")
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第9日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 第9日数据不足，无法统计")
 
             # 检查下10个交易日
             if end_idx + 10 < len(source_data):
@@ -2648,14 +2850,22 @@ class GPUBatchPearsonAnalyzer:
                     stats['next_10_day_up'] += 1
                 if self.debug:
                     try:
-                        self.logger.debug(
-                            f"🔧     - [{source_stock_code} {end_date} corr={float(avg_correlation):.4f}] 第10日: 收:{float(day_10_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_10_close > up_threshold_price)}"
-                        )
+                        corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                        corr5 = period.get('avg_corr_5', None)
+                        if corr5 is not None:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}, corr5={float(corr5):.4f}] 第10日: 收:{float(day_10_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_10_close > up_threshold_price)}"
+                            )
+                        else:
+                            self.logger.debug(
+                                f"🔧     - [{source_stock_code} {end_date} corr10={float(corr10):.4f}] 第10日: 收:{float(day_10_close):.4f}, 上涨阈值价:{float(up_threshold_price):.4f}, 上涨:{bool(day_10_close > up_threshold_price)}"
+                            )
                     except Exception:
-                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第10日: 收:{day_10_close}")
+                        self.logger.debug(f"🔧     - [{source_stock_code} {end_date}] 第10日: 收:{day_10_close}")
             else:
                 if self.debug:
-                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr={avg_correlation}] 第10日数据不足，无法统计")
+                    corr10 = period.get('avg_corr_10', period.get('avg_correlation'))
+                    self.logger.debug(f"🔧     - [{source_stock_code} {end_date} corr10={corr10}] 第10日数据不足，无法统计")
 
             # 计算该期间内未来10日的最大涨跌（基于收盘价、相对期末收盘）
             # 严格要求未来满10个交易日才参与10日涨跌幅聚合（与10日valid口径一致）
@@ -2807,7 +3017,7 @@ class GPUBatchPearsonAnalyzer:
         if window_size is not None:
             self.window_size = window_size
         if threshold is not None:
-            self.threshold = threshold
+            self.threshold_10 = threshold
         if comparison_mode is not None:
             self.comparison_mode = comparison_mode
         if comparison_stocks is not None:
@@ -2825,9 +3035,11 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"评测日期数量: {self.evaluation_days}")
         self.logger.info(f"每批次处理数量: {self.evaluation_batch_size}")
         self.logger.info(f"窗口大小: {self.window_size}")
-        self.logger.info(f"相关系数阈值: {self.threshold}")
+        self.logger.info(f"相关系数阈值(10天): {self.threshold_10}")
+        self.logger.info(f"相关系数阈值(5天): {self.threshold_5}")
         self.logger.info(f"对比模式: {self.comparison_mode}")
         self.logger.info(f"GPU设备: {self.device}")
+        self.logger.info("计算机制: 前10天与后5天分段相关(3字段×2段=6通道)，8条件AND筛选")
         
         # 多股票模式总计算量信息（仅用于日志显示）
         if self.is_multi_stock:
@@ -4239,7 +4451,8 @@ class GPUBatchPearsonAnalyzer:
                                         'evaluation_date': evaluation_date,
                                         'daily_result': daily_result,
                                         'window_size': result['window_size'],
-                                        'threshold': result['threshold']
+                                        'threshold_10': result.get('threshold_10', result.get('threshold')),
+                                        'threshold_5': result.get('threshold_5')
                                     }
                                     evaluation_units.append(evaluation_unit)
                                 else:
@@ -4264,7 +4477,8 @@ class GPUBatchPearsonAnalyzer:
                                 'evaluation_date': evaluation_date,
                                 'daily_result': daily_result,
                                 'window_size': result['window_size'],
-                                'threshold': result['threshold']
+                                'threshold_10': result.get('threshold_10', result.get('threshold')),
+                                'threshold_5': result.get('threshold_5')
                             }
                             evaluation_units.append(evaluation_unit)
                         else:
@@ -4297,7 +4511,8 @@ class GPUBatchPearsonAnalyzer:
                 row_data = {
                     '代码': stock_code,
                     'window_size': unit['window_size'],
-                    '阈值': unit['threshold'],
+                    '阈值(10天)': unit.get('threshold_10'),
+                    '阈值(5天)': unit.get('threshold_5'),
                     '评测日期': evaluation_date.strftime('%Y-%m-%d'),
                     '对比股票数量': comparison_stock_count,
                     '相关数量': daily_result.get('daily_high_count', 0),
@@ -4400,12 +4615,16 @@ class GPUBatchPearsonAnalyzer:
 
 
 def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evaluation_days=1, 
-                                         window_size=15, threshold=None, 
-                                         threshold_close_minus_open=None, threshold_close=None, threshold_volume=None,
+                                         window_size=15, threshold_10=None, 
+                                         threshold_close_minus_open_10=None, threshold_close_10=None, threshold_volume_10=None,
                                          comparison_mode='default', 
                                          comparison_stocks=None, debug=False, csv_filename=None, 
                                          use_gpu=True, batch_size=1000, latest_date=None,
-                                         comparison_date_count=1000, num_processes=None, evaluation_batch_size=100):
+                                         comparison_date_count=1000, num_processes=None, evaluation_batch_size=100,
+                                         threshold_5=None,
+                                         threshold_close_minus_open_5=None,
+                                         threshold_close_5=None,
+                                         threshold_volume_5=None):
     """
     GPU批量评测Pearson相关性分析的便捷函数
     
@@ -4437,10 +4656,14 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
     analyzer = GPUBatchPearsonAnalyzer(
         stock_code=stock_code,
         window_size=window_size,
-        threshold=threshold,
-        threshold_close_minus_open=threshold_close_minus_open,
-        threshold_close=threshold_close,
-        threshold_volume=threshold_volume,
+        threshold_10=threshold_10,
+        threshold_close_minus_open_10=threshold_close_minus_open_10,
+        threshold_close_10=threshold_close_10,
+        threshold_volume_10=threshold_volume_10,
+        threshold_5=threshold_5,
+        threshold_close_minus_open_5=threshold_close_minus_open_5,
+        threshold_close_5=threshold_close_5,
+        threshold_volume_5=threshold_volume_5,
         evaluation_days=evaluation_days,
         debug=debug,
         comparison_stocks=comparison_stocks,
@@ -4466,10 +4689,14 @@ if __name__ == "__main__":
     parser.add_argument('--backtest_date', type=str, help='回测结束日期 (YYYY-MM-DD)')
     parser.add_argument('--evaluation_days', type=int, default=1, help='评测日期数量 (默认: 1)')
     parser.add_argument('--window_size', type=int, default=15, help='分析窗口大小 (默认: 15)')
-    parser.add_argument('--threshold', type=float, default=None, help='总相关系数阈值 (默认: None)')
-    parser.add_argument('--threshold_close_minus_open', type=float, default=0.65, help='字段 close_minus_open 的阈值 (默认: None)')
-    parser.add_argument('--threshold_close', type=float, default=0.9, help='字段 close 的阈值 (默认: None)')
-    parser.add_argument('--threshold_volume', type=float, default=0.80, help='字段 volume 的阈值 (默认: None)')
+    parser.add_argument('--threshold_10', type=float, default=None, help='前10天总相关系数阈值 (默认: None)')
+    parser.add_argument('--threshold_close_minus_open_10', type=float, default=None, help='前10天 close_minus_open 字段阈值 (默认: None)')
+    parser.add_argument('--threshold_close_10', type=float, default=None, help='前10天 close 字段阈值 (默认: None)')
+    parser.add_argument('--threshold_volume_10', type=float, default=None, help='前10天 volume 字段阈值 (默认: None)')
+    parser.add_argument('--threshold_5', type=float, default=None, help='后5天总相关系数阈值 (默认: None)')
+    parser.add_argument('--threshold_close_minus_open_5', type=float, default=None, help='后5天 close_minus_open 字段阈值 (默认: None)')
+    parser.add_argument('--threshold_close_5', type=float, default=None, help='后5天 close 字段阈值 (默认: None)')
+    parser.add_argument('--threshold_volume_5', type=float, default=None, help='后5天 volume 字段阈值 (默认: None)')
     parser.add_argument('--comparison_mode', type=str, default='top10',
                        help="对比模式: 通用 'topXXX'（如 top156）、hs300、zz500、custom、self_only、all（默认: top10）")
     parser.add_argument('--comparison_stocks', nargs='*', 
@@ -4522,7 +4749,7 @@ if __name__ == "__main__":
     print(f"开始GPU批量评测分析，股票代码: {stock_codes}")
     print(f"评测日期数量: {args.evaluation_days}")
     print(f"窗口大小: {args.window_size}")
-    print(f"相关系数阈值: {args.threshold}")
+    print(f"相关系数阈值(10天): {args.threshold_10}, 相关系数阈值(5天): {args.threshold_5}")
     
     # 使用真正的多股票批量处理
     print(f"\n开始批量处理所有股票: {stock_codes}")
@@ -4531,10 +4758,14 @@ if __name__ == "__main__":
         backtest_date=args.backtest_date,
         evaluation_days=args.evaluation_days,
         window_size=args.window_size,
-        threshold=args.threshold,
-        threshold_close_minus_open=args.threshold_close_minus_open,
-        threshold_close=args.threshold_close,
-        threshold_volume=args.threshold_volume,
+        threshold_10=args.threshold_10,
+        threshold_close_minus_open_10=args.threshold_close_minus_open_10,
+        threshold_close_10=args.threshold_close_10,
+        threshold_volume_10=args.threshold_volume_10,
+        threshold_5=args.threshold_5,
+        threshold_close_minus_open_5=args.threshold_close_minus_open_5,
+        threshold_close_5=args.threshold_close_5,
+        threshold_volume_5=args.threshold_volume_5,
         comparison_mode=args.comparison_mode,
         comparison_stocks=args.comparison_stocks,
         debug=args.debug,

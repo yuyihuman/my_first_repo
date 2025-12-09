@@ -29,6 +29,22 @@ def parse_args():
         "--evaluation_days", type=int, default=30, help="传递给 pearson_analyzer_gpu_3.py 的 --evaluation_days"
     )
 
+    parser.add_argument(
+        "--window_size", type=int, default=15, help="传递给 pearson_analyzer_gpu_3.py 的 --window_size"
+    )
+
+    parser.add_argument("--threshold_10", type=float, default=None, help="传递 --threshold_10")
+    parser.add_argument("--threshold_close_minus_open_10", type=float, default=None, help="传递 --threshold_close_minus_open_10")
+    parser.add_argument("--threshold_close_10", type=float, default=None, help="传递 --threshold_close_10")
+    parser.add_argument("--threshold_volume_10", type=float, default=None, help="传递 --threshold_volume_10")
+    parser.add_argument("--threshold_5", type=float, default=None, help="传递 --threshold_5")
+    parser.add_argument("--threshold_close_minus_open_5", type=float, default=None, help="传递 --threshold_close_minus_open_5")
+    parser.add_argument("--threshold_close_5", type=float, default=None, help="传递 --threshold_close_5")
+    parser.add_argument("--threshold_volume_5", type=float, default=None, help="传递 --threshold_volume_5")
+
+    parser.add_argument("--debug", action="store_true", help="传递 --debug 打印详细日志")
+    parser.add_argument("--no_gpu", action="store_true", help="传递 --no_gpu 禁用GPU")
+
     # 传递历史数据上限与数量限制（仅对对比股票生效，与 pearson_analyzer_gpu_3.py 保持一致）
     parser.add_argument(
         "--latest_date", type=str, default=None,
@@ -144,12 +160,23 @@ def run_backtests_for_anchors(
     comparison_mode: str,
     csv_filename: str,
     evaluation_days: int,
+    window_size: int,
     latest_dates: Optional[list],
     comparison_date_count: int,
     append_date_to_csv: bool,
     sleep_seconds: float,
     script_path: Path,
     dry_run: bool,
+    threshold_10: Optional[float],
+    threshold_close_minus_open_10: Optional[float],
+    threshold_close_10: Optional[float],
+    threshold_volume_10: Optional[float],
+    threshold_5: Optional[float],
+    threshold_close_minus_open_5: Optional[float],
+    threshold_close_5: Optional[float],
+    threshold_volume_5: Optional[float],
+    debug: bool,
+    no_gpu: bool,
 ):
     """按锚点日期（每隔固定交易日）调用 pearson_analyzer_gpu_3.py。"""
     import time
@@ -177,6 +204,8 @@ def run_backtests_for_anchors(
             d,
             "--evaluation_days",
             str(evaluation_days),
+            "--window_size",
+            str(window_size),
         ]
 
         # latest_date（每组）仅在存在时添加
@@ -184,6 +213,27 @@ def run_backtests_for_anchors(
             cmd.extend(["--latest_date", str(ld)])
         # comparison_date_count 始终传递（与分析器默认值一致但允许覆盖）
         cmd.extend(["--comparison_date_count", str(comparison_date_count)])
+
+        if threshold_10 is not None:
+            cmd.extend(["--threshold_10", str(threshold_10)])
+        if threshold_close_minus_open_10 is not None:
+            cmd.extend(["--threshold_close_minus_open_10", str(threshold_close_minus_open_10)])
+        if threshold_close_10 is not None:
+            cmd.extend(["--threshold_close_10", str(threshold_close_10)])
+        if threshold_volume_10 is not None:
+            cmd.extend(["--threshold_volume_10", str(threshold_volume_10)])
+        if threshold_5 is not None:
+            cmd.extend(["--threshold_5", str(threshold_5)])
+        if threshold_close_minus_open_5 is not None:
+            cmd.extend(["--threshold_close_minus_open_5", str(threshold_close_minus_open_5)])
+        if threshold_close_5 is not None:
+            cmd.extend(["--threshold_close_5", str(threshold_close_5)])
+        if threshold_volume_5 is not None:
+            cmd.extend(["--threshold_volume_5", str(threshold_volume_5)])
+        if debug:
+            cmd.append("--debug")
+        if no_gpu:
+            cmd.append("--no_gpu")
 
         prefix = "DRY-RUN:" if dry_run else "RUN:"
         print(prefix, " ".join(cmd))
@@ -252,12 +302,23 @@ def main():
         comparison_mode=args.comparison_mode,
         csv_filename=args.csv_filename,
         evaluation_days=args.evaluation_days,
+        window_size=args.window_size,
         latest_dates=per_group_latest_dates,
         comparison_date_count=args.comparison_date_count,
         append_date_to_csv=args.append_date_to_csv,
         sleep_seconds=args.sleep_seconds,
         script_path=script_path,
         dry_run=args.dry_run,
+        threshold_10=args.threshold_10,
+        threshold_close_minus_open_10=args.threshold_close_minus_open_10,
+        threshold_close_10=args.threshold_close_10,
+        threshold_volume_10=args.threshold_volume_10,
+        threshold_5=args.threshold_5,
+        threshold_close_minus_open_5=args.threshold_close_minus_open_5,
+        threshold_close_5=args.threshold_close_5,
+        threshold_volume_5=args.threshold_volume_5,
+        debug=args.debug,
+        no_gpu=args.no_gpu,
     )
 
     print(f"总执行次数: {total_trading_days}")
