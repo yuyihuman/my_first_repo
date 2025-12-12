@@ -132,11 +132,12 @@ def parse_log(log_path: str) -> Tuple[Optional[str], Optional[str], List[Dict]]:
                 'start': m.group('start').strip(),
                 'end': m.group('end').strip(),
                 'stock': None,
-                'corr': None,  # 平均相关系数可能在后续行
+                'corr': None,
             }
-            # 向后检查若干行以找“来源股票”与“平均相关系数”
             j = i + 1
-            while j < len(lines) and (lines[j].strip().startswith('202') or lines[j].strip().startswith('🔍') or 'INFO' in lines[j] or 'DEBUG' in lines[j]):
+            while j < len(lines):
+                if RE_PERIOD_INFO_BLOCK.search(lines[j]):
+                    break
                 ms = RE_SOURCE_STOCK_IN_BLOCK.search(lines[j])
                 if ms:
                     info_block_buffer[idx]['stock'] = ms.group('stock')
@@ -145,16 +146,26 @@ def parse_log(log_path: str) -> Tuple[Optional[str], Optional[str], List[Dict]]:
                         info_block_buffer[idx]['corr'] = float(lines[j].split('平均相关系数:')[-1].strip())
                     except Exception:
                         pass
-                # 到下一个块的分隔就停
-                if lines[j].strip().startswith('------------------------------------------------------------'):
+                if '-----' in lines[j]:
                     break
                 j += 1
 
-    # 合并 INFO 块到 periods 列表（若该 idx 未出现于 DEBUG 列表中）
-    existing_idxs = {p['idx'] for p in periods}
+    # 合并/覆盖 INFO 块到 periods 列表
+    periods_by_idx: Dict[int, Dict] = {p['idx']: p for p in periods}
     for idx, info in info_block_buffer.items():
-        if idx not in existing_idxs and info.get('stock') and info.get('start') and info.get('end'):
-            periods.append(info)
+        if idx in periods_by_idx:
+            p = periods_by_idx[idx]
+            if info.get('stock'):
+                p['stock'] = info['stock']
+            if info.get('start'):
+                p['start'] = info['start']
+            if info.get('end'):
+                p['end'] = info['end']
+            if info.get('corr') is not None:
+                p['corr'] = info['corr']
+        else:
+            if info.get('stock') and info.get('start') and info.get('end'):
+                periods.append(info)
 
     # 按 idx 排序
     periods.sort(key=lambda x: x['idx'])
@@ -229,11 +240,9 @@ def pad_with_blank_rows(df: pd.DataFrame, target_len: int) -> pd.DataFrame:
 
     last_dt = df.index[-1]
     need = target_len - cur_len
-    # 从下一工作日开始补齐
     pad_index = pd.bdate_range(last_dt + pd.Timedelta(days=1), periods=need)
-    blank = pd.DataFrame(index=pad_index, columns=df.columns)
-    # OHLCV 全部 NaN，mplfinance 会在相应位置不绘制蜡烛，但占位确保数量对齐
-    return pd.concat([df, blank])
+    new_index = df.index.append(pad_index)
+    return df.reindex(new_index)
 
 
 def plot_two_panels(source_ohlcv: pd.DataFrame,

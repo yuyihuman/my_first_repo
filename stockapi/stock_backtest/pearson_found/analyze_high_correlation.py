@@ -1203,10 +1203,10 @@ def main():
     parser.add_argument('--file', type=str, 
                         default='c:\\Users\\17701\\github\\my_first_repo\\stockapi\\stock_backtest\\pearson_found\\evaluation_results.csv',
                         help='CSV文件路径')
-    parser.add_argument('--min-count', type=int, default=30,
+    parser.add_argument('--min-count', type=int, default=10,
                         help='最小相关数量阈值 (默认: 30')
-    parser.add_argument('--high-percentage', type=float, default=65.0,
-                        help='高百分比阈值 (默认: 65.0)')
+    parser.add_argument('--high-percentage', type=float, default=75,
+                        help='高百分比阈值 (默认: 75)')
     parser.add_argument('--output', type=str, default='',
                         help='结果输出文件路径 (默认: results_YYYYMMDD_HHMMSS.txt)')
     parser.add_argument('--eval-days', type=int, default=15,

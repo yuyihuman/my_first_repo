@@ -22,9 +22,7 @@ def parse_args():
     parser.add_argument(
         "--comparison_mode", default="top1000", help="传递给 pearson_analyzer_gpu_3.py 的 --comparison_mode"
     )
-    parser.add_argument(
-        "--csv_filename", default="test.csv", help="传递给 pearson_analyzer_gpu_3.py 的 --csv_filename"
-    )
+    parser.add_argument("--csv_filename", default="test.csv", help="传递给 pearson_analyzer_gpu_3.py 的 --csv_filename")
     parser.add_argument(
         "--evaluation_days", type=int, default=30, help="传递给 pearson_analyzer_gpu_3.py 的 --evaluation_days"
     )
@@ -44,6 +42,8 @@ def parse_args():
 
     parser.add_argument("--debug", action="store_true", help="传递 --debug 打印详细日志")
     parser.add_argument("--no_gpu", action="store_true", help="传递 --no_gpu 禁用GPU")
+    parser.add_argument("--enable_histogram", action="store_true", help="传递 --enable_histogram 开启直方图统计")
+    parser.add_argument("--histogram_interval", type=int, default=0, help="传递给 pearson_analyzer_gpu_3.py 的 --histogram_interval")
 
     # 传递历史数据上限与数量限制（仅对对比股票生效，与 pearson_analyzer_gpu_3.py 保持一致）
     parser.add_argument(
@@ -177,6 +177,8 @@ def run_backtests_for_anchors(
     threshold_volume_5: Optional[float],
     debug: bool,
     no_gpu: bool,
+    enable_histogram: bool,
+    histogram_interval: int,
 ):
     """按锚点日期（每隔固定交易日）调用 pearson_analyzer_gpu_3.py。"""
     import time
@@ -234,6 +236,10 @@ def run_backtests_for_anchors(
             cmd.append("--debug")
         if no_gpu:
             cmd.append("--no_gpu")
+        if enable_histogram:
+            cmd.append("--enable_histogram")
+        if histogram_interval is not None:
+            cmd.extend(["--histogram_interval", str(histogram_interval)])
 
         prefix = "DRY-RUN:" if dry_run else "RUN:"
         print(prefix, " ".join(cmd))
@@ -319,6 +325,8 @@ def main():
         threshold_volume_5=args.threshold_volume_5,
         debug=args.debug,
         no_gpu=args.no_gpu,
+        enable_histogram=args.enable_histogram,
+        histogram_interval=args.histogram_interval,
     )
 
     print(f"总执行次数: {total_trading_days}")

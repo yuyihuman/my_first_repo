@@ -49,12 +49,12 @@ def _process_stock_historical_data_worker(args):
     多进程工作函数：处理单只股票的历史数据
     
     Args:
-        args: (stock_code, stock_data, window_size, fields, debug)
+        args: (stock_code, stock_data, window_size, fields, debug, stride)
     
     Returns:
         tuple: (stock_code, historical_data_list, stats)
     """
-    stock_code, stock_data, window_size, fields, debug = args
+    stock_code, stock_data, window_size, fields, debug, stride = args
     
     historical_data = []
     stock_valid_periods = 0
@@ -68,7 +68,7 @@ def _process_stock_historical_data_worker(args):
             return stock_code, [], {'valid_periods': 0, 'invalid_periods': 0, 'skipped': True}
         
         # 生成该股票的历史期间并直接进行筛选和预处理
-        for i in range(len(available_data) - window_size + 1):
+        for i in range(0, len(available_data) - window_size + 1, max(1, int(stride) if stride is not None else 1)):
             period_data = available_data.iloc[i:i + window_size]
             
             # 检查数据长度是否正确
@@ -116,7 +116,12 @@ class GPUBatchPearsonAnalyzer:
                  threshold_5=None,
                  threshold_close_minus_open_5=None,
                  threshold_close_5=None,
-                 threshold_volume_5=None):
+                 threshold_volume_5=None,
+                 use_fp16=False,
+                 historical_stride=1,
+                 histogram_interval=0,
+                 cleanup_every_n_batches=1,
+                 enable_histogram=False):
         """
         初始化GPU批量评测Pearson相关性分析器
         
@@ -180,6 +185,7 @@ class GPUBatchPearsonAnalyzer:
         self.latest_date = pd.to_datetime(latest_date) if latest_date else None
         self.comparison_date_count = int(comparison_date_count) if comparison_date_count is not None else 1000
         self.use_gpu = use_gpu
+        self.use_fp16 = bool(use_fp16)
         self.batch_size = batch_size
         self.gpu_memory_limit = gpu_memory_limit
         # 预测统计最大数量，仅处理相关性最高的前N个
@@ -197,6 +203,11 @@ class GPUBatchPearsonAnalyzer:
         
         # GPU设备设置
         self.device = self._setup_device()
+        self.tensor_dtype = torch.float16 if (self.device.type == 'cuda' and self.use_fp16) else torch.float32
+        self.historical_stride = int(historical_stride) if historical_stride is not None else 1
+        self.histogram_interval = int(histogram_interval) if histogram_interval is not None else 0
+        self.cleanup_every_n_batches = max(0, int(cleanup_every_n_batches) if cleanup_every_n_batches is not None else 1)
+        self.enable_histogram = bool(enable_histogram)
         
         # GPU显存监控
         self.gpu_memory_stats = {
@@ -281,6 +292,13 @@ class GPUBatchPearsonAnalyzer:
         self.logger.info(f"GPU内存限制: {gpu_memory_limit*100:.0f}%")
         self.logger.info(f"对比模式: {comparison_mode}, 对比股票数量: {len(self.comparison_stocks)}")
         self.logger.info(f"上涨阈值: {self.up_threshold_pct*100:.2f}%")
+        try:
+            self.logger.info(f"FP16: {self.use_fp16}")
+            self.logger.info(f"histogram_interval: {self.histogram_interval}")
+            self.logger.info(f"cleanup_every_n_batches: {self.cleanup_every_n_batches}")
+            self.logger.info(f"enable_histogram: {self.enable_histogram}")
+        except Exception:
+            pass
     
     def _setup_device(self):
         """设置计算设备（GPU或CPU）"""
@@ -764,9 +782,18 @@ class GPUBatchPearsonAnalyzer:
                 self.end_timer('batch_data_preparation')
                 return None, [], [], None
 
-            batch_data = np.stack(multi_stock_batch_data, axis=0)  # [num_stocks, evaluation_days, window_size, 3]
-            batch_tensor = torch.tensor(batch_data, dtype=torch.float32, device=self.device)
-            valid_mask_tensor = torch.tensor(np.array(valid_mask_list, dtype=bool), device=self.device)  # [num_stocks, evaluation_days]
+            batch_data = np.stack(multi_stock_batch_data, axis=0).astype(np.float32)
+            batch_cpu = torch.from_numpy(batch_data)
+            if self.device.type == 'cuda':
+                batch_tensor = batch_cpu.pin_memory().to(self.device, non_blocking=True, dtype=self.tensor_dtype)
+            else:
+                batch_tensor = batch_cpu.to(self.device, dtype=self.tensor_dtype)
+            valid_mask_np = np.array(valid_mask_list, dtype=bool)
+            valid_mask_tensor = torch.from_numpy(valid_mask_np)
+            if self.device.type == 'cuda':
+                valid_mask_tensor = valid_mask_tensor.pin_memory().to(self.device, non_blocking=True)
+            else:
+                valid_mask_tensor = valid_mask_tensor.to(self.device)
 
             self.logger.info(f"多股票批量评测数据准备完成，形状: {batch_tensor.shape}")
             self.logger.info(f"股票数量: {len(valid_stock_codes)}，评测日期数量: {len(evaluation_dates)}")
@@ -832,11 +859,13 @@ class GPUBatchPearsonAnalyzer:
         expected_fields = historical_data_list[0].shape[1] if historical_data_list else 'n/a'
         self.logger.info(f"张量形状将为: [{len(historical_data_list)}, {window_size}, {expected_fields}]")
         
-        historical_tensor = torch.tensor(
-            np.stack(historical_data_list, axis=0), 
-            dtype=torch.float32, 
-            device=self.device
-        )  # [num_historical_periods, window_size, 3]
+        hist_np = np.stack(historical_data_list, axis=0).astype(np.float32)
+        hist_cpu = torch.from_numpy(hist_np)
+        if self.device.type == 'cuda':
+            historical_tensor = hist_cpu.pin_memory().to(self.device, non_blocking=True, dtype=self.tensor_dtype)
+        else:
+            historical_tensor = hist_cpu.to(self.device, dtype=self.tensor_dtype)
+        
         
         self.logger.info(f"GPU历史数据张量创建完成: {historical_tensor.shape}, 设备: {historical_tensor.device}")
         self.end_timer('gpu_step2_tensor_creation')
@@ -1276,15 +1305,35 @@ class GPUBatchPearsonAnalyzer:
             df_row = pd.DataFrame([row], columns=columns)
             if not os.path.exists(static_path):
                 df_row.to_csv(static_path, index=False, encoding='utf-8-sig', mode='w')
+                if hasattr(self, 'logger') and self.logger is not None:
+                    try:
+                        self.logger.info(f"📊 相关性直方图写入(创建): {static_path} | 批次 {int(batch_idx + 1)}")
+                    except Exception:
+                        pass
             else:
                 try:
                     existing = pd.read_csv(static_path, nrows=1, encoding='utf-8-sig')
                     if 'field' in existing.columns or set(existing.columns) != set(columns):
                         df_row.to_csv(static_path, index=False, encoding='utf-8-sig', mode='w')
+                        if hasattr(self, 'logger') and self.logger is not None:
+                            try:
+                                self.logger.info(f"📊 相关性直方图写入(重建): {static_path} | 批次 {int(batch_idx + 1)}")
+                            except Exception:
+                                pass
                     else:
                         df_row.to_csv(static_path, index=False, encoding='utf-8-sig', mode='a', header=False)
+                        if hasattr(self, 'logger') and self.logger is not None:
+                            try:
+                                self.logger.info(f"📊 相关性直方图写入(追加): {static_path} | 批次 {int(batch_idx + 1)}")
+                            except Exception:
+                                pass
                 except Exception:
                     df_row.to_csv(static_path, index=False, encoding='utf-8-sig', mode='w')
+                    if hasattr(self, 'logger') and self.logger is not None:
+                        try:
+                            self.logger.info(f"📊 相关性直方图写入(回退重建): {static_path} | 批次 {int(batch_idx + 1)}")
+                        except Exception:
+                            pass
         except Exception as e:
             if hasattr(self, 'logger') and self.logger is not None:
                 try:
@@ -1506,15 +1555,16 @@ class GPUBatchPearsonAnalyzer:
         all_avg_correlations = []  # 每个元素: [num_stocks, batch_size, num_historical_periods]
         all_high_corr_masks = []   # 每个元素: [num_stocks, batch_size, num_historical_periods]
         all_high_corr_counts = []  # 每个元素: [num_stocks, batch_size]
+        all_corr5_close_minus_open = []  # 每个元素: [num_stocks, batch_size, num_historical_periods]
         
         # 创建阈值张量（在GPU上）
         thr_10 = None
         if self.threshold_10 is not None:
             try:
-                thr_10 = torch.tensor(float(self.threshold_10), device=self.device, dtype=torch.float32)
+                thr_10 = torch.tensor(float(self.threshold_10), device=self.device, dtype=self.tensor_dtype)
             except Exception:
                 thr_10 = None
-        self_correlation_threshold = torch.tensor(0.9999, device=self.device, dtype=torch.float32)
+        self_correlation_threshold = torch.tensor(0.9999, device=self.device, dtype=self.tensor_dtype)
         # 🔧 Debug：记录筛选阈值配置
         if self.debug:
             try:
@@ -1522,6 +1572,20 @@ class GPUBatchPearsonAnalyzer:
             except Exception:
                 self.logger.debug(f"🔧 [筛选配置] 10天: avg={self.threshold_10}, fields={self.threshold_close_minus_open_10},{self.threshold_close_10},{self.threshold_volume_10}; 5天: avg={self.threshold_5}, fields={self.threshold_close_minus_open_5},{self.threshold_close_5},{self.threshold_volume_5}; 自相关过滤阈值: 0.9999")
         
+        first_len = min(10, historical_tensor.shape[1])
+        second_len = max(0, min(5, historical_tensor.shape[1] - first_len))
+        hist_first = historical_tensor[:, :first_len, :]
+        center_h1 = hist_first - hist_first.mean(dim=1, keepdim=True)
+        denom_h1 = torch.sqrt((center_h1 ** 2).sum(dim=1, keepdim=True) + 1e-8)
+        hist_norm_10 = center_h1 / denom_h1
+        if second_len > 0:
+            hist_second = historical_tensor[:, -second_len:, :]
+            center_h2 = hist_second - hist_second.mean(dim=1, keepdim=True)
+            denom_h2 = torch.sqrt((center_h2 ** 2).sum(dim=1, keepdim=True) + 1e-8)
+            hist_norm_5 = center_h2 / denom_h2
+        else:
+            hist_norm_5 = None
+
         for batch_idx, i in enumerate(range(0, evaluation_days, batch_size)):
             end_idx = min(i + batch_size, evaluation_days)
             current_batch = batch_recent_data[:, i:end_idx]  # [num_stocks, batch_size, window_size, 3]
@@ -1538,12 +1602,25 @@ class GPUBatchPearsonAnalyzer:
             # 计算当前批次的相关系数 - 支持多股票
             self.end_timer('gpu_step3_integrated_misc')
             self.start_timer('gpu_step3_correlation_matrix', parent_timer='gpu_step3_integrated_correlation_processing')
-            batch_correlations = self._compute_correlation_matrix_multi_stock(current_batch, historical_tensor)
+            recent_first = current_batch[:, :, :first_len, :]
+            center_r1 = recent_first - recent_first.mean(dim=2, keepdim=True)
+            denom_r1 = torch.sqrt((center_r1 ** 2).sum(dim=2, keepdim=True) + 1e-8)
+            recent_norm_10 = center_r1 / denom_r1
+            corr1 = torch.einsum('sblf,hlf->sbhf', recent_norm_10, hist_norm_10)
+            if second_len > 0 and hist_norm_5 is not None:
+                recent_second = current_batch[:, :, -second_len:, :]
+                center_r2 = recent_second - recent_second.mean(dim=2, keepdim=True)
+                denom_r2 = torch.sqrt((center_r2 ** 2).sum(dim=2, keepdim=True) + 1e-8)
+                recent_norm_5 = center_r2 / denom_r2
+                corr2 = torch.einsum('sblf,hlf->sbhf', recent_norm_5, hist_norm_5)
+                batch_correlations = torch.cat([corr1, corr2], dim=3)
+            else:
+                batch_correlations = corr1
             self.end_timer('gpu_step3_correlation_matrix')
             # batch_correlations: [num_stocks, batch_size, num_historical_periods, 3]
             
             self.start_timer('gpu_step3_correlation_filtering', parent_timer='gpu_step3_integrated_correlation_processing')
-            w3 = torch.tensor([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=torch.float32, device=self.device)
+            w3 = torch.tensor([1.0/3.0, 1.0/3.0, 1.0/3.0], dtype=self.tensor_dtype, device=self.device)
             corr_10 = batch_correlations[..., :3]
             corr_5 = batch_correlations[..., 3:]
             avg_10 = (corr_10 * w3.view(1, 1, 1, 3)).sum(dim=3)
@@ -1553,7 +1630,7 @@ class GPUBatchPearsonAnalyzer:
             self_corr_mask = self_corr_mask_10 | self_corr_mask_5
             batch_avg_correlations_filtered = avg_10.clone()
             batch_avg_correlations_filtered[self_corr_mask] = 0.0
-            thr_5 = torch.tensor(float(self.threshold_5), device=self.device, dtype=torch.float32) if self.threshold_5 is not None else None
+            thr_5 = torch.tensor(float(self.threshold_5), device=self.device, dtype=self.tensor_dtype) if self.threshold_5 is not None else None
             mask_10 = (batch_avg_correlations_filtered > thr_10) if thr_10 is not None else torch.ones_like(batch_avg_correlations_filtered, dtype=torch.bool)
             mask_5 = (avg_5 > thr_5) if thr_5 is not None else torch.ones_like(avg_5, dtype=torch.bool)
             batch_high_corr_mask = mask_10 & mask_5
@@ -1561,12 +1638,12 @@ class GPUBatchPearsonAnalyzer:
             ft_5 = [self.threshold_close_minus_open_5, self.threshold_close_5, self.threshold_volume_5]
             for f_idx, f_thr in enumerate(ft_10):
                 if f_thr is not None:
-                    f_thr_t = torch.tensor(float(f_thr), device=self.device, dtype=torch.float32)
+                    f_thr_t = torch.tensor(float(f_thr), device=self.device, dtype=self.tensor_dtype)
                     f_mask = corr_10[..., f_idx] > f_thr_t
                     batch_high_corr_mask = batch_high_corr_mask & f_mask
             for f_idx, f_thr in enumerate(ft_5):
                 if f_thr is not None:
-                    f_thr_t = torch.tensor(float(f_thr), device=self.device, dtype=torch.float32)
+                    f_thr_t = torch.tensor(float(f_thr), device=self.device, dtype=self.tensor_dtype)
                     f_mask = corr_5[..., f_idx] > f_thr_t
                     batch_high_corr_mask = batch_high_corr_mask & f_mask
             field_self_mask = (
@@ -1592,6 +1669,17 @@ class GPUBatchPearsonAnalyzer:
             batch_high_corr_counts = batch_high_corr_mask.sum(dim=2)  # [num_stocks, batch_size]
             self.end_timer('gpu_step3_correlation_filtering')
             self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
+            try:
+                if corr_5.shape[-1] > 0:
+                    batch_corr5_cmo = corr_5[..., 0].clone()
+                    batch_corr5_cmo[field_self_mask] = 0.0
+                    if current_mask is not None:
+                        batch_corr5_cmo[invalid_3d] = 0.0
+                else:
+                    batch_corr5_cmo = torch.zeros_like(batch_avg_correlations_filtered)
+                all_corr5_close_minus_open.append(batch_corr5_cmo)
+            except Exception:
+                all_corr5_close_minus_open.append(torch.zeros_like(batch_avg_correlations_filtered))
             # 🔧 Debug：输出筛选过程与结果统计
             if self.debug:
                 try:
@@ -1628,13 +1716,14 @@ class GPUBatchPearsonAnalyzer:
             all_high_corr_counts.append(batch_high_corr_counts)
             self.end_timer('gpu_step3_result_aggregation')
             self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
-            try:
-                self._append_correlation_histogram(batch_correlations, batch_idx)
-            except Exception as e:
+            if self.enable_histogram and self.histogram_interval and ((int(getattr(self, '_global_batch_idx', batch_idx)) + 1) % self.histogram_interval == 0):
                 try:
-                    self.logger.warning(f"统计输出失败: {str(e)}")
-                except Exception:
-                    pass
+                    self._append_correlation_histogram(batch_correlations, batch_idx)
+                except Exception as e:
+                    try:
+                        self.logger.warning(f"统计输出失败: {str(e)}")
+                    except Exception:
+                        pass
             
             # 监控每个批次后的GPU显存（仅在debug模式）
             if self.debug and batch_idx % max(1, total_batches // 5) == 0:  # 每20%进度监控一次
@@ -1646,6 +1735,7 @@ class GPUBatchPearsonAnalyzer:
         all_avg_correlations_tensor = torch.cat(all_avg_correlations, dim=1)  # [num_stocks, evaluation_days, num_historical_periods]
         all_high_corr_masks_tensor = torch.cat(all_high_corr_masks, dim=1)    # [num_stocks, evaluation_days, num_historical_periods]
         all_high_corr_counts_tensor = torch.cat(all_high_corr_counts, dim=1)  # [num_stocks, evaluation_days]
+        all_corr5_cmo_tensor = torch.cat(all_corr5_close_minus_open, dim=1)   # [num_stocks, evaluation_days, num_historical_periods]
         self.end_timer('gpu_step3_batch_merging')
         self.start_timer('gpu_step3_integrated_misc', parent_timer='gpu_step3_integrated_correlation_processing')
         
@@ -1725,6 +1815,7 @@ class GPUBatchPearsonAnalyzer:
             # 传输必要的数据到CPU进行详细结果构建
             avg_correlations_cpu = all_avg_correlations_tensor.cpu().numpy()
             high_corr_masks_cpu = all_high_corr_masks_tensor.cpu().numpy()
+            corr5_cmo_cpu = all_corr5_cmo_tensor.cpu().numpy()
             
             if is_multi_stock:
                 self.logger.debug(f"🔍 多股票模式detailed_results构建")
@@ -1767,8 +1858,9 @@ class GPUBatchPearsonAnalyzer:
                             self.logger.debug(f"📝 [详细结果构建] 提取数据成功: eval_avg_correlations.shape={eval_avg_correlations.shape}")
                             
                             # 为这个evaluation unit构建详细结果
+                            eval_corr5_cmo = corr5_cmo_cpu[stock_idx, eval_idx:eval_idx+1]
                             eval_detailed_results = self._build_detailed_results_cpu(
-                                eval_avg_correlations, eval_high_corr_masks, period_info_list, [eval_date]
+                                eval_avg_correlations, eval_high_corr_masks, period_info_list, [eval_date], corr5_close_cpu=eval_corr5_cmo
                             )
                             
                             self.logger.debug(f"📝 [详细结果构建] _build_detailed_results_cpu返回结果: 类型={type(eval_detailed_results)}, 长度={len(eval_detailed_results) if hasattr(eval_detailed_results, '__len__') else 'N/A'}")
@@ -1803,8 +1895,9 @@ class GPUBatchPearsonAnalyzer:
                         stock_avg_correlations = avg_correlations_cpu[stock_idx]
                         stock_high_corr_masks = high_corr_masks_cpu[stock_idx]
                         
+                        stock_corr5_cmo = corr5_cmo_cpu[stock_idx]
                         stock_detailed_results = self._build_detailed_results_cpu(
-                            stock_avg_correlations, stock_high_corr_masks, period_info_list, evaluation_dates
+                            stock_avg_correlations, stock_high_corr_masks, period_info_list, evaluation_dates, corr5_close_cpu=stock_corr5_cmo
                         )
                         
                         detailed_results[stock_code] = stock_detailed_results
@@ -1820,7 +1913,7 @@ class GPUBatchPearsonAnalyzer:
                 self.logger.info(f"📝 [详细结果构建] 单股票模式evaluation_dates: {evaluation_dates}")
                 
                 detailed_results = self._build_detailed_results_cpu(
-                    avg_correlations_cpu, high_corr_masks_cpu, period_info_list, evaluation_dates
+                    avg_correlations_cpu, high_corr_masks_cpu, period_info_list, evaluation_dates, corr5_close_cpu=corr5_cmo_cpu
                 )
                 
                 self.logger.info(f"📝 [详细结果构建] 单股票模式结果: 类型={type(detailed_results)}, 长度={len(detailed_results) if hasattr(detailed_results, '__len__') else 'N/A'}")
@@ -1906,7 +1999,7 @@ class GPUBatchPearsonAnalyzer:
         return final_result
 
     def _build_detailed_results_cpu(self, avg_correlations_cpu, high_corr_masks_cpu, 
-                                   period_info_list, evaluation_dates):
+                                   period_info_list, evaluation_dates, corr5_close_cpu=None):
         """
         在CPU上构建详细结果（仅在需要时调用）
         
@@ -1935,6 +2028,12 @@ class GPUBatchPearsonAnalyzer:
             if eval_idx < avg_correlations_cpu.shape[0]:
                 eval_correlations = avg_correlations_cpu[eval_idx]
                 eval_high_corr_mask = high_corr_masks_cpu[eval_idx]
+                eval_corr5_close = None
+                try:
+                    if corr5_close_cpu is not None and eval_idx < corr5_close_cpu.shape[0]:
+                        eval_corr5_close = corr5_close_cpu[eval_idx]
+                except Exception:
+                    eval_corr5_close = None
                 
                 self.logger.debug(f"🔧   - eval_correlations.shape: {eval_correlations.shape}")
                 self.logger.debug(f"🔧   - eval_high_corr_mask.shape: {eval_high_corr_mask.shape}")
@@ -1943,9 +2042,15 @@ class GPUBatchPearsonAnalyzer:
                 # 找到高相关性期间
                 high_corr_periods = []
                 high_corr_indices = np.where(eval_high_corr_mask)[0]
-                # 按相关性从大到小排序索引
+                # 按相关性从大到小排序索引（改为使用 close_minus_open_5）
                 if high_corr_indices.size > 0:
-                    corr_selected = eval_correlations[high_corr_indices]
+                    try:
+                        if eval_corr5_close is not None:
+                            corr_selected = eval_corr5_close[high_corr_indices]
+                        else:
+                            corr_selected = eval_correlations[high_corr_indices]
+                    except Exception:
+                        corr_selected = eval_correlations[high_corr_indices]
                     sort_order = np.argsort(-corr_selected)
                     high_corr_indices_sorted = high_corr_indices[sort_order]
                 else:
@@ -1955,14 +2060,24 @@ class GPUBatchPearsonAnalyzer:
                 # 🔧 追加：输出高相关期间的前5个按相关系数排序的信息
                 try:
                     if len(high_corr_indices_sorted) > 0:
-                        vals = eval_correlations[high_corr_indices_sorted]
+                        vals = None
+                        try:
+                            if eval_corr5_close is not None:
+                                vals = eval_corr5_close[high_corr_indices_sorted]
+                            else:
+                                vals = eval_correlations[high_corr_indices_sorted]
+                        except Exception:
+                            vals = eval_correlations[high_corr_indices_sorted]
                         order = np.argsort(vals)[::-1]
                         top_n = min(5, len(order))
                         for rank in range(top_n):
                             idx = high_corr_indices_sorted[order[rank]]
                             if idx < len(period_info_list):
                                 pinfo = period_info_list[idx]
-                                corr_v = float(eval_correlations[idx])
+                                try:
+                                    corr_v = float(vals[order[rank]])
+                                except Exception:
+                                    corr_v = float(eval_correlations[idx])
                                 self.logger.debug(f"🔧     - TOP{rank+1} 期间索引={idx}, {pinfo['start_date']}~{pinfo['end_date']}, 来源:{pinfo['stock_code']}, 相关性:{corr_v:.6f}")
                     else:
                         self.logger.debug("🔧     - 无高相关期间用于TOP列表")
@@ -2424,14 +2539,40 @@ class GPUBatchPearsonAnalyzer:
         if len(high_corr_indices) > 0:
             self.logger.debug("🔍 超过阈值的对比日期和相关系数:")
 
-            # 按相关系数降序排列（torch实现）
-            corr_values = first_eval_correlations[high_corr_indices_tensor]
-            sorted_order = torch.argsort(corr_values, descending=True)
-            sorted_indices = [high_corr_indices[i] for i in sorted_order.tolist()]
+            try:
+                first_len = min(10, self.window_size)
+                second_len = max(0, min(5, self.window_size - first_len))
+                if second_len > 0:
+                    eval_cmo = first_eval_data[:, 0]
+                    e5 = eval_cmo[-second_len:]
+                    x5 = e5 - e5.mean()
+                    denom_e = x5.norm().clamp(min=1e-8)
+                    c5_list = []
+                    for h_idx in high_corr_indices:
+                        hist_cmo = historical_tensor[h_idx].detach().cpu()[:, 0]
+                        h5 = hist_cmo[-second_len:]
+                        y5 = h5 - h5.mean()
+                        denom_h = y5.norm().clamp(min=1e-8)
+                        c5 = (x5.dot(y5) / (denom_e * denom_h)).item()
+                        c5_list.append(c5)
+                    corr_values_cpu = torch.tensor(c5_list)
+                else:
+                    corr_values_cpu = first_eval_correlations[high_corr_indices_tensor]
+                sorted_order = torch.argsort(corr_values_cpu, descending=True)
+                sorted_indices = [high_corr_indices[i.item() if hasattr(i, 'item') else i] for i in sorted_order]
+                c5_sorted = corr_values_cpu[sorted_order]
+            except Exception:
+                corr_values = first_eval_correlations[high_corr_indices_tensor]
+                sorted_order = torch.argsort(corr_values, descending=True)
+                sorted_indices = [high_corr_indices[i] for i in sorted_order.tolist()]
+                c5_sorted = None
 
-            for rank, hist_idx in enumerate(sorted_indices, 1):  # 打印所有超过阈值的期间
+            for rank, hist_idx in enumerate(sorted_indices, 1):
                 period_info = period_info_list[hist_idx]
-                correlation = first_eval_correlations[hist_idx].item()
+                try:
+                    correlation = float(c5_sorted[rank - 1].item()) if c5_sorted is not None else float(first_eval_correlations[hist_idx].item())
+                except Exception:
+                    correlation = float(first_eval_correlations[hist_idx].item())
 
                 self.logger.debug(f"🔍   #{rank} 历史期间 {hist_idx}: {period_info['start_date']} 到 {period_info['end_date']}")
                 self.logger.debug(f"🔍       来源股票: {period_info['stock_code']}")
@@ -2457,6 +2598,10 @@ class GPUBatchPearsonAnalyzer:
                         cnt5 += 1
                 avg10 /= 3.0
                 avg5 = (avg5 / cnt5) if cnt5 > 0 else float('nan')
+                try:
+                    self.logger.debug(f"🔍       排序依据(5天 close_minus_open): {correlation:.6f}")
+                except Exception:
+                    pass
                 self.logger.debug(f"🔍       平均相关系数(10天): {avg10:.6f}, 平均相关系数(5天): {avg5:.6f}")
 
                 # 获取对应的历史数据
@@ -3356,7 +3501,7 @@ class GPUBatchPearsonAnalyzer:
         # 准备多进程任务参数
         tasks = []
         for stock_code, stock_data in self.loaded_stocks_data.items():
-            tasks.append((stock_code, stock_data, self.window_size, fields, self.debug))
+            tasks.append((stock_code, stock_data, self.window_size, fields, self.debug, self.historical_stride))
         
         self.logger.debug(f"🚀 启动多进程数据预处理: {len(tasks)} 只股票，{self.num_processes} 个进程")
         
@@ -3426,7 +3571,7 @@ class GPUBatchPearsonAnalyzer:
         invalid_periods = 0
         
         # 生成目标股票的历史期间数据
-        for i in range(len(available_data) - self.window_size + 1):
+        for i in range(0, len(available_data) - self.window_size + 1, max(1, self.historical_stride)):
             period_data = available_data.iloc[i:i + self.window_size]
             
             # 检查数据长度是否正确
@@ -3860,6 +4005,7 @@ class GPUBatchPearsonAnalyzer:
                 # 第3步：集成相关性处理
                 self.start_timer('gpu_step3_integrated_correlation_processing')
                 # 调用不带计时器的GPU计算函数
+                self._global_batch_idx = batch_idx
                 batch_correlations = self._calculate_batch_gpu_correlation_no_timer(
                     gpu_tensor_data, historical_periods_data, batch_dates_list, stock_codes=batch_evaluation_unit_stock_codes, valid_mask=batch_valid_mask
                 )
@@ -4020,6 +4166,7 @@ class GPUBatchPearsonAnalyzer:
                         batch_valid_mask = None
                 self.end_timer('batch_units_preparation')
                 
+                self._global_batch_idx = batch_idx
                 batch_correlations = self.calculate_batch_gpu_correlation_optimized(
                     batch_recent_subset, historical_periods_data, batch_dates, stock_codes=batch_evaluation_unit_stock_codes, valid_mask=batch_valid_mask
                 )
@@ -4047,10 +4194,11 @@ class GPUBatchPearsonAnalyzer:
                     batch_summary['max_high_correlations_per_day']
                 )
                 
-                # 清理GPU缓存
-                if self.device.type == 'cuda':
-                    torch.cuda.empty_cache()
-                    gc.collect()
+                # 清理GPU缓存（按批次频率）
+                if self.device.type == 'cuda' and self.cleanup_every_n_batches > 0:
+                    if (batch_idx + 1) % self.cleanup_every_n_batches == 0:
+                        torch.cuda.empty_cache()
+                        gc.collect()
                 
                 self.logger.info(f"✅ 批次 {batch_idx + 1} 处理完成，累计高相关性期间: {merged_results['batch_results']['summary']['total_high_correlations']}")
         
@@ -4624,7 +4772,12 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
                                          threshold_5=None,
                                          threshold_close_minus_open_5=None,
                                          threshold_close_5=None,
-                                         threshold_volume_5=None):
+                                         threshold_volume_5=None,
+                                         use_fp16=False,
+                                         historical_stride=1,
+                                         histogram_interval=0,
+                                         cleanup_every_n_batches=1,
+                                         enable_histogram=False):
     """
     GPU批量评测Pearson相关性分析的便捷函数
     
@@ -4675,7 +4828,12 @@ def analyze_pearson_correlation_gpu_batch(stock_code, backtest_date=None, evalua
         latest_date=latest_date,
         comparison_date_count=comparison_date_count,
         num_processes=num_processes,
-        evaluation_batch_size=evaluation_batch_size
+        evaluation_batch_size=evaluation_batch_size,
+        use_fp16=use_fp16,
+        historical_stride=historical_stride,
+        histogram_interval=histogram_interval,
+        cleanup_every_n_batches=cleanup_every_n_batches,
+        enable_histogram=enable_histogram
     )
     
     result = analyzer.analyze_batch()
@@ -4692,9 +4850,9 @@ if __name__ == "__main__":
     parser.add_argument('--threshold_10', type=float, default=None, help='前10天总相关系数阈值 (默认: None)')
     parser.add_argument('--threshold_close_minus_open_10', type=float, default=None, help='前10天 close_minus_open 字段阈值 (默认: None)')
     parser.add_argument('--threshold_close_10', type=float, default=None, help='前10天 close 字段阈值 (默认: None)')
-    parser.add_argument('--threshold_volume_10', type=float, default=None, help='前10天 volume 字段阈值 (默认: None)')
+    parser.add_argument('--threshold_volume_10', type=float, default=0.8, help='前10天 volume 字段阈值 (默认: None)')
     parser.add_argument('--threshold_5', type=float, default=None, help='后5天总相关系数阈值 (默认: None)')
-    parser.add_argument('--threshold_close_minus_open_5', type=float, default=0.99, help='后5天 close_minus_open 字段阈值 (默认: None)')
+    parser.add_argument('--threshold_close_minus_open_5', type=float, default=0.98, help='后5天 close_minus_open 字段阈值 (默认: None)')
     parser.add_argument('--threshold_close_5', type=float, default=None, help='后5天 close 字段阈值 (默认: None)')
     parser.add_argument('--threshold_volume_5', type=float, default=None, help='后5天 volume 字段阈值 (默认: None)')
     parser.add_argument('--comparison_mode', type=str, default='top10',
@@ -4704,19 +4862,24 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='开启调试模式')
     parser.add_argument('--csv_filename', type=str, default='evaluation_results.csv', help='CSV结果文件名 (默认: evaluation_results.csv)')
     parser.add_argument('--no_gpu', action='store_true', help='禁用GPU加速 (默认启用GPU)')
+    parser.add_argument('--use_fp16', action='store_true', help='启用FP16计算以减少显存并提升吞吐')
     parser.add_argument('--batch_size', type=int, default=1000, 
                        help='GPU批处理大小 - 控制单次GPU计算的数据量，影响内存使用和计算效率。'
                             '推荐值：RTX 3060(8GB)=500-1000, RTX 3080(10GB)=1000-2000, RTX 4090(24GB)=2000-5000 (默认: 1000)')
     parser.add_argument('--latest_date', type=str, default=None,
                        help='历史数据的日期上限 (YYYY-MM-DD)，晚于此日期的数据将被过滤掉（仅对对比股票生效）')
-    parser.add_argument('--comparison_date_count', type=int, default=1000,
-                       help='对比股票的日期总数限制（保留latest_date及其之前最近N个交易日，默认: 1000）')
+    parser.add_argument('--comparison_date_count', type=int, default=1800,
+                       help='对比股票的日期总数限制（保留latest_date及其之前最近N个交易日，默认: 1800）')
     parser.add_argument('--num_processes', type=int, default=None,
                        help='多进程数量，None表示自动检测（默认为CPU核心数-1）')
     parser.add_argument('--evaluation_batch_size', type=int, default=100,
                         help='每批次处理的计算单元数量，用于控制GPU内存使用。'
                              '单股票模式: 直接表示评测日期数量 (如evaluation_days=100, batch_size=15, 分7批处理)。'
                              '多股票模式: 表示总计算单元数 (如100股票×15评测日期=1500单元, batch_size=15, 分100批处理) (默认: 100)')
+    parser.add_argument('--historical_stride', type=int, default=1, help='历史窗口步长，>1可降采样历史期间以提升速度')
+    parser.add_argument('--histogram_interval', type=int, default=0, help='相关分布直方图写入频率；0禁用，n表示每n批次写一次')
+    parser.add_argument('--cleanup_every_n_batches', type=int, default=1, help='GPU缓存清理频率；n表示每n批清理一次，0禁用')
+    parser.add_argument('--enable_histogram', action='store_true', help='启用相关性直方图统计输出（默认关闭）')
 
     args = parser.parse_args()
     
@@ -4775,7 +4938,12 @@ if __name__ == "__main__":
         latest_date=args.latest_date,
         comparison_date_count=args.comparison_date_count,
         num_processes=args.num_processes,
-        evaluation_batch_size=args.evaluation_batch_size
+        evaluation_batch_size=args.evaluation_batch_size,
+        use_fp16=args.use_fp16,
+        historical_stride=args.historical_stride,
+        histogram_interval=args.histogram_interval,
+        cleanup_every_n_batches=args.cleanup_every_n_batches,
+        enable_histogram=args.enable_histogram
     )
     
     # 输出总体结果
