@@ -69,6 +69,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+ADB_SERIAL = "CUYDU19528013322"
 
 # 坐标配置（统一修改）
 CANDIDATE_AREA_X_START = 0
@@ -100,7 +101,10 @@ FALLBACK_FIRST_RESULT_Y = 320
 def adb_command(command):
     """执行ADB命令并返回结果"""
     logger.info(f"执行ADB命令: {command}")
-    result = subprocess.run(command, shell=True, capture_output=True, text=True, encoding='utf-8')
+    cmd = command
+    if re.match(r'^\s*adb\b', cmd) and not re.match(r'^\s*adb\s+devices\b', cmd):
+        cmd = re.sub(r'^\s*adb\b', f'adb -s {ADB_SERIAL}', cmd, count=1)
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8')
     if result.returncode != 0:
         logger.error(f"命令执行失败: {result.stderr}")
     else:

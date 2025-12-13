@@ -47,9 +47,13 @@ pytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tess
 
 def get_pinyin_initials(text):
     return ''.join([item[0][0] for item in pinyin(text, style=Style.FIRST_LETTER)])
+ADB_SERIAL = "CUYDU19528013322"
 
 def adb_command(command):
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    cmd = command
+    if re.match(r'^\s*adb\b', cmd) and not re.match(r'^\s*adb\s+devices\b', cmd):
+        cmd = re.sub(r'^\s*adb\b', f'adb -s {ADB_SERIAL}', cmd, count=1)
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
         logger.error(f"Error executing command: {command}\n{result.stderr}")
     return result.stdout.strip()

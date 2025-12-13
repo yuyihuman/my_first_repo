@@ -4,12 +4,17 @@ import time
 from datetime import datetime
 import logging
 import argparse
+import re
+ADB_SERIAL = "CUYDU19528013322"
 
 
 def adb_command(command: str) -> subprocess.CompletedProcess:
     """Run an ADB command and return the CompletedProcess."""
+    cmd = command
+    if re.match(r'^\s*adb\b', cmd) and not re.match(r'^\s*adb\s+devices\b', cmd):
+        cmd = re.sub(r'^\s*adb\b', f'adb -s {ADB_SERIAL}', cmd, count=1)
     return subprocess.run(
-        command,
+        cmd,
         shell=True,
         capture_output=True,
         text=True,
